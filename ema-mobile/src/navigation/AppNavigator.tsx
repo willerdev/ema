@@ -1,0 +1,72 @@
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
+import { ActivityIndicator, View } from 'react-native';
+import { HomeScreen } from '../screens/HomeScreen';
+import { TradesScreen } from '../screens/TradesScreen';
+import { WalletScreen } from '../screens/WalletScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
+import { AuthScreen } from '../screens/AuthScreen';
+import { useAuth } from '../context/AuthContext';
+import { palette } from '../theme/colors';
+import { RootTabParamList } from '../types';
+
+const Tab = createBottomTabNavigator<RootTabParamList>();
+
+const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
+  Home: 'home',
+  Trades: 'stats-chart',
+  Wallet: 'wallet',
+  Settings: 'settings',
+};
+
+const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
+  Home: 'home-outline',
+  Trades: 'stats-chart-outline',
+  Wallet: 'wallet-outline',
+  Settings: 'settings-outline',
+};
+
+export function AppNavigator() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: palette.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator color={palette.primary} />
+      </View>
+    );
+  }
+
+  if (!user) {
+    return <AuthScreen />;
+  }
+
+  return (
+    <Tab.Navigator
+      screenOptions={({ route }) => ({
+        headerStyle: { backgroundColor: palette.surface },
+        headerTitleStyle: { color: palette.textPrimary },
+        tabBarStyle: {
+          backgroundColor: palette.surface,
+          borderTopColor: palette.border,
+          borderTopWidth: 1,
+          paddingTop: 6,
+          paddingBottom: 8,
+          height: 64,
+        },
+        tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
+        tabBarShowLabel: true,
+        tabBarActiveTintColor: palette.primary,
+        tabBarInactiveTintColor: palette.textSecondary,
+        tabBarIcon: ({ color, size, focused }) => (
+          <Ionicons name={focused ? focusedIconMap[route.name] : unfocusedIconMap[route.name]} color={color} size={size} />
+        ),
+      })}
+    >
+      <Tab.Screen name='Home' component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen name='Trades' component={TradesScreen} options={{ tabBarLabel: 'Trades' }} />
+      <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
+      <Tab.Screen name='Settings' component={SettingsScreen} options={{ tabBarLabel: 'Settings' }} />
+    </Tab.Navigator>
+  );
+}
