@@ -1,0 +1,12 @@
+node_modules/
+**/node_modules/
+.DS_Store
+.env
+.env.*
+*.log
+dist/
+build/
+.expo/
+ema-mobile/.expo/
+ema-mobile/android/
+ema-mobile/ios/
