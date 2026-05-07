@@ -21,7 +21,7 @@ const {
 } = require('./db');
 const { authMiddleware } = require('./middleware/auth');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
-const { ensureMetaApiAccount, fetchMt5Balance, extractErrorMessage } = require('./services/mt5Client');
+const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
 
 const app = express();
 app.use(cors());
@@ -436,6 +436,34 @@ app.get('/mt5/accounts/:id/balance', authMiddleware, async (req, res) => {
     const message = process.env.NODE_ENV === 'production'
       ? 'Failed to fetch MT5 balance'
       : extractErrorMessage(error, 'Failed to fetch MT5 balance');
+    return res.status(500).json({ message });
+  }
+});
+
+app.get('/mt5/accounts/:id/positions', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) {
+      return res.status(404).json({ message: 'MT5 account not found' });
+    }
+
+    const { accountId } = await ensureMetaApiAccount({
+      metaapiAccountId: account.metaapi_account_id,
+      login: account.login,
+      password: account.password,
+      server: account.server,
+      accountName: account.account_name || '',
+    });
+    if (accountId && accountId !== account.metaapi_account_id) {
+      await setMt5AccountMetaApiId(req.userId, account.id, accountId);
+    }
+
+    const positions = await fetchMt5OpenPositions({ accountId });
+    return res.json({ positions });
+  } catch (error) {
+    const message = process.env.NODE_ENV === 'production'
+      ? 'Failed to fetch MT5 positions'
+      : extractErrorMessage(error, 'Failed to fetch MT5 positions');
     return res.status(500).json({ message });
   }
 });

@@ -82,3 +82,13 @@ export interface Mt5Balance {
   accountName?: string;
   updatedAt?: string;
 }
+
+export interface Mt5Position {
+  id?: string;
+  symbol?: string;
+  type?: string;
+  volume?: number;
+  openPrice?: number;
+  currentPrice?: number;
+  profit?: number;
+}

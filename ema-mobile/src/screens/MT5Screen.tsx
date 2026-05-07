@@ -1,14 +1,16 @@
 import { useCallback, useState } from 'react';
 import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
 import { mt5Service } from '../services/mt5Service';
-import { Mt5AccountConfig, Mt5Balance } from '../types';
+import { Mt5AccountConfig, Mt5Balance, Mt5Position } from '../types';
 import { palette } from '../theme/colors';
 
 export function MT5Screen() {
+  const insets = useSafeAreaInsets();
   const [accounts, setAccounts] = useState<Mt5AccountConfig[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState<string>('');
   const [login, setLogin] = useState('');
@@ -19,6 +21,8 @@ export function MT5Screen() {
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [positions, setPositions] = useState<Mt5Position[]>([]);
   const [status, setStatus] = useState('Connect your MT5 account to fetch balance automatically.');
 
   const refresh = useCallback(async () => {
@@ -39,10 +43,17 @@ export function MT5Screen() {
       if (nextSelected) {
         const balanceData = await mt5Service.getBalance(nextSelected);
         setBalance(balanceData);
+        const openPositions = await mt5Service.getPositions(nextSelected);
+        setPositions(openPositions.positions || []);
         setStatus(`Live sync ${new Date().toLocaleTimeString()}`);
       }
     } catch (error: any) {
-      setStatus(error?.message || 'Unable to fetch MT5 data');
+      const message = String(error?.message || 'Unable to fetch MT5 data');
+      if (message.includes('Server returned HTML (404)')) {
+        setStatus('MT5 backend routes are not deployed yet. Deploy latest backend to Render.');
+        return;
+      }
+      setStatus(message);
     }
   }, [selectedAccountId]);
 
@@ -76,6 +87,22 @@ export function MT5Screen() {
     }
   };
 
+  const openAccountDetails = async (id: string) => {
+    setSelectedAccountId(id);
+    setDetailOpen(true);
+    try {
+      const [balanceData, openPositions] = await Promise.all([
+        mt5Service.getBalance(id),
+        mt5Service.getPositions(id),
+      ]);
+      setBalance(balanceData);
+      setPositions(openPositions.positions || []);
+      setStatus(`Live sync ${new Date().toLocaleTimeString()}`);
+    } catch (error: any) {
+      setStatus(String(error?.message || 'Unable to load MT5 account details'));
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -89,7 +116,7 @@ export function MT5Screen() {
           {accounts.map((account) => {
             const selected = account.id === selectedAccountId;
             return (
-              <Pressable key={account.id} style={[styles.accountRow, selected && styles.accountRowActive]} onPress={() => setSelectedAccountId(account.id || '')}>
+              <Pressable key={account.id} style={[styles.accountRow, selected && styles.accountRowActive]} onPress={() => openAccountDetails(account.id || '')}>
                 <Text style={styles.accountTitle}>{account.accountName || account.login}</Text>
                 <Text style={styles.item}>{account.server}</Text>
               </Pressable>
@@ -97,14 +124,16 @@ export function MT5Screen() {
           })}
         </Card>
 
-        <Card>
-          <Text style={styles.label}>Auto Balance Sync</Text>
-          <Text style={styles.item}>Status: {accounts.length ? 'Connected' : 'Not connected'}</Text>
-          <Text style={styles.item}>{status}</Text>
-          <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
-          <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
-          <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
-        </Card>
+        {accounts.length > 0 && (
+          <Card>
+            <Text style={styles.label}>Auto Balance Sync</Text>
+            <Text style={styles.item}>Status: Connected</Text>
+            <Text style={styles.item}>{status}</Text>
+            <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
+            <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
+            <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
+          </Card>
+        )}
       </ScrollView>
 
       <Pressable style={styles.fab} onPress={() => setAddOpen(true)}>
@@ -113,7 +142,8 @@ export function MT5Screen() {
 
       <Modal visible={addOpen} transparent animationType='slide'>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
+          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setAddOpen(false)} />
+          <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
             <Text style={styles.label}>Add MT5 Account</Text>
             <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
             <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
@@ -125,6 +155,41 @@ export function MT5Screen() {
               <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
             </View>
           </View>
+        </View>
+      </Modal>
+
+      <Modal visible={detailOpen} animationType='slide'>
+        <View style={styles.detailContainer}>
+          <View style={styles.detailHeader}>
+            <Pressable onPress={() => setDetailOpen(false)}>
+              <Ionicons name='arrow-back' size={24} color={palette.textPrimary} />
+            </Pressable>
+            <Text style={styles.detailTitle}>MT5 Account Details</Text>
+            <View style={{ width: 24 }} />
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 16 }}>
+            <Card>
+              <Text style={styles.label}>Live Balance</Text>
+              <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
+              <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
+              <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
+            </Card>
+            <Card>
+              <Text style={styles.label}>Running Trades</Text>
+              {!positions.length && <Text style={styles.item}>No open positions</Text>}
+              {positions.map((p, idx) => (
+                <View key={p.id || `${p.symbol}-${idx}`} style={styles.positionRow}>
+                  <View>
+                    <Text style={styles.accountTitle}>{p.symbol || 'Unknown'}</Text>
+                    <Text style={styles.item}>{String(p.type || '')} • Vol {Number(p.volume || 0).toFixed(2)}</Text>
+                  </View>
+                  <Text style={{ color: Number(p.profit || 0) >= 0 ? palette.success : palette.danger }}>
+                    {Number(p.profit || 0).toFixed(2)}
+                  </Text>
+                </View>
+              ))}
+            </Card>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -167,4 +232,17 @@ const styles = StyleSheet.create({
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: palette.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
   modalRow: { flexDirection: 'row' },
+  detailContainer: { flex: 1, backgroundColor: palette.background },
+  detailHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
+  detailTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700' },
+  positionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
 });

@@ -59,10 +59,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!response.ok) {
     const fallback = `Request failed (${response.status})`;
+    const htmlError = raw.trim().startsWith('<');
     const message =
+      (htmlError ? `Server returned HTML (${response.status}). Check backend route/server state.` : '') ||
       data?.message ||
       (typeof data === 'string' ? data : '') ||
-      (raw.startsWith('<') ? `Server returned HTML (${response.status}). Check backend route/server state.` : '') ||
       fallback;
     throw new Error(message);
   }

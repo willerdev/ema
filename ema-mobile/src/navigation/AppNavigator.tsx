@@ -1,6 +1,7 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeScreen } from '../screens/HomeScreen';
 import { TradesScreen } from '../screens/TradesScreen';
 import { WalletScreen } from '../screens/WalletScreen';
@@ -31,6 +32,7 @@ const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.gly
 
 export function AppNavigator() {
   const { user, loading } = useAuth();
+  const insets = useSafeAreaInsets();
 
   if (loading) {
     return (
@@ -54,8 +56,8 @@ export function AppNavigator() {
           borderTopColor: palette.border,
           borderTopWidth: 1,
           paddingTop: 6,
-          paddingBottom: 8,
-          height: 64,
+          paddingBottom: Math.max(8, insets.bottom),
+          height: 64 + Math.max(0, insets.bottom - 4),
         },
         tabBarLabelStyle: { fontSize: 12, fontWeight: '600' },
         tabBarShowLabel: true,

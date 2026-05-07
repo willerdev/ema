@@ -88,6 +88,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `GET /mt5/accounts`
 - `POST /mt5/accounts`
 - `GET /mt5/accounts/:id/balance`
+- `GET /mt5/accounts/:id/positions`
 - `GET /health/db`
 
 ## Notes / limitations
