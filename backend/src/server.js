@@ -17,6 +17,7 @@ const {
   getMt5AccountByIdForUser,
   createMt5AccountForUser,
   setMt5AccountMetaApiId,
+  updateMt5AccountSnapshot,
   checkDatabaseHealth,
 } = require('./db');
 const { authMiddleware } = require('./middleware/auth');
@@ -41,6 +42,18 @@ function signToken(user) {
 }
 
 const currentUser = (req) => getUserById(req.userId);
+const toMt5Summary = (account) => ({
+  id: account.id,
+  metaapiAccountId: account.metaapi_account_id || '',
+  login: account.login,
+  server: account.server,
+  accountName: account.account_name || '',
+  cachedBalance: account.cached_balance !== null && account.cached_balance !== undefined ? Number(account.cached_balance) : null,
+  cachedEquity: account.cached_equity !== null && account.cached_equity !== undefined ? Number(account.cached_equity) : null,
+  cachedCurrency: account.cached_currency || null,
+  balanceLastUpdatedAt: account.balance_last_updated_at || null,
+  updatedAt: account.updated_at,
+});
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
@@ -355,14 +368,7 @@ app.get('/mt5/accounts', authMiddleware, async (req, res) => {
   try {
     const accounts = await listMt5AccountsByUserId(req.userId);
     return res.json({
-      accounts: accounts.map((account) => ({
-        id: account.id,
-        metaapiAccountId: account.metaapi_account_id || '',
-        login: account.login,
-        server: account.server,
-        accountName: account.account_name || '',
-        updatedAt: account.updated_at,
-      })),
+      accounts: accounts.map(toMt5Summary),
     });
   } catch {
     return res.status(500).json({ message: 'Failed to fetch MT5 accounts' });
@@ -391,14 +397,7 @@ app.post('/mt5/accounts', authMiddleware, async (req, res) => {
     });
     return res.json({
       success: true,
-      account: {
-        id: saved.id,
-        metaapiAccountId: saved.metaapi_account_id || '',
-        login: saved.login,
-        server: saved.server,
-        accountName: saved.account_name || '',
-        updatedAt: saved.updated_at,
-      },
+      account: toMt5Summary(saved),
     });
   } catch (error) {
     return res.status(500).json({ message: extractErrorMessage(error, 'Failed to save MT5 account') });
@@ -411,6 +410,29 @@ app.get('/mt5/accounts/:id/balance', authMiddleware, async (req, res) => {
     if (!account) {
       return res.status(404).json({ message: 'MT5 account not found' });
     }
+    return res.json({
+      isLive: false,
+      hasSnapshot: account.cached_balance !== null && account.cached_balance !== undefined,
+      balance: account.cached_balance !== null && account.cached_balance !== undefined ? Number(account.cached_balance) : 0,
+      equity: account.cached_equity !== null && account.cached_equity !== undefined ? Number(account.cached_equity) : 0,
+      currency: account.cached_currency || 'USD',
+      login: account.login,
+      server: account.server,
+      accountName: account.account_name || '',
+      updatedAt: account.balance_last_updated_at || null,
+    });
+  } catch (error) {
+    const message = process.env.NODE_ENV === 'production'
+      ? 'Failed to fetch MT5 balance'
+      : extractErrorMessage(error, 'Failed to fetch MT5 balance');
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/mt5/accounts/:id/refresh-balance', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
 
     const { accountId } = await ensureMetaApiAccount({
       metaapiAccountId: account.metaapi_account_id,
@@ -423,19 +445,29 @@ app.get('/mt5/accounts/:id/balance', authMiddleware, async (req, res) => {
       await setMt5AccountMetaApiId(req.userId, account.id, accountId);
     }
 
-    const balance = await fetchMt5Balance({ accountId });
+    const live = await fetchMt5Balance({ accountId });
+    const updatedAt = new Date().toISOString();
+    await updateMt5AccountSnapshot(req.userId, account.id, {
+      balance: Number(live.balance || 0),
+      equity: Number(live.equity || live.balance || 0),
+      currency: String(live.currency || 'USD'),
+      updatedAt,
+    });
 
     return res.json({
-      ...balance,
-      login: balance.login || account.login,
-      server: balance.server || account.server,
-      accountName: balance.name || account.account_name || '',
-      updatedAt: new Date().toISOString(),
+      isLive: true,
+      balance: Number(live.balance || 0),
+      equity: Number(live.equity || live.balance || 0),
+      currency: String(live.currency || 'USD'),
+      login: live.login || account.login,
+      server: live.server || account.server,
+      accountName: live.name || account.account_name || '',
+      updatedAt,
     });
   } catch (error) {
     const message = process.env.NODE_ENV === 'production'
-      ? 'Failed to fetch MT5 balance'
-      : extractErrorMessage(error, 'Failed to fetch MT5 balance');
+      ? 'Failed to refresh MT5 balance'
+      : extractErrorMessage(error, 'Failed to refresh MT5 balance');
     return res.status(500).json({ message });
   }
 });

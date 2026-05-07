@@ -150,6 +150,22 @@ async function setMt5AccountMetaApiId(userId, accountId, metaapiAccountId) {
   if (error) throw error;
 }
 
+async function updateMt5AccountSnapshot(userId, accountId, snapshot) {
+  const payload = {
+    cached_balance: snapshot.balance,
+    cached_equity: snapshot.equity,
+    cached_currency: snapshot.currency,
+    balance_last_updated_at: snapshot.updatedAt || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { error } = await supabase
+    .from('mt5_accounts')
+    .update(payload)
+    .eq('user_id', userId)
+    .eq('id', accountId);
+  if (error) throw error;
+}
+
 async function checkDatabaseHealth() {
   const [usersResult, walletsResult, transactionsResult, mt5Result] = await Promise.all([
     supabase.from('users').select('*').limit(1),
@@ -182,5 +198,6 @@ module.exports = {
   getMt5AccountByIdForUser,
   createMt5AccountForUser,
   setMt5AccountMetaApiId,
+  updateMt5AccountSnapshot,
   checkDatabaseHealth,
 };

@@ -1,5 +1,17 @@
 import { useCallback, useState } from 'react';
-import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../components/Card';
@@ -23,6 +35,7 @@ export function MT5Screen() {
   const [addOpen, setAddOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [positions, setPositions] = useState<Mt5Position[]>([]);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [status, setStatus] = useState('Connect your MT5 account to fetch balance automatically.');
 
   const refresh = useCallback(async () => {
@@ -39,13 +52,19 @@ export function MT5Screen() {
 
       const nextSelected = rows.find((a) => a.id === selectedAccountId)?.id || rows[0].id || '';
       setSelectedAccountId(nextSelected);
-
-      if (nextSelected) {
-        const balanceData = await mt5Service.getBalance(nextSelected);
-        setBalance(balanceData);
-        const openPositions = await mt5Service.getPositions(nextSelected);
-        setPositions(openPositions.positions || []);
-        setStatus(`Live sync ${new Date().toLocaleTimeString()}`);
+      const selected = rows.find((a) => a.id === nextSelected);
+      if (selected) {
+        setBalance({
+          isLive: false,
+          balance: Number(selected.cachedBalance ?? 0),
+          equity: Number(selected.cachedEquity ?? selected.cachedBalance ?? 0),
+          currency: selected.cachedCurrency || 'USD',
+          login: selected.login,
+          server: selected.server,
+          accountName: selected.accountName,
+          updatedAt: selected.balanceLastUpdatedAt || undefined,
+        });
+        setStatus(selected.balanceLastUpdatedAt ? `Last updated ${new Date(selected.balanceLastUpdatedAt).toLocaleString()}` : 'Balance not fetched yet');
       }
     } catch (error: any) {
       const message = String(error?.message || 'Unable to fetch MT5 data');
@@ -90,6 +109,7 @@ export function MT5Screen() {
   const openAccountDetails = async (id: string) => {
     setSelectedAccountId(id);
     setDetailOpen(true);
+    setDetailLoading(true);
     try {
       const [balanceData, openPositions] = await Promise.all([
         mt5Service.getBalance(id),
@@ -97,9 +117,30 @@ export function MT5Screen() {
       ]);
       setBalance(balanceData);
       setPositions(openPositions.positions || []);
-      setStatus(`Live sync ${new Date().toLocaleTimeString()}`);
+      setStatus(balanceData.updatedAt ? `Last updated ${new Date(balanceData.updatedAt).toLocaleString()}` : 'Balance not fetched yet');
     } catch (error: any) {
       setStatus(String(error?.message || 'Unable to load MT5 account details'));
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const onRefreshLive = async () => {
+    if (!selectedAccountId) return;
+    try {
+      setDetailLoading(true);
+      const [liveBalance, openPositions] = await Promise.all([
+        mt5Service.refreshBalance(selectedAccountId),
+        mt5Service.getPositions(selectedAccountId),
+      ]);
+      setBalance(liveBalance);
+      setPositions(openPositions.positions || []);
+      setStatus(`Live now • ${new Date().toLocaleTimeString()}`);
+      await refresh();
+    } catch (error: any) {
+      Alert.alert('MT5 Error', String(error?.message || 'Failed to refresh live balance'));
+    } finally {
+      setDetailLoading(false);
     }
   };
 
@@ -141,21 +182,23 @@ export function MT5Screen() {
       </Pressable>
 
       <Modal visible={addOpen} transparent animationType='slide'>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBackdrop}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setAddOpen(false)} />
           <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
-            <Text style={styles.label}>Add MT5 Account</Text>
-            <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
-            <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
-            <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker Server (e.g. Broker-Demo)' placeholderTextColor={palette.textSecondary} />
-            <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Account Name (optional)' placeholderTextColor={palette.textSecondary} />
-            <View style={styles.modalRow}>
-              <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
-              <View style={{ width: 8 }} />
-              <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
-            </View>
+            <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ paddingBottom: 4 }}>
+              <Text style={styles.label}>Add MT5 Account</Text>
+              <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
+              <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
+              <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker Server (e.g. Broker-Demo)' placeholderTextColor={palette.textSecondary} />
+              <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Account Name (optional)' placeholderTextColor={palette.textSecondary} />
+              <View style={styles.modalRow}>
+                <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
+                <View style={{ width: 8 }} />
+                <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
+              </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={detailOpen} animationType='slide'>
@@ -169,10 +212,20 @@ export function MT5Screen() {
           </View>
           <ScrollView contentContainerStyle={{ padding: 16 }}>
             <Card>
-              <Text style={styles.label}>Live Balance</Text>
+              <Text style={styles.label}>Balance Snapshot</Text>
               <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
               <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
               <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
+              <Text style={styles.item}>
+                {balance?.isLive
+                  ? 'Status: live'
+                  : `Status: cached${balance?.updatedAt ? ` • ${new Date(balance.updatedAt).toLocaleString()}` : ''}`}
+              </Text>
+              <PrimaryButton
+                label={detailLoading ? 'Refreshing...' : 'Refresh Live Balance'}
+                onPress={onRefreshLive}
+                disabled={detailLoading}
+              />
             </Card>
             <Card>
               <Text style={styles.label}>Running Trades</Text>

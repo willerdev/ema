@@ -34,6 +34,10 @@ create table if not exists public.mt5_accounts (
   password text not null,
   server text not null,
   account_name text default '' not null,
+  cached_balance numeric(18,2),
+  cached_equity numeric(18,2),
+  cached_currency text,
+  balance_last_updated_at timestamptz,
   created_at timestamptz default now() not null,
   updated_at timestamptz default now() not null
 );

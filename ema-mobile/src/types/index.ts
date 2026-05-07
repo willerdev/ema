@@ -70,10 +70,16 @@ export interface Mt5AccountConfig {
   server: string;
   metaapiAccountId?: string;
   accountName?: string;
+  cachedBalance?: number | null;
+  cachedEquity?: number | null;
+  cachedCurrency?: string | null;
+  balanceLastUpdatedAt?: string | null;
   updatedAt?: string;
 }
 
 export interface Mt5Balance {
+  isLive?: boolean;
+  hasSnapshot?: boolean;
   balance: number;
   equity: number;
   currency: string;
