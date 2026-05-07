@@ -37,6 +37,20 @@ function alpacaErrorMessage(error, fallback) {
   return upstream || fallback;
 }
 
+function mt5SafeErrorMessage(error, fallback) {
+  const raw = String(extractErrorMessage(error, fallback) || fallback);
+  const lower = raw.toLowerCase();
+  if (lower.includes('mt5_metaapi_token is not configured')) return 'MT5 MetaApi token is missing on backend environment';
+  if (lower.includes('timeout')) return 'MetaApi request timed out. Retry in a moment.';
+  if (lower.includes('validation for trading account') && lower.includes('too many times')) {
+    return 'MetaApi temporarily rate-limited this account validation. Retry in about 1 hour.';
+  }
+  if (lower.includes('failed to authenticate') || lower.includes('invalid account') || lower.includes('e_auth')) {
+    return 'MT5 credentials or server are invalid. Verify login, password, and server name.';
+  }
+  return process.env.NODE_ENV === 'production' ? fallback : raw;
+}
+
 function signToken(user) {
   return jwt.sign({ sub: user.id }, process.env.JWT_SECRET || 'ema-dev-secret', { expiresIn: '7d' });
 }
@@ -460,9 +474,7 @@ app.post('/mt5/accounts/:id/refresh-balance', authMiddleware, async (req, res) =
       updatedAt,
     });
   } catch (error) {
-    const message = process.env.NODE_ENV === 'production'
-      ? 'Failed to refresh MT5 balance'
-      : extractErrorMessage(error, 'Failed to refresh MT5 balance');
+    const message = mt5SafeErrorMessage(error, 'Failed to refresh MT5 balance');
     return res.status(500).json({ message });
   }
 });
@@ -488,9 +500,7 @@ app.get('/mt5/accounts/:id/positions', authMiddleware, async (req, res) => {
     const positions = await fetchMt5OpenPositions({ accountId });
     return res.json({ positions });
   } catch (error) {
-    const message = process.env.NODE_ENV === 'production'
-      ? 'Failed to fetch MT5 positions'
-      : extractErrorMessage(error, 'Failed to fetch MT5 positions');
+    const message = mt5SafeErrorMessage(error, 'Failed to fetch MT5 positions');
     return res.status(500).json({ message });
   }
 });

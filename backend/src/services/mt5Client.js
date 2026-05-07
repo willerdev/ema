@@ -4,7 +4,20 @@ const fs = require('fs');
 const path = require('path');
 
 const PROVISIONING_API_URL = process.env.MT5_METAAPI_PROVISIONING_URL || 'https://mt-provisioning-api-v1.agiliumtrade.agiliumtrade.ai';
-const CLIENT_API_URL = process.env.MT5_METAAPI_CLIENT_URL || 'https://mt-client-api-v1.new-york.agiliumtrade.ai';
+const DEFAULT_CLIENT_API_CANDIDATES = [
+  'https://mt-client-api-v1.new-york.agiliumtrade.ai',
+  'https://mt-client-api-v1.london.agiliumtrade.ai',
+  'https://mt-client-api-v1.singapore.agiliumtrade.ai',
+];
+
+function getClientApiCandidates() {
+  const configured = process.env.MT5_METAAPI_CLIENT_URLS || process.env.MT5_METAAPI_CLIENT_URL;
+  if (!configured) return DEFAULT_CLIENT_API_CANDIDATES;
+  return String(configured)
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 
 function getMetaApiToken() {
   if (process.env.MT5_METAAPI_TOKEN) return process.env.MT5_METAAPI_TOKEN;
@@ -65,51 +78,74 @@ async function ensureMetaApiAccount({ metaapiAccountId, login, password, server,
 
 async function fetchMt5Balance({ accountId }) {
   const token = getMetaApiToken();
-  const response = await axios.get(
-    `${CLIENT_API_URL.replace(/\/+$/, '')}/users/current/accounts/${accountId}/account-information`,
-    {
-      timeout: 15000,
-      headers: {
-        Accept: 'application/json',
-        'auth-token': token,
-      },
-    }
-  );
+  const candidates = getClientApiCandidates();
+  let lastError = null;
 
-  const payload = response.data || {};
-  return {
-    balance: Number(payload.balance ?? 0),
-    equity: Number(payload.equity ?? payload.balance ?? 0),
-    currency: String(payload.currency || 'USD'),
-    name: String(payload.name || ''),
-    login: String(payload.login || ''),
-    server: String(payload.server || ''),
-  };
+  for (const baseUrl of candidates) {
+    try {
+      const response = await axios.get(
+        `${baseUrl.replace(/\/+$/, '')}/users/current/accounts/${accountId}/account-information`,
+        {
+          timeout: 15000,
+          headers: {
+            Accept: 'application/json',
+            'auth-token': token,
+          },
+        }
+      );
+      const payload = response.data || {};
+      return {
+        balance: Number(payload.balance ?? 0),
+        equity: Number(payload.equity ?? payload.balance ?? 0),
+        currency: String(payload.currency || 'USD'),
+        name: String(payload.name || ''),
+        login: String(payload.login || ''),
+        server: String(payload.server || ''),
+        clientApiUrl: baseUrl,
+      };
+    } catch (error) {
+      lastError = error;
+      const msg = extractErrorMessage(error, '').toLowerCase();
+      const notFound = error?.response?.status === 404 || msg.includes('account id') && msg.includes('not found');
+      if (notFound) continue;
+      throw error;
+    }
+  }
+
+  throw lastError || new Error('Unable to fetch account information from MetaApi regional endpoints');
 }
 
 async function fetchMt5OpenPositions({ accountId }) {
   const token = getMetaApiToken();
-  try {
-    const response = await axios.get(
-      `${CLIENT_API_URL.replace(/\/+$/, '')}/users/current/accounts/${accountId}/positions`,
-      {
-        timeout: 15000,
-        headers: {
-          Accept: 'application/json',
-          'auth-token': token,
-        },
+  const candidates = getClientApiCandidates();
+  let lastError = null;
+  for (const baseUrl of candidates) {
+    try {
+      const response = await axios.get(
+        `${baseUrl.replace(/\/+$/, '')}/users/current/accounts/${accountId}/positions`,
+        {
+          timeout: 15000,
+          headers: {
+            Accept: 'application/json',
+            'auth-token': token,
+          },
+        }
+      );
+      return Array.isArray(response.data) ? response.data : [];
+    } catch (error) {
+      lastError = error;
+      const message = extractErrorMessage(error, '').toLowerCase();
+      const status = error?.response?.status;
+      const accountNotFound = status === 404 || (message.includes('account id') && message.includes('not found'));
+      // If provider reports no positions (or no terminal state), treat as empty list.
+      if (message.includes('no position') || message.includes('positions not found') || message.includes('not synchronized')) {
+        return [];
       }
-    );
-    return Array.isArray(response.data) ? response.data : [];
-  } catch (error) {
-    const message = extractErrorMessage(error, '').toLowerCase();
-    const status = error?.response?.status;
-    // If provider reports no positions (or no terminal state), treat as empty list.
-    if (status === 404 || message.includes('no position') || message.includes('positions not found') || message.includes('not synchronized')) {
-      return [];
+      if (accountNotFound) continue;
+      throw error;
     }
-    throw error;
   }
+  throw lastError || new Error('Unable to fetch positions from MetaApi regional endpoints');
 }
 
 module.exports = { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage };
