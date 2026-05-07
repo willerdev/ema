@@ -23,6 +23,9 @@ Render will deploy directly from that repository.
    - **Build Command**: `npm install`
    - **Start Command**: `npm start`
 
+Alternative (recommended):
+- Use **Blueprint** deploy from `render.yaml` in repo root. Render will prefill service settings automatically.
+
 ## 3) Set Environment Variables in Render
 
 In Render service settings, add:
