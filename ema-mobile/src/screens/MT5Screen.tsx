@@ -39,6 +39,7 @@ export function MT5Screen() {
   const [status, setStatus] = useState('Connect your MT5 account to fetch balance automatically.');
 
   const refresh = useCallback(async () => {
+    if (addOpen) return;
     try {
       const list = await mt5Service.listAccounts();
       const rows = list.accounts || [];
@@ -74,9 +75,12 @@ export function MT5Screen() {
       }
       setStatus(message);
     }
-  }, [selectedAccountId]);
+  }, [selectedAccountId, addOpen]);
 
-  usePolling(refresh, 15000, true);
+  usePolling(() => {
+    if (addOpen || detailOpen) return;
+    refresh();
+  }, 15000, true);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -182,21 +186,19 @@ export function MT5Screen() {
       </Pressable>
 
       <Modal visible={addOpen} transparent animationType='slide'>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.modalBackdrop}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
           <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setAddOpen(false)} />
           <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
-            <ScrollView keyboardShouldPersistTaps='handled' contentContainerStyle={{ paddingBottom: 4 }}>
-              <Text style={styles.label}>Add MT5 Account</Text>
-              <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
-              <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
-              <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker Server (e.g. Broker-Demo)' placeholderTextColor={palette.textSecondary} />
-              <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Account Name (optional)' placeholderTextColor={palette.textSecondary} />
-              <View style={styles.modalRow}>
-                <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
-                <View style={{ width: 8 }} />
-                <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
-              </View>
-            </ScrollView>
+            <Text style={styles.label}>Add MT5 Account</Text>
+            <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
+            <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
+            <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker Server (e.g. Broker-Demo)' placeholderTextColor={palette.textSecondary} />
+            <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Account Name (optional)' placeholderTextColor={palette.textSecondary} />
+            <View style={styles.modalRow}>
+              <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
+              <View style={{ width: 8 }} />
+              <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
+            </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
