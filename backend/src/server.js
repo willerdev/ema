@@ -381,19 +381,14 @@ app.post('/mt5/accounts', authMiddleware, async (req, res) => {
     if (!login || !password || !server) {
       return res.status(400).json({ message: 'login, password and server are required' });
     }
-    const { accountId } = await ensureMetaApiAccount({
-      metaapiAccountId: '',
-      login: String(login),
-      password: String(password),
-      server: String(server),
-      accountName: String(accountName || ''),
-    });
+    // Save credentials first; do not block save flow on MetaApi provisioning latency.
+    // Provisioning happens later when user explicitly refreshes live balance.
     const saved = await createMt5AccountForUser(req.userId, {
       login: String(login),
       password: String(password),
       server: String(server),
       accountName: String(accountName || ''),
-      metaapiAccountId: accountId,
+      metaapiAccountId: '',
     });
     return res.json({
       success: true,

@@ -41,7 +41,7 @@ async function createMetaApiAccount({ login, password, server, accountName }) {
     `${PROVISIONING_API_URL.replace(/\/+$/, '')}/users/current/accounts`,
     payload,
     {
-      timeout: 25000,
+      timeout: 45000,
       headers: {
         'Content-Type': 'application/json',
         'auth-token': token,
