@@ -115,13 +115,16 @@ export function MT5Screen() {
     setDetailOpen(true);
     setDetailLoading(true);
     try {
-      const [balanceData, openPositions] = await Promise.all([
-        mt5Service.getBalance(id),
-        mt5Service.getPositions(id),
-      ]);
+      const balanceData = await mt5Service.getBalance(id);
       setBalance(balanceData);
-      setPositions(openPositions.positions || []);
       setStatus(balanceData.updatedAt ? `Last updated ${new Date(balanceData.updatedAt).toLocaleString()}` : 'Balance not fetched yet');
+      try {
+        const openPositions = await mt5Service.getPositions(id);
+        setPositions(openPositions.positions || []);
+      } catch {
+        // No positions or temporary issue should not block account details.
+        setPositions([]);
+      }
     } catch (error: any) {
       setStatus(String(error?.message || 'Unable to load MT5 account details'));
     } finally {
@@ -133,13 +136,15 @@ export function MT5Screen() {
     if (!selectedAccountId) return;
     try {
       setDetailLoading(true);
-      const [liveBalance, openPositions] = await Promise.all([
-        mt5Service.refreshBalance(selectedAccountId),
-        mt5Service.getPositions(selectedAccountId),
-      ]);
+      const liveBalance = await mt5Service.refreshBalance(selectedAccountId);
       setBalance(liveBalance);
-      setPositions(openPositions.positions || []);
       setStatus(`Live now • ${new Date().toLocaleTimeString()}`);
+      try {
+        const openPositions = await mt5Service.getPositions(selectedAccountId);
+        setPositions(openPositions.positions || []);
+      } catch {
+        setPositions([]);
+      }
       await refresh();
     } catch (error: any) {
       Alert.alert('MT5 Error', String(error?.message || 'Failed to refresh live balance'));

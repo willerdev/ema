@@ -89,18 +89,27 @@ async function fetchMt5Balance({ accountId }) {
 
 async function fetchMt5OpenPositions({ accountId }) {
   const token = getMetaApiToken();
-  const response = await axios.get(
-    `${CLIENT_API_URL.replace(/\/+$/, '')}/users/current/accounts/${accountId}/positions`,
-    {
-      timeout: 15000,
-      headers: {
-        Accept: 'application/json',
-        'auth-token': token,
-      },
+  try {
+    const response = await axios.get(
+      `${CLIENT_API_URL.replace(/\/+$/, '')}/users/current/accounts/${accountId}/positions`,
+      {
+        timeout: 15000,
+        headers: {
+          Accept: 'application/json',
+          'auth-token': token,
+        },
+      }
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  } catch (error) {
+    const message = extractErrorMessage(error, '').toLowerCase();
+    const status = error?.response?.status;
+    // If provider reports no positions (or no terminal state), treat as empty list.
+    if (status === 404 || message.includes('no position') || message.includes('positions not found') || message.includes('not synchronized')) {
+      return [];
     }
-  );
-
-  return Array.isArray(response.data) ? response.data : [];
+    throw error;
+  }
 }
 
 module.exports = { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage };
