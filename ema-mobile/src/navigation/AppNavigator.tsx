@@ -4,6 +4,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { HomeScreen } from '../screens/HomeScreen';
 import { TradesScreen } from '../screens/TradesScreen';
 import { WalletScreen } from '../screens/WalletScreen';
+import { MT5Screen } from '../screens/MT5Screen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { useAuth } from '../context/AuthContext';
@@ -16,6 +17,7 @@ const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyph
   Home: 'home',
   Trades: 'stats-chart',
   Wallet: 'wallet',
+  MT5: 'analytics',
   Settings: 'settings',
 };
 
@@ -23,6 +25,7 @@ const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.gly
   Home: 'home-outline',
   Trades: 'stats-chart-outline',
   Wallet: 'wallet-outline',
+  MT5: 'analytics-outline',
   Settings: 'settings-outline',
 };
 
@@ -66,6 +69,7 @@ export function AppNavigator() {
       <Tab.Screen name='Home' component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
       <Tab.Screen name='Trades' component={TradesScreen} options={{ tabBarLabel: 'Trades' }} />
       <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
+      <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
       <Tab.Screen name='Settings' component={SettingsScreen} options={{ tabBarLabel: 'Settings' }} />
     </Tab.Navigator>
   );

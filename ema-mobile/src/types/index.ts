@@ -2,6 +2,7 @@ export type RootTabParamList = {
   Home: undefined;
   Trades: undefined;
   Wallet: undefined;
+  MT5: undefined;
   Settings: undefined;
 };
 
@@ -61,4 +62,23 @@ export interface WalletTransaction {
   amount: number;
   status: string;
   created_at: string;
+}
+
+export interface Mt5AccountConfig {
+  id?: string;
+  login: string;
+  server: string;
+  metaapiAccountId?: string;
+  accountName?: string;
+  updatedAt?: string;
+}
+
+export interface Mt5Balance {
+  balance: number;
+  equity: number;
+  currency: string;
+  login: string;
+  server: string;
+  accountName?: string;
+  updatedAt?: string;
 }

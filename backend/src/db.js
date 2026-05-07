@@ -99,20 +99,72 @@ async function clearTransactionsByUserId(userId) {
   if (error) throw error;
 }
 
+async function listMt5AccountsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getMt5AccountByIdForUser(userId, accountId) {
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', accountId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function createMt5AccountForUser(userId, { login, password, server, accountName, metaapiAccountId }) {
+  const payload = {
+    id: id(),
+    user_id: userId,
+    metaapi_account_id: metaapiAccountId || '',
+    login,
+    password,
+    server,
+    account_name: accountName || '',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .insert(payload)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function setMt5AccountMetaApiId(userId, accountId, metaapiAccountId) {
+  const { error } = await supabase
+    .from('mt5_accounts')
+    .update({ metaapi_account_id: metaapiAccountId || '', updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', accountId);
+  if (error) throw error;
+}
+
 async function checkDatabaseHealth() {
-  const [usersResult, walletsResult, transactionsResult] = await Promise.all([
+  const [usersResult, walletsResult, transactionsResult, mt5Result] = await Promise.all([
     supabase.from('users').select('*').limit(1),
     supabase.from('wallets').select('*').limit(1),
     supabase.from('transactions').select('*').limit(1),
+    supabase.from('mt5_accounts').select('*').limit(1),
   ]);
-
-  const firstError = usersResult.error || walletsResult.error || transactionsResult.error;
+  const firstError = usersResult.error || walletsResult.error || transactionsResult.error || mt5Result?.error;
   if (firstError) throw firstError;
 
   return {
     users: usersResult.data?.length ?? 0,
     wallets: walletsResult.data?.length ?? 0,
     transactions: transactionsResult.data?.length ?? 0,
+    mt5_accounts: mt5Result?.data?.length ?? 0,
   };
 }
 
@@ -126,5 +178,9 @@ module.exports = {
   createTransaction,
   getTransactionsByUserId,
   clearTransactionsByUserId,
+  listMt5AccountsByUserId,
+  getMt5AccountByIdForUser,
+  createMt5AccountForUser,
+  setMt5AccountMetaApiId,
   checkDatabaseHealth,
 };

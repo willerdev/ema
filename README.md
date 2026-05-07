@@ -85,6 +85,9 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `GET /wallet`
 - `POST /wallet/deposit`
 - `POST /wallet/withdraw`
+- `GET /mt5/accounts`
+- `POST /mt5/accounts`
+- `GET /mt5/accounts/:id/balance`
 - `GET /health/db`
 
 ## Notes / limitations
@@ -98,8 +101,10 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 
 1. Open Supabase SQL Editor.
 2. Run `backend/sql/schema.sql`.
-3. Confirm `users`, `wallets`, and `transactions` tables exist.
+3. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
+4. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
 
 The backend reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from `backend/.env`.
+For MT5 integration via MetaApi, set `MT5_METAAPI_TOKEN` and keep the default MetaApi URLs (or override them in env).
 
 Use `GET /health/db` to verify table connectivity and basic counts from Supabase.
