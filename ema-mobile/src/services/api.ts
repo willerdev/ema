@@ -16,9 +16,8 @@ function resolveDefaultBaseUrl() {
 
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = await authStorage.getToken();
-  const response = await fetch(`${BASE_URL}${path}`, {
+async function fetchWithAuth(path: string, options: RequestInit, token: string | null) {
+  return fetch(`${BASE_URL}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -26,6 +25,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...(options.headers || {}),
     },
   });
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const token = await authStorage.getToken();
+  let response: Response;
+  try {
+    response = await fetchWithAuth(path, options, token);
+  } catch (error: any) {
+    // Render free instances may need a wake-up request on first hit.
+    try {
+      await fetch(`${BASE_URL}/health`);
+      response = await fetchWithAuth(path, options, token);
+    } catch {
+      throw new Error(`Network request failed. API base URL: ${BASE_URL}`);
+    }
+  }
 
   const contentType = response.headers.get('content-type') || '';
   const raw = await response.text();
