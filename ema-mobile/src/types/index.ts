@@ -104,6 +104,12 @@ export interface CryptoSummary {
   depositAddress: string | null;
   wallets?: CryptoWalletRow[];
   balances: CryptoBalanceRow[];
+  balanceSync?: {
+    status: string;
+    message: string | null;
+    updatedAt: string | null;
+    refreshIntervalSec?: number;
+  };
   activity: CryptoActivityRow[];
   swap: { enabled: boolean; message: string };
 }

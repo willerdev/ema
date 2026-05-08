@@ -229,6 +229,12 @@ async function insertCryptoEthereumWallet(row) {
   return data;
 }
 
+async function updateCryptoEthereumWalletByUserId(userId, patch) {
+  const { data, error } = await supabase.from('crypto_ethereum_wallets').update(patch).eq('user_id', userId).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
 async function findUserIdByDepositAddress(address) {
   if (!address) return null;
   const normalized = String(address).toLowerCase();
@@ -345,6 +351,7 @@ module.exports = {
   getCryptoEthereumWalletByUserId,
   getNextCryptoEthereumDerivationIndex,
   insertCryptoEthereumWallet,
+  updateCryptoEthereumWalletByUserId,
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,

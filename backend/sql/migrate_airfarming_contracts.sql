@@ -37,3 +37,19 @@ create table if not exists public.contract_accruals (
 );
 
 create index if not exists idx_contract_accruals_user on public.contract_accruals(user_id, accrual_date desc);
+
+-- Optional crypto wallet cache columns for throttled on-chain balance refreshes.
+alter table if exists public.crypto_ethereum_wallets
+  add column if not exists cached_eth_balance text default '0' not null;
+
+alter table if exists public.crypto_ethereum_wallets
+  add column if not exists cached_usdt_balance text default '0' not null;
+
+alter table if exists public.crypto_ethereum_wallets
+  add column if not exists balances_updated_at timestamptz;
+
+alter table if exists public.crypto_ethereum_wallets
+  add column if not exists balance_sync_status text default 'idle' not null;
+
+alter table if exists public.crypto_ethereum_wallets
+  add column if not exists balance_sync_message text;

@@ -20,6 +20,12 @@ export function HomeScreen() {
   const refreshCrypto = useCallback(async () => {
     setCryptoError(null);
     try {
+      // Queue a throttled backend refresh (max once/minute per user).
+      try {
+        await cryptoWalletService.refreshBalances();
+      } catch {
+        // summary call still returns cached balances/status
+      }
       let s = await cryptoWalletService.getSummary();
       if (!s.onboarded) {
         try {
@@ -42,7 +48,7 @@ export function HomeScreen() {
     await Promise.all([refreshDashboard(), refreshTrades(), refreshCrypto()]);
   }, [refreshDashboard, refreshTrades, refreshCrypto]);
 
-  usePolling(refresh, 12000, true);
+  usePolling(refresh, 60000, true);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -54,6 +60,14 @@ export function HomeScreen() {
   const usdtBal = cryptoSummary?.balances.find((b) => b.asset === 'USDT')?.balance ?? '—';
   const alpacaEquity = account?.equity !== undefined && account?.equity !== null ? `$${Number(account.equity).toFixed(2)}` : '—';
   const alpacaCash = account?.cash !== undefined && account?.cash !== null ? `$${Number(account.cash).toFixed(2)}` : '—';
+  const syncLabel = (() => {
+    const status = cryptoSummary?.balanceSync?.status || 'idle';
+    const updatedAt = cryptoSummary?.balanceSync?.updatedAt;
+    const msg = cryptoSummary?.balanceSync?.message;
+    if (msg) return `Sync: ${status} - ${msg}`;
+    if (!updatedAt) return `Sync: ${status}`;
+    return `Sync: ${status} · ${new Date(updatedAt).toLocaleTimeString()}`;
+  })();
 
   return (
     <ScrollView
@@ -67,6 +81,7 @@ export function HomeScreen() {
       <Card>
         <Text style={styles.section}>Crypto (on-chain)</Text>
         {cryptoError ? <Text style={styles.warn}>{cryptoError}</Text> : null}
+        <Text style={styles.meta}>{syncLabel}</Text>
         {!cryptoSummary && !cryptoError ? <Text style={styles.meta}>Loading crypto…</Text> : null}
         {cryptoSummary?.onboarded ? (
           <>

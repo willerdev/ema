@@ -4,6 +4,7 @@ const {
   getCryptoEthereumWalletByUserId,
   getNextCryptoEthereumDerivationIndex,
   insertCryptoEthereumWallet,
+  updateCryptoEthereumWalletByUserId,
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
@@ -13,6 +14,7 @@ const tatum = require('./services/tatumClient');
 const ethWallet = require('./services/ethWallet');
 const ethChain = require('./services/ethChain');
 const erc20TransferIface = new ethers.Interface(['function transfer(address to, uint256 amount)']);
+const BALANCE_REFRESH_INTERVAL_MS = 60 * 1000;
 
 function cryptoConfigured() {
   try {
@@ -83,6 +85,11 @@ async function provisionUserEthereumWallet(userId) {
     user_id: userId,
     derivation_index: derivationIndex,
     address,
+    cached_eth_balance: '0',
+    cached_usdt_balance: '0',
+    balances_updated_at: null,
+    balance_sync_status: 'idle',
+    balance_sync_message: null,
   });
   await ensureSubscriptionsForAddress(row.address);
   return row;
@@ -102,6 +109,54 @@ function normalizeHash(txHash) {
   const t = String(txHash || '').trim();
   if (!/^0x[0-9a-fA-F]{64}$/.test(t)) return null;
   return t.toLowerCase();
+}
+
+function shouldRefreshBalances(wallet, force = false) {
+  if (force) return true;
+  const ts = wallet?.balances_updated_at ? Date.parse(wallet.balances_updated_at) : NaN;
+  if (!Number.isFinite(ts)) return true;
+  return Date.now() - ts >= BALANCE_REFRESH_INTERVAL_MS;
+}
+
+async function refreshWalletBalances(userId, wallet, { force = false, reason = 'summary' } = {}) {
+  if (!wallet) return null;
+  if (!shouldRefreshBalances(wallet, force)) return { wallet, refreshed: false };
+
+  try {
+    await updateCryptoEthereumWalletByUserId(userId, {
+      balance_sync_status: 'syncing',
+      balance_sync_message: `Refreshing balances (${reason})`,
+    });
+  } catch {
+    // no-op
+  }
+
+  let ethBalance = wallet.cached_eth_balance || '0';
+  let usdtBalance = wallet.cached_usdt_balance || '0';
+  let message = null;
+  let status = 'ok';
+  try {
+    ethBalance = await ethChain.getEthBalanceFormatted(wallet.address);
+  } catch (e) {
+    status = 'degraded';
+    message = `ETH refresh failed: ${e?.message || 'unknown'}`;
+  }
+  try {
+    usdtBalance = await ethChain.getUsdtBalanceFormatted(wallet.address);
+  } catch (e) {
+    status = status === 'ok' ? 'degraded' : status;
+    const m = `USDT refresh failed: ${e?.message || 'unknown'}`;
+    message = message ? `${message}; ${m}` : m;
+  }
+
+  const updated = await updateCryptoEthereumWalletByUserId(userId, {
+    cached_eth_balance: String(ethBalance || '0'),
+    cached_usdt_balance: String(usdtBalance || '0'),
+    balances_updated_at: new Date().toISOString(),
+    balance_sync_status: status,
+    balance_sync_message: message,
+  });
+  return { wallet: updated, refreshed: true };
 }
 
 function getReconciledActivityForWallet(walletAddress, tx, receipt) {
@@ -243,6 +298,12 @@ async function handleTatumWebhook(req, res) {
       status: 'confirmed',
       dedupe_key: dedupeKey,
     });
+    try {
+      const wallet = await getCryptoEthereumWalletByUserId(userId);
+      if (wallet) await refreshWalletBalances(userId, wallet, { force: true, reason: 'webhook' });
+    } catch {
+      // keep webhook resilient
+    }
     return res.status(200).json({ ok: true, recorded: Boolean(inserted) });
   } catch (e) {
     console.error('Tatum webhook error', e);
@@ -299,34 +360,29 @@ function registerCryptoRoutes(app, { authMiddleware }) {
           swap: swapState,
         });
       }
-
-      let ethBalance = '0';
-      let usdtBalance = '0';
-      try {
-        ethBalance = await ethChain.getEthBalanceFormatted(wallet.address);
-      } catch (e) {
-        if (process.env.NODE_ENV !== 'production') console.warn('ETH balance:', e.message);
-      }
-      try {
-        usdtBalance = await ethChain.getUsdtBalanceFormatted(wallet.address);
-      } catch (e) {
-        if (process.env.NODE_ENV !== 'production') console.warn('USDT balance:', e.message);
-      }
+      const refreshed = await refreshWalletBalances(req.userId, wallet, { force: req.query.refresh === '1', reason: 'summary' });
+      const walletRow = refreshed?.wallet || wallet;
 
       const balances = [
-        { asset: 'ETH', balance: ethBalance },
-        { asset: 'USDT', balance: usdtBalance },
+        { asset: 'ETH', balance: String(walletRow.cached_eth_balance || '0') },
+        { asset: 'USDT', balance: String(walletRow.cached_usdt_balance || '0') },
       ];
 
       const activity = await listTatumOnchainTxsByUserId(req.userId, 40);
       return res.json({
         onboarded: true,
-        depositAddress: wallet.address,
+        depositAddress: walletRow.address,
         wallets: [
-          { asset: 'ETH', chain: 'ETHEREUM', address: wallet.address },
-          { asset: 'USDT', chain: 'ETHEREUM', address: wallet.address },
+          { asset: 'ETH', chain: 'ETHEREUM', address: walletRow.address },
+          { asset: 'USDT', chain: 'ETHEREUM', address: walletRow.address },
         ],
         balances,
+        balanceSync: {
+          status: walletRow.balance_sync_status || 'idle',
+          message: walletRow.balance_sync_message || null,
+          updatedAt: walletRow.balances_updated_at || null,
+          refreshIntervalSec: 60,
+        },
         activity: activity.map((t) => ({
           id: t.id,
           direction: t.direction,
@@ -347,6 +403,30 @@ function registerCryptoRoutes(app, { authMiddleware }) {
 
   app.get('/crypto/swap-status', authMiddleware, async (req, res) => {
     return res.json(swapState);
+  });
+
+  app.post('/crypto/refresh-balances', authMiddleware, async (req, res) => {
+    try {
+      if (!cryptoConfigured()) {
+        return res.status(503).json({ message: notConfiguredMessage });
+      }
+      const wallet = await getCryptoEthereumWalletByUserId(req.userId);
+      if (!wallet) {
+        return res.status(400).json({ message: 'Crypto wallet not onboarded. Call POST /crypto/onboard first.' });
+      }
+      const result = await refreshWalletBalances(req.userId, wallet, { force: false, reason: 'manual' });
+      return res.json({
+        ok: true,
+        refreshed: Boolean(result?.refreshed),
+        status: result?.wallet?.balance_sync_status || 'idle',
+        updatedAt: result?.wallet?.balances_updated_at || null,
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: schemaErrorMessage });
+      }
+      return res.status(500).json({ message: e?.message || 'Balance refresh failed' });
+    }
   });
 
   app.post('/crypto/send', authMiddleware, async (req, res) => {
@@ -394,6 +474,11 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         status: 'pending',
         dedupe_key: dedupeKey,
       });
+      try {
+        await refreshWalletBalances(req.userId, wallet, { force: true, reason: 'send' });
+      } catch {
+        // keep send responsive even if refresh fails
+      }
 
       return res.json({
         id: txHash,
@@ -464,6 +549,11 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         status: row.status,
         dedupe_key: dedupeKey,
       });
+      try {
+        await refreshWalletBalances(req.userId, wallet, { force: true, reason: 'reconcile' });
+      } catch {
+        // no-op
+      }
 
       return res.json({ ok: true, recorded: Boolean(inserted), direction: row.direction, asset: row.asset, amountDisplay });
     } catch (e) {

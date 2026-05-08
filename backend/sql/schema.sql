@@ -49,6 +49,11 @@ create table if not exists public.crypto_ethereum_wallets (
   user_id uuid primary key references public.users(id) on delete cascade,
   derivation_index integer not null unique,
   address text not null,
+  cached_eth_balance text default '0' not null,
+  cached_usdt_balance text default '0' not null,
+  balances_updated_at timestamptz,
+  balance_sync_status text default 'idle' not null,
+  balance_sync_message text,
   created_at timestamptz default now() not null
 );
 

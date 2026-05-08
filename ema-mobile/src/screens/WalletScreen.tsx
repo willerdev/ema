@@ -68,7 +68,7 @@ export function WalletScreen() {
     if (tab === 'crypto') await refreshCrypto();
   }, [refreshCash, refreshCrypto, tab]);
 
-  usePolling(refresh, 10000, true);
+  usePolling(refresh, 60000, true);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);

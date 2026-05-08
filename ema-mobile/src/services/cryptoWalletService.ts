@@ -8,6 +8,7 @@ export const cryptoWalletService = {
       {}
     ),
   getSummary: () => api.get<CryptoSummary>('/crypto/summary'),
+  refreshBalances: () => api.post<{ ok: boolean; refreshed: boolean; status: string; updatedAt: string | null }>('/crypto/refresh-balances', {}),
   send: (to: string, amount: string, asset: 'ETH' | 'USDT') => api.post<{ id: string; txId: string; completed: boolean }>('/crypto/send', { to, amount, asset }),
   getSwapStatus: () => api.get<{ enabled: boolean; message: string }>('/crypto/swap-status'),
 };
