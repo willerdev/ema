@@ -10,7 +10,9 @@ const ERC20_MIN_ABI = [
 function getProvider() {
   const url = process.env.ETHEREUM_RPC_URL;
   if (!url || !String(url).trim()) throw new Error('ETHEREUM_RPC_URL is not configured');
-  return new JsonRpcProvider(String(url).trim());
+  // Tatum gateway rejects JSON-RPC batch calls on free tier (HTTP 402).
+  // Force single-call transport so balance and token reads work reliably.
+  return new JsonRpcProvider(String(url).trim(), undefined, { batchMaxCount: 1 });
 }
 
 async function getEthBalanceFormatted(address) {
