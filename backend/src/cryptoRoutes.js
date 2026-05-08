@@ -166,6 +166,23 @@ function getReconciledActivityForWallet(walletAddress, tx, receipt) {
   return null;
 }
 
+function normalizeRawTx(tx) {
+  if (!tx) return null;
+  return {
+    from: tx.from,
+    to: tx.to,
+    value: tx.value || '0x0',
+    data: tx.input || tx.data || '0x',
+  };
+}
+
+function normalizeRawReceipt(receipt) {
+  if (!receipt) return null;
+  return {
+    status: receipt.status,
+  };
+}
+
 async function handleTatumWebhook(req, res) {
   try {
     if (!verifyTatumWebhook(req)) {
@@ -406,7 +423,22 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         return res.status(400).json({ message: 'Crypto wallet not onboarded. Call POST /crypto/onboard first.' });
       }
 
-      const [tx, receipt] = await Promise.all([ethChain.getTransactionByHash(txHash), ethChain.getTransactionReceipt(txHash)]);
+      let tx;
+      let receipt;
+      try {
+        [tx, receipt] = await Promise.all([ethChain.getTransactionByHash(txHash), ethChain.getTransactionReceipt(txHash)]);
+      } catch {
+        tx = null;
+        receipt = null;
+      }
+      if (!tx || !receipt) {
+        const [rawTx, rawReceipt] = await Promise.all([
+          ethChain.getTransactionByHashRaw(txHash),
+          ethChain.getTransactionReceiptRaw(txHash),
+        ]);
+        tx = normalizeRawTx(rawTx);
+        receipt = normalizeRawReceipt(rawReceipt);
+      }
       if (!tx) return res.status(404).json({ message: 'Transaction not found on chain' });
       if (!receipt) return res.status(404).json({ message: 'Transaction receipt not found yet' });
 
