@@ -171,6 +171,8 @@ function registerCryptoRoutes(app, { authMiddleware }) {
   const notConfiguredMessage =
     'Crypto is not configured. Set TATUM_API_KEY, TATUM_ETH_MASTER_MNEMONIC, ETHEREUM_RPC_URL, and APP_BASE_URL (for webhooks) on the server.';
 
+  const swapState = { enabled: false, message: 'Swap is currently unavailable.' };
+
   app.post('/crypto/onboard', authMiddleware, async (req, res) => {
     try {
       if (!cryptoConfigured()) {
@@ -180,6 +182,10 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       return res.json({
         depositAddress: wallet.address,
         derivationIndex: wallet.derivation_index,
+        wallets: [
+          { asset: 'ETH', chain: 'ETHEREUM', address: wallet.address },
+          { asset: 'USDT', chain: 'ETHEREUM', address: wallet.address },
+        ],
       });
     } catch (e) {
       if (isMissingTableError(e)) {
@@ -203,7 +209,8 @@ function registerCryptoRoutes(app, { authMiddleware }) {
           depositAddress: null,
           balances: [],
           activity: [],
-          swap: { enabled: false, message: 'Swap is not available yet (phase 2).' },
+          wallets: [],
+          swap: swapState,
         });
       }
 
@@ -229,6 +236,10 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       return res.json({
         onboarded: true,
         depositAddress: wallet.address,
+        wallets: [
+          { asset: 'ETH', chain: 'ETHEREUM', address: wallet.address },
+          { asset: 'USDT', chain: 'ETHEREUM', address: wallet.address },
+        ],
         balances,
         activity: activity.map((t) => ({
           id: t.id,
@@ -238,7 +249,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
           txHash: t.tx_hash,
           createdAt: t.created_at,
         })),
-        swap: { enabled: false, message: 'Swap is not available yet (phase 2).' },
+        swap: swapState,
       });
     } catch (e) {
       if (isMissingTableError(e)) {
@@ -249,7 +260,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
   });
 
   app.get('/crypto/swap-status', authMiddleware, async (req, res) => {
-    return res.json({ enabled: false, message: 'Swap is not available yet (phase 2).' });
+    return res.json(swapState);
   });
 
   app.post('/crypto/send', authMiddleware, async (req, res) => {

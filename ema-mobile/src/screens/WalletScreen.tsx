@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
@@ -24,6 +25,7 @@ export function WalletScreen() {
   const [cryptoSendAmount, setCryptoSendAmount] = useState('');
   const [cryptoSendAsset, setCryptoSendAsset] = useState<'ETH' | 'USDT'>('ETH');
   const [cryptoError, setCryptoError] = useState<string | null>(null);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
 
   const refreshCash = useCallback(async () => {
     try {
@@ -91,7 +93,13 @@ export function WalletScreen() {
   };
 
   const onCopyAddress = async (addr: string) => {
-    Alert.alert('Receive address', addr);
+    try {
+      await Clipboard.setStringAsync(addr);
+      setCopyToast('Wallet address copied');
+      setTimeout(() => setCopyToast(null), 1800);
+    } catch {
+      Alert.alert('Copy failed', 'Could not copy address. Please try again.');
+    }
   };
 
   const onCryptoSend = async () => {
@@ -107,12 +115,20 @@ export function WalletScreen() {
     }
   };
 
+  const primaryWalletAddress = cryptoSummary?.depositAddress || cryptoSummary?.wallets?.[0]?.address || null;
+  const ethBalance = cryptoSummary?.balances.find((b) => b.asset === 'ETH')?.balance || '0';
+  const usdtBalance = cryptoSummary?.balances.find((b) => b.asset === 'USDT')?.balance || '0';
+  const totalBalanceDisplay = (() => {
+    const total = (parseFloat(ethBalance) || 0) + (parseFloat(usdtBalance) || 0);
+    return Number.isFinite(total) ? total.toFixed(4) : '0.0000';
+  })();
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
-    >
+    <View style={styles.container}>
+      <ScrollView
+        contentContainerStyle={{ padding: 16 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+      >
       <View style={styles.tabRow}>
         <Text style={[styles.tab, tab === 'cash' && styles.tabActive]} onPress={() => setTab('cash')}>
           Cash wallet
@@ -159,27 +175,62 @@ export function WalletScreen() {
 
           {cryptoSummary?.onboarded ? (
             <>
-              <Card>
-                <Text style={styles.label}>Receive (Ethereum)</Text>
-                <Text style={styles.mono}>{cryptoSummary.depositAddress || '—'}</Text>
-                {cryptoSummary.depositAddress ? (
-                  <PrimaryButton label='Copy address' onPress={() => void onCopyAddress(cryptoSummary.depositAddress!)} style={{ marginTop: 8 }} />
-                ) : null}
-                <Text style={styles.hint}>Send ETH or USDT (ERC-20) on Ethereum mainnet to this address.</Text>
+              <Card style={styles.heroCard}>
+                <Text style={styles.heroCaption}>Crypto Wallet Balance</Text>
+                <Text style={styles.heroBalance}>{totalBalanceDisplay}</Text>
+                <View style={styles.heroMetaRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.heroMetaLabel}>Ethereum Address</Text>
+                    <Text style={styles.heroMetaValue}>{primaryWalletAddress ? `${primaryWalletAddress.slice(0, 8)}...${primaryWalletAddress.slice(-6)}` : 'Not ready'}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.heroMetaLabel}>Assets Enabled</Text>
+                    <Text style={styles.heroMetaValue}>ETH + USDT</Text>
+                  </View>
+                </View>
+                <View style={styles.quickActionsRow}>
+                  <PrimaryButton label='Receive' onPress={() => primaryWalletAddress && void onCopyAddress(primaryWalletAddress)} style={{ flex: 1 }} />
+                  <View style={{ width: 8 }} />
+                  <PrimaryButton label='Send' onPress={() => {}} style={{ flex: 1 }} />
+                </View>
               </Card>
 
               <Card>
-                <Text style={styles.label}>Balances (on-chain)</Text>
-                {cryptoSummary.balances.map((b) => (
-                  <Text key={b.asset} style={styles.item}>
-                    {b.asset}: {b.balance}
-                  </Text>
-                ))}
-                {!cryptoSummary.balances.length && <Text style={styles.item}>No balance data</Text>}
+                <Text style={styles.sectionTitle}>Assets</Text>
+                <View style={styles.assetGrid}>
+                  <View style={styles.assetTile}>
+                    <Text style={styles.assetLabel}>ETH</Text>
+                    <Text style={styles.assetValue}>{ethBalance}</Text>
+                    <Text style={styles.assetSub}>Main wallet</Text>
+                  </View>
+                  <View style={styles.assetTile}>
+                    <Text style={styles.assetLabel}>USDT</Text>
+                    <Text style={styles.assetValue}>{usdtBalance}</Text>
+                    <Text style={styles.assetSub}>Wallet ready by default</Text>
+                  </View>
+                </View>
               </Card>
 
               <Card>
-                <Text style={styles.label}>Send</Text>
+                <Text style={styles.sectionTitle}>Quick Services</Text>
+                <View style={styles.serviceRow}>
+                  <Pressable style={styles.servicePill} onPress={() => primaryWalletAddress && void onCopyAddress(primaryWalletAddress)}>
+                    <Text style={styles.servicePillText}>Receive</Text>
+                  </Pressable>
+                  <Pressable style={styles.servicePill} onPress={() => setCryptoSendAsset('ETH')}>
+                    <Text style={styles.servicePillText}>Send ETH</Text>
+                  </Pressable>
+                  <Pressable style={styles.servicePill} onPress={() => setCryptoSendAsset('USDT')}>
+                    <Text style={styles.servicePillText}>Send USDT</Text>
+                  </Pressable>
+                  <Pressable style={styles.servicePill} onPress={() => Alert.alert('Swap', 'Swap is currently unavailable.')}>
+                    <Text style={styles.servicePillText}>Swap</Text>
+                  </Pressable>
+                </View>
+              </Card>
+
+              <Card>
+                <Text style={styles.sectionTitle}>Transfer</Text>
                 <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
                 <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
                 <View style={styles.row}>
@@ -191,22 +242,13 @@ export function WalletScreen() {
               </Card>
 
               <Card>
-                <Text style={styles.label}>Activity</Text>
+                <Text style={styles.sectionTitle}>Recent Activity</Text>
                 {cryptoSummary.activity.map((t) => (
                   <Text key={t.id} style={styles.item}>
                     {t.direction.toUpperCase()} {t.amountDisplay} {t.asset} — {(t.txHash || '').slice(0, 10)}…
                   </Text>
                 ))}
                 {!cryptoSummary.activity.length && <Text style={styles.item}>No recorded transfers yet</Text>}
-              </Card>
-
-              <Card>
-                <Text style={styles.label}>Swap</Text>
-                <Text style={styles.item}>{cryptoSummary.swap.message}</Text>
-                <PrimaryButton label='Swap status' onPress={async () => {
-                  const s = await cryptoWalletService.getSwapStatus();
-                  Alert.alert('Swap', s.message);
-                }} />
               </Card>
             </>
           ) : cryptoError ? null : (
@@ -216,7 +258,13 @@ export function WalletScreen() {
           )}
         </>
       )}
-    </ScrollView>
+      </ScrollView>
+      {copyToast ? (
+        <View style={styles.toastWrap}>
+          <Text style={styles.toastText}>{copyToast}</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
@@ -226,6 +274,7 @@ const styles = StyleSheet.create({
   tab: { flex: 1, textAlign: 'center', color: palette.textSecondary, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: palette.border },
   tabActive: { color: palette.primary, borderColor: palette.primary },
   label: { color: palette.textSecondary, marginBottom: 8 },
+  sectionTitle: { color: palette.textSecondary, marginBottom: 10, fontSize: 16, fontWeight: '700' },
   balance: { color: palette.textPrimary, fontSize: 34, fontWeight: '800' },
   input: { backgroundColor: palette.surfaceElevated, borderWidth: 1, borderColor: palette.border, color: palette.textPrimary, borderRadius: 12, padding: 10, marginBottom: 8 },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
@@ -236,4 +285,32 @@ const styles = StyleSheet.create({
   mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12 },
   hint: { color: palette.textSecondary, marginTop: 8, fontSize: 12 },
   errorText: { color: '#f87171', marginBottom: 8 },
+  heroCard: { paddingTop: 18, paddingBottom: 18 },
+  heroCaption: { color: palette.textSecondary, marginBottom: 6, fontSize: 15 },
+  heroBalance: { color: palette.textPrimary, fontSize: 40, fontWeight: '800', marginBottom: 14 },
+  heroMetaRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 12, marginBottom: 12 },
+  heroMetaLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 4 },
+  heroMetaValue: { color: palette.textPrimary, fontSize: 14, fontWeight: '600' },
+  quickActionsRow: { flexDirection: 'row' },
+  assetGrid: { flexDirection: 'row', gap: 10 },
+  assetTile: { flex: 1, backgroundColor: palette.surfaceElevated, borderRadius: 12, borderWidth: 1, borderColor: palette.border, padding: 12 },
+  assetLabel: { color: palette.textSecondary, fontSize: 13, marginBottom: 4 },
+  assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 4 },
+  assetSub: { color: palette.textSecondary, fontSize: 12 },
+  serviceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  servicePill: { borderRadius: 999, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surfaceElevated, paddingVertical: 10, paddingHorizontal: 14 },
+  servicePillText: { color: palette.textPrimary, fontWeight: '600' },
+  toastWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 20,
+    backgroundColor: '#0f172a',
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  toastText: { color: palette.textPrimary, textAlign: 'center', fontWeight: '600' },
 });

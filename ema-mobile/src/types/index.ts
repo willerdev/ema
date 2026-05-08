@@ -69,6 +69,12 @@ export interface CryptoBalanceRow {
   balance: string;
 }
 
+export interface CryptoWalletRow {
+  asset: 'ETH' | 'USDT' | string;
+  chain: string;
+  address: string;
+}
+
 export interface CryptoActivityRow {
   id: string;
   direction: 'in' | 'out';
@@ -81,6 +87,7 @@ export interface CryptoActivityRow {
 export interface CryptoSummary {
   onboarded: boolean;
   depositAddress: string | null;
+  wallets?: CryptoWalletRow[];
   balances: CryptoBalanceRow[];
   activity: CryptoActivityRow[];
   swap: { enabled: boolean; message: string };
