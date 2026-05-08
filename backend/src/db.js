@@ -12,6 +12,10 @@ const supabase = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
+function isMissingTableError(error) {
+  return error?.code === 'PGRST205';
+}
+
 function id() {
   return crypto.randomUUID();
 }
@@ -174,20 +178,18 @@ async function checkDatabaseHealth() {
     supabase.from('mt5_accounts').select('*').limit(1),
     supabase.from('tatum_virtual_accounts').select('*').limit(1),
   ]);
-  const firstError =
-    usersResult.error ||
-    walletsResult.error ||
-    transactionsResult.error ||
-    mt5Result?.error ||
-    tatumVaResult?.error;
+  const tatumError = tatumVaResult?.error;
+  const firstError = usersResult.error || walletsResult.error || transactionsResult.error || mt5Result?.error;
   if (firstError) throw firstError;
+  if (tatumError && !isMissingTableError(tatumError)) throw tatumError;
 
   return {
     users: usersResult.data?.length ?? 0,
     wallets: walletsResult.data?.length ?? 0,
     transactions: transactionsResult.data?.length ?? 0,
     mt5_accounts: mt5Result?.data?.length ?? 0,
-    tatum_virtual_accounts: tatumVaResult?.data?.length ?? 0,
+    tatum_virtual_accounts: tatumError ? null : tatumVaResult?.data?.length ?? 0,
+    tatum_schema_ready: !tatumError,
   };
 }
 
@@ -285,4 +287,5 @@ module.exports = {
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
+  isMissingTableError,
 };

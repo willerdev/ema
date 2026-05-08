@@ -8,6 +8,7 @@ const {
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
+  isMissingTableError,
 } = require('./db');
 const tatum = require('./services/tatumClient');
 
@@ -203,6 +204,9 @@ async function handleTatumWebhook(req, res) {
 }
 
 function registerCryptoRoutes(app, { authMiddleware }) {
+  const schemaErrorMessage =
+    'Crypto DB schema is not initialized. Run backend/sql/schema.sql in Supabase SQL editor to create tatum_* tables.';
+
   app.post('/crypto/onboard', authMiddleware, async (req, res) => {
     try {
       if (!cryptoConfigured()) {
@@ -220,6 +224,9 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         ],
       });
     } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: schemaErrorMessage });
+      }
       const msg = e?.message || 'Crypto onboard failed';
       const status = e?.status && e.status < 600 ? e.status : 500;
       return res.status(status).json({ message: msg });
@@ -275,8 +282,11 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         })),
         swap: { enabled: false, message: 'Swap is not available yet (phase 2).' },
       });
-    } catch {
-      return res.status(500).json({ message: 'Failed to load crypto summary' });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: schemaErrorMessage });
+      }
+      return res.status(500).json({ message: e?.message || 'Failed to load crypto summary' });
     }
   });
 
@@ -343,6 +353,9 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         completed: result.completed,
       });
     } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: schemaErrorMessage });
+      }
       const msg = e?.message || 'Send failed';
       const status = e?.status && e.status < 600 ? e.status : 500;
       return res.status(status).json({ message: msg });

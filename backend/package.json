@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node src/server.js",
-    "test:mt5": "node src/scripts/testMt5Cli.js"
+    "test:mt5": "node src/scripts/testMt5Cli.js",
+    "check:tatum": "node src/scripts/checkTatumRuntime.js"
   },
   "keywords": [],
   "author": "",
