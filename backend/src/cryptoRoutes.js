@@ -8,6 +8,7 @@ const {
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
+  getTrackedUsdtBalanceByUserId,
   isMissingTableError,
 } = require('./db');
 const tatum = require('./services/tatumClient');
@@ -139,14 +140,23 @@ async function refreshWalletBalances(userId, wallet, { force = false, reason = '
     ethBalance = await ethChain.getEthBalanceFormatted(wallet.address);
   } catch (e) {
     status = 'degraded';
-    message = `ETH refresh failed: ${e?.message || 'unknown'}`;
+    message = 'ETH balance is temporarily unavailable from provider.';
   }
   try {
     usdtBalance = await ethChain.getUsdtBalanceFormatted(wallet.address);
   } catch (e) {
     status = status === 'ok' ? 'degraded' : status;
-    const m = `USDT refresh failed: ${e?.message || 'unknown'}`;
-    message = message ? `${message}; ${m}` : m;
+    try {
+      // Fallback: derive USDT from tracked in/out activity if RPC token call is blocked by provider plan.
+      usdtBalance = await getTrackedUsdtBalanceByUserId(userId);
+      message = 'USDT is estimated from recent activity while token RPC is unavailable.';
+    } catch {
+      message = 'USDT balance is temporarily unavailable from provider.';
+    }
+  }
+
+  if (status === 'degraded' && !message) {
+    message = 'Balance sync is degraded. Pull to refresh later.';
   }
 
   const updated = await updateCryptoEthereumWalletByUserId(userId, {

@@ -268,6 +268,24 @@ async function listTatumOnchainTxsByUserId(userId, limit = 50) {
   return data || [];
 }
 
+async function getTrackedUsdtBalanceByUserId(userId) {
+  const { data, error } = await supabase
+    .from('tatum_onchain_txs')
+    .select('direction,amount_display,status')
+    .eq('user_id', userId)
+    .eq('asset', 'USDT')
+    .neq('status', 'pending');
+  if (error) throw error;
+  let total = 0;
+  for (const row of data || []) {
+    const n = Number(row.amount_display || 0);
+    if (!Number.isFinite(n)) continue;
+    total += row.direction === 'out' ? -n : n;
+  }
+  if (total < 0) total = 0;
+  return String(total);
+}
+
 async function getAirfarmingStateByUserId(userId) {
   const { data, error } = await supabase.from('airfarming_state').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
@@ -355,6 +373,7 @@ module.exports = {
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
+  getTrackedUsdtBalanceByUserId,
   isMissingTableError,
   getAirfarmingStateByUserId,
   upsertAirfarmingState,

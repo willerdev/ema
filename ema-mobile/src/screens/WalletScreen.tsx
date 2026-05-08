@@ -255,7 +255,7 @@ export function WalletScreen() {
             <Text style={styles.modalMono}>{primaryWalletAddress || 'Not available'}</Text>
             {primaryWalletAddress ? (
               <View style={styles.qrWrap}>
-                <QRCode value={primaryWalletAddress} size={160} color={palette.textPrimary} backgroundColor='white' />
+                <QRCode value={primaryWalletAddress} size={160} color='#111827' backgroundColor='white' />
               </View>
             ) : null}
             <View style={styles.modalButtonRow}>
