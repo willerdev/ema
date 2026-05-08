@@ -218,6 +218,11 @@ function cryptoSafeMessage(error, fallback) {
   return fallback || 'Crypto operation failed';
 }
 
+function isRateLimitError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes('too many requests') || msg.includes('429') || msg.includes('rate limit');
+}
+
 function shouldRefreshBalances(wallet, force = false) {
   if (force) return true;
   const ts = wallet?.balances_updated_at ? Date.parse(wallet.balances_updated_at) : NaN;
@@ -566,15 +571,20 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       const mnemonic = tatum.getMasterMnemonic();
       const provider = ethChain.getProvider();
       const signer = ethWallet.getSignerAtIndex(mnemonic, Number(wallet.derivation_index), provider);
-      await ensureWalletGasBalance({
-        userId: req.userId,
-        walletAddress: wallet.address,
-        toAddress: checksumTo,
-        signer,
-        provider,
-        asset: upper,
-        amount: String(amount),
-      });
+      try {
+        await ensureWalletGasBalance({
+          userId: req.userId,
+          walletAddress: wallet.address,
+          toAddress: checksumTo,
+          signer,
+          provider,
+          asset: upper,
+          amount: String(amount),
+        });
+      } catch (e) {
+        // On strict provider limits, avoid failing before actual send attempt.
+        if (!isRateLimitError(e)) throw e;
+      }
 
       let txHash;
       if (upper === 'ETH') {

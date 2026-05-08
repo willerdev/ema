@@ -7,6 +7,29 @@ const ERC20_MIN_ABI = [
   'function transfer(address to, uint256 amount) returns (bool)',
 ];
 
+function isRateLimitError(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes('too many requests') || msg.includes('429') || msg.includes('rate limit');
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withRateLimitRetry(fn, { attempts = 3, delayMs = 1200 } = {}) {
+  let lastErr = null;
+  for (let i = 0; i < attempts; i += 1) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!isRateLimitError(e) || i === attempts - 1) throw e;
+      await sleep(delayMs * (i + 1));
+    }
+  }
+  throw lastErr || new Error('Operation failed');
+}
+
 function getProvider() {
   const url = process.env.ETHEREUM_RPC_URL;
   if (!url || !String(url).trim()) throw new Error('ETHEREUM_RPC_URL is not configured');
@@ -51,30 +74,32 @@ async function getUsdtBalanceFormatted(address) {
 }
 
 async function sendNativeEth(signer, toAddress, amountEthString) {
-  const tx = await signer.sendTransaction({
-    to: toAddress,
-    value: ethers.parseEther(String(amountEthString)),
-  });
+  const tx = await withRateLimitRetry(() =>
+    signer.sendTransaction({
+      to: toAddress,
+      value: ethers.parseEther(String(amountEthString)),
+    })
+  );
   return { txHash: tx.hash };
 }
 
 async function sendErc20Usdt(signer, toAddress, amountUsdtString) {
   const c = new Contract(USDT_ETHEREUM_MAINNET, ERC20_MIN_ABI, signer);
   const amount = ethers.parseUnits(String(amountUsdtString), 6);
-  const tx = await c.transfer(toAddress, amount);
+  const tx = await withRateLimitRetry(() => c.transfer(toAddress, amount));
   return { txHash: tx.hash };
 }
 
 async function estimateNativeEthGas(signer, toAddress, amountEthString) {
   const value = ethers.parseEther(String(amountEthString));
-  const gasLimit = await signer.estimateGas({ to: toAddress, value });
+  const gasLimit = await withRateLimitRetry(() => signer.estimateGas({ to: toAddress, value }));
   return { gasLimit, value };
 }
 
 async function estimateUsdtTransferGas(signer, toAddress, amountUsdtString) {
   const c = new Contract(USDT_ETHEREUM_MAINNET, ERC20_MIN_ABI, signer);
   const amount = ethers.parseUnits(String(amountUsdtString), 6);
-  const gasLimit = await c.transfer.estimateGas(toAddress, amount);
+  const gasLimit = await withRateLimitRetry(() => c.transfer.estimateGas(toAddress, amount));
   return { gasLimit, amount };
 }
 
@@ -87,7 +112,10 @@ function computeRequiredGasWei(feeData, gasLimit, bufferBps = 3000) {
 }
 
 async function waitForConfirmation(provider, txHash, confirmations = 1) {
-  const tx = await provider.waitForTransaction(txHash, confirmations);
+  const tx = await withRateLimitRetry(() => provider.waitForTransaction(txHash, confirmations), {
+    attempts: 4,
+    delayMs: 1500,
+  });
   if (!tx || tx.status === 0) throw new Error('Top-up transaction failed');
   return tx;
 }
