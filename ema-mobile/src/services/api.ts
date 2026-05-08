@@ -16,6 +16,8 @@ function resolveDefaultBaseUrl() {
 
 const BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function fetchWithAuth(path: string, options: RequestInit, token: string | null) {
   return fetch(`${BASE_URL}${path}`, {
     ...options,
@@ -29,17 +31,28 @@ async function fetchWithAuth(path: string, options: RequestInit, token: string |
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await authStorage.getToken();
-  let response: Response;
-  try {
-    response = await fetchWithAuth(path, options, token);
-  } catch (error: any) {
-    // Render free instances may need a wake-up request on first hit.
+  let response: Response | null = null;
+  let lastNetworkError: unknown = null;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
-      await fetch(`${BASE_URL}/health`);
       response = await fetchWithAuth(path, options, token);
-    } catch {
-      throw new Error(`Network request failed. API base URL: ${BASE_URL}`);
+      break;
+    } catch (error) {
+      lastNetworkError = error;
+      // Render instances may be cold; poke health and back off.
+      try {
+        await fetch(`${BASE_URL}/health`);
+      } catch {
+        // ignore and retry with backoff
+      }
+      await sleep(700 * (attempt + 1));
     }
+  }
+
+  if (!response) {
+    const hint = lastNetworkError instanceof Error ? ` (${lastNetworkError.message})` : '';
+    throw new Error(`Network request failed. API base URL: ${BASE_URL}${hint}`);
   }
 
   const contentType = response.headers.get('content-type') || '';

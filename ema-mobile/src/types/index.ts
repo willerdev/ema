@@ -64,6 +64,29 @@ export interface WalletTransaction {
   created_at: string;
 }
 
+export interface CryptoBalanceRow {
+  currency: string;
+  accountBalance: string;
+  availableBalance: string;
+}
+
+export interface CryptoActivityRow {
+  id: string;
+  direction: 'in' | 'out';
+  asset: string;
+  amountDisplay: string;
+  txHash: string;
+  createdAt: string;
+}
+
+export interface CryptoSummary {
+  onboarded: boolean;
+  depositAddress: string | null;
+  balances: CryptoBalanceRow[];
+  activity: CryptoActivityRow[];
+  swap: { enabled: boolean; message: string };
+}
+
 export interface Mt5AccountConfig {
   id?: string;
   login: string;

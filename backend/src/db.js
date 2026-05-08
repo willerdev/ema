@@ -167,13 +167,19 @@ async function updateMt5AccountSnapshot(userId, accountId, snapshot) {
 }
 
 async function checkDatabaseHealth() {
-  const [usersResult, walletsResult, transactionsResult, mt5Result] = await Promise.all([
+  const [usersResult, walletsResult, transactionsResult, mt5Result, tatumVaResult] = await Promise.all([
     supabase.from('users').select('*').limit(1),
     supabase.from('wallets').select('*').limit(1),
     supabase.from('transactions').select('*').limit(1),
     supabase.from('mt5_accounts').select('*').limit(1),
+    supabase.from('tatum_virtual_accounts').select('*').limit(1),
   ]);
-  const firstError = usersResult.error || walletsResult.error || transactionsResult.error || mt5Result?.error;
+  const firstError =
+    usersResult.error ||
+    walletsResult.error ||
+    transactionsResult.error ||
+    mt5Result?.error ||
+    tatumVaResult?.error;
   if (firstError) throw firstError;
 
   return {
@@ -181,7 +187,79 @@ async function checkDatabaseHealth() {
     wallets: walletsResult.data?.length ?? 0,
     transactions: transactionsResult.data?.length ?? 0,
     mt5_accounts: mt5Result?.data?.length ?? 0,
+    tatum_virtual_accounts: tatumVaResult?.data?.length ?? 0,
   };
+}
+
+async function upsertTatumCryptoProfile(userId, tatumCustomerId) {
+  const { data, error } = await supabase
+    .from('tatum_crypto_profiles')
+    .upsert({ user_id: userId, tatum_customer_id: tatumCustomerId || null }, { onConflict: 'user_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listTatumVirtualAccountsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('tatum_virtual_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('currency', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function insertTatumVirtualAccount(row) {
+  const { data, error } = await supabase.from('tatum_virtual_accounts').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function getTatumVirtualAccountByUserAndCurrency(userId, currency) {
+  const { data, error } = await supabase
+    .from('tatum_virtual_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('currency', currency)
+    .eq('chain', 'ETHEREUM')
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function findUserIdByDepositAddress(address) {
+  if (!address) return null;
+  const normalized = String(address).toLowerCase();
+  const { data, error } = await supabase
+    .from('tatum_virtual_accounts')
+    .select('user_id')
+    .ilike('deposit_address', normalized)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.user_id || null;
+}
+
+async function insertTatumOnchainTx(row) {
+  const { data, error } = await supabase.from('tatum_onchain_txs').insert(row).select('*').single();
+  if (error) {
+    if (error.code === '23505') return null;
+    throw error;
+  }
+  return data;
+}
+
+async function listTatumOnchainTxsByUserId(userId, limit = 50) {
+  const { data, error } = await supabase
+    .from('tatum_onchain_txs')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
 }
 
 module.exports = {
@@ -200,4 +278,11 @@ module.exports = {
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
   checkDatabaseHealth,
+  upsertTatumCryptoProfile,
+  listTatumVirtualAccountsByUserId,
+  insertTatumVirtualAccount,
+  getTatumVirtualAccountByUserAndCurrency,
+  findUserIdByDepositAddress,
+  insertTatumOnchainTx,
+  listTatumOnchainTxsByUserId,
 };

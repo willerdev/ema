@@ -24,8 +24,22 @@ const { authMiddleware } = require('./middleware/auth');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
 const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
 
+const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
+
 const app = express();
 app.use(cors());
+app.post(
+  '/crypto/webhooks/tatum',
+  express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+  (req, res, next) => {
+    handleTatumWebhook(req, res).catch(next);
+  }
+);
 app.use(express.json());
 
 function alpacaErrorMessage(error, fallback) {
@@ -312,6 +326,8 @@ app.post('/alpaca/orders', async (req, res) => {
     return res.status(500).json({ message: alpacaErrorMessage(error, 'Failed to place order') });
   }
 });
+
+registerCryptoRoutes(app, { authMiddleware });
 
 app.get('/wallet', authMiddleware, async (req, res) => {
   try {

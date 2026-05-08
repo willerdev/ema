@@ -210,8 +210,8 @@ export function MT5Screen() {
 
       <Modal visible={detailOpen} animationType='slide'>
         <View style={styles.detailContainer}>
-          <View style={styles.detailHeader}>
-            <Pressable onPress={() => setDetailOpen(false)}>
+          <View style={[styles.detailHeader, { paddingTop: Math.max(16, insets.top + 8) }]}>
+            <Pressable onPress={() => setDetailOpen(false)} hitSlop={12}>
               <Ionicons name='arrow-back' size={24} color={palette.textPrimary} />
             </Pressable>
             <Text style={styles.detailTitle}>MT5 Account Details</Text>
