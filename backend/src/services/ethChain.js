@@ -43,11 +43,23 @@ async function sendErc20Usdt(signer, toAddress, amountUsdtString) {
   return { txHash: tx.hash };
 }
 
+async function getTransactionByHash(txHash) {
+  const provider = getProvider();
+  return provider.getTransaction(txHash);
+}
+
+async function getTransactionReceipt(txHash) {
+  const provider = getProvider();
+  return provider.getTransactionReceipt(txHash);
+}
+
 module.exports = {
   getProvider,
   getEthBalanceFormatted,
   getUsdtBalanceFormatted,
   sendNativeEth,
   sendErc20Usdt,
+  getTransactionByHash,
+  getTransactionReceipt,
   USDT_ETHEREUM_MAINNET,
 };

@@ -12,6 +12,7 @@ const {
 const tatum = require('./services/tatumClient');
 const ethWallet = require('./services/ethWallet');
 const ethChain = require('./services/ethChain');
+const erc20TransferIface = new ethers.Interface(['function transfer(address to, uint256 amount)']);
 
 function cryptoConfigured() {
   try {
@@ -95,6 +96,74 @@ function formatAmountDisplay(asset, rawValueStr) {
     return rawValueStr || '0';
   }
   return rawValueStr || '0';
+}
+
+function normalizeHash(txHash) {
+  const t = String(txHash || '').trim();
+  if (!/^0x[0-9a-fA-F]{64}$/.test(t)) return null;
+  return t.toLowerCase();
+}
+
+function getReconciledActivityForWallet(walletAddress, tx, receipt) {
+  if (!tx || !receipt || String(receipt.status) !== '1') return null;
+  const wallet = String(walletAddress || '').toLowerCase();
+  const from = String(tx.from || '').toLowerCase();
+  const to = String(tx.to || '').toLowerCase();
+  const usdt = String(tatum.USDT_ETHEREUM_MAINNET || '').toLowerCase();
+
+  if (to === wallet) {
+    return {
+      direction: 'in',
+      asset: 'ETH',
+      rawValue: String(tx.value || '0'),
+      fromAddress: from || null,
+      toAddress: to || null,
+      status: 'confirmed',
+    };
+  }
+
+  if (to === usdt && tx.data && tx.data !== '0x') {
+    try {
+      const decoded = erc20TransferIface.decodeFunctionData('transfer', tx.data);
+      const transferTo = String(decoded?.to || '').toLowerCase();
+      const amount = decoded?.amount;
+      if (transferTo === wallet) {
+        return {
+          direction: 'in',
+          asset: 'USDT',
+          rawValue: String(amount || '0'),
+          fromAddress: from || null,
+          toAddress: transferTo || null,
+          status: 'confirmed',
+        };
+      }
+      if (from === wallet) {
+        return {
+          direction: 'out',
+          asset: 'USDT',
+          rawValue: String(amount || '0'),
+          fromAddress: from || null,
+          toAddress: transferTo || null,
+          status: 'confirmed',
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  if (from === wallet) {
+    return {
+      direction: 'out',
+      asset: 'ETH',
+      rawValue: String(tx.value || '0'),
+      fromAddress: from || null,
+      toAddress: to || null,
+      status: 'confirmed',
+    };
+  }
+
+  return null;
 }
 
 async function handleTatumWebhook(req, res) {
@@ -321,6 +390,56 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       const msg = e?.message || 'Send failed';
       const status = e?.status && e.status < 600 ? e.status : 500;
       return res.status(status).json({ message: msg });
+    }
+  });
+
+  app.post('/crypto/reconcile', authMiddleware, async (req, res) => {
+    try {
+      if (!cryptoConfigured()) {
+        return res.status(503).json({ message: notConfiguredMessage });
+      }
+      const txHash = normalizeHash(req.body?.txHash);
+      if (!txHash) return res.status(400).json({ message: 'Provide valid txHash (0x...)' });
+
+      const wallet = await getCryptoEthereumWalletByUserId(req.userId);
+      if (!wallet) {
+        return res.status(400).json({ message: 'Crypto wallet not onboarded. Call POST /crypto/onboard first.' });
+      }
+
+      const [tx, receipt] = await Promise.all([ethChain.getTransactionByHash(txHash), ethChain.getTransactionReceipt(txHash)]);
+      if (!tx) return res.status(404).json({ message: 'Transaction not found on chain' });
+      if (!receipt) return res.status(404).json({ message: 'Transaction receipt not found yet' });
+
+      const row = getReconciledActivityForWallet(wallet.address, tx, receipt);
+      if (!row) {
+        return res.status(400).json({
+          message: 'Transaction does not map to this wallet address (incoming/outgoing ETH or USDT transfer).',
+        });
+      }
+
+      const amountDisplay = formatAmountDisplay(row.asset, row.rawValue);
+      const dedupeKey = `${txHash}:reconcile:${row.asset}:${row.direction}`;
+      const inserted = await insertTatumOnchainTx({
+        id: newId(),
+        user_id: req.userId,
+        direction: row.direction,
+        asset: row.asset,
+        amount_display: amountDisplay,
+        tx_hash: txHash,
+        log_index: null,
+        from_address: row.fromAddress,
+        to_address: row.toAddress,
+        status: row.status,
+        dedupe_key: dedupeKey,
+      });
+
+      return res.json({ ok: true, recorded: Boolean(inserted), direction: row.direction, asset: row.asset, amountDisplay });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: schemaErrorMessage });
+      }
+      const msg = e?.message || 'Reconcile failed';
+      return res.status(500).json({ message: msg });
     }
   });
 }
