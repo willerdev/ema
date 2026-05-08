@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
@@ -11,6 +12,8 @@ import { CryptoSummary, WalletTransaction } from '../types';
 import { palette } from '../theme/colors';
 
 type WalletTab = 'cash' | 'crypto';
+const SEND_COOLDOWN_MS = 60 * 1000;
+const SEND_COOLDOWN_STORAGE_KEY = 'wallet_crypto_last_send_attempt_at';
 
 export function WalletScreen() {
   const [tab, setTab] = useState<WalletTab>('cash');
@@ -30,6 +33,45 @@ export function WalletScreen() {
   const [receiveModalOpen, setReceiveModalOpen] = useState(false);
   const [sendModalOpen, setSendModalOpen] = useState(false);
   const [quickServicesModalOpen, setQuickServicesModalOpen] = useState(false);
+  const [lastSendAttemptAt, setLastSendAttemptAt] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SEND_COOLDOWN_STORAGE_KEY);
+        if (!active || !raw) return;
+        const ts = Number(raw);
+        if (!Number.isFinite(ts) || ts <= 0) return;
+        setLastSendAttemptAt(ts);
+      } catch {
+        // no-op
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        if (lastSendAttemptAt) {
+          await AsyncStorage.setItem(SEND_COOLDOWN_STORAGE_KEY, String(lastSendAttemptAt));
+        } else {
+          await AsyncStorage.removeItem(SEND_COOLDOWN_STORAGE_KEY);
+        }
+      } catch {
+        // no-op
+      }
+    })();
+  }, [lastSendAttemptAt]);
 
   const refreshCash = useCallback(async () => {
     try {
@@ -107,13 +149,19 @@ export function WalletScreen() {
   };
 
   const onCryptoSend = async () => {
+    if (!sendWindowOpen) {
+      setCryptoError(`Send window opens in ${sendCooldownSec}s. Please wait before sending again.`);
+      return;
+    }
+    setLastSendAttemptAt(Date.now());
     try {
       setCryptoError(null);
       const r = await cryptoWalletService.send(cryptoSendTo.trim(), cryptoSendAmount.trim(), cryptoSendAsset);
       setCryptoSendTo('');
       setCryptoSendAmount('');
-      await refreshCrypto();
+      setCryptoError('Transaction submitted. Activity and balances update after network confirmation.');
       Alert.alert('Sent', r.txId ? `Tx: ${r.txId}` : 'Transaction submitted');
+      setSendModalOpen(false);
     } catch (e: any) {
       setCryptoError(sanitizeCryptoError(e?.message || 'Send failed'));
     }
@@ -141,6 +189,10 @@ export function WalletScreen() {
     const total = (parseFloat(ethBalance) || 0) + (parseFloat(usdtBalance) || 0);
     return Number.isFinite(total) ? total.toFixed(4) : '0.0000';
   })();
+  const msSinceSendAttempt = lastSendAttemptAt ? nowMs - lastSendAttemptAt : Number.POSITIVE_INFINITY;
+  const sendCooldownLeftMs = Math.max(0, SEND_COOLDOWN_MS - msSinceSendAttempt);
+  const sendCooldownSec = Math.ceil(sendCooldownLeftMs / 1000);
+  const sendWindowOpen = sendCooldownLeftMs <= 0;
 
   return (
     <View style={styles.container}>
@@ -206,6 +258,14 @@ export function WalletScreen() {
                     <Text style={styles.heroMetaLabel}>Assets Enabled</Text>
                     <Text style={styles.heroMetaValue}>ETH + USDT</Text>
                   </View>
+                </View>
+                <View style={styles.rateRow}>
+                  <View style={[styles.rateDot, sendWindowOpen ? styles.rateDotReady : styles.rateDotCooling]} />
+                  <Text style={styles.rateText}>
+                    {sendWindowOpen
+                      ? 'Withdraw window open (safe to send)'
+                      : `Cooling down: wait ${sendCooldownSec}s before next send`}
+                  </Text>
                 </View>
                 <View style={styles.quickActionsRow}>
                   <PrimaryButton label='Receive' onPress={() => setReceiveModalOpen(true)} style={{ flex: 1 }} />
@@ -299,14 +359,14 @@ export function WalletScreen() {
                 <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
               ))}
             </View>
+            <Text style={styles.cooldownHint}>
+              {sendWindowOpen ? 'Window open: send is enabled.' : `Window closed: send unlocks in ${sendCooldownSec}s.`}
+            </Text>
             <View style={styles.modalButtonRow}>
               <PrimaryButton
                 label='Send on-chain'
-                onPress={async () => {
-                  await onCryptoSend();
-                  setSendModalOpen(false);
-                }}
-                disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim()}
+                onPress={onCryptoSend}
+                disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim() || !sendWindowOpen}
                 style={{ flex: 1 }}
               />
               <View style={{ width: 8 }} />
@@ -391,6 +451,11 @@ const styles = StyleSheet.create({
   heroMetaRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 12, marginBottom: 12 },
   heroMetaLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 4 },
   heroMetaValue: { color: palette.textPrimary, fontSize: 14, fontWeight: '600' },
+  rateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  rateDot: { width: 10, height: 10, borderRadius: 999, marginRight: 8 },
+  rateDotReady: { backgroundColor: '#22c55e' },
+  rateDotCooling: { backgroundColor: '#ef4444' },
+  rateText: { color: palette.textSecondary, fontSize: 12, fontWeight: '600' },
   quickActionsRow: { flexDirection: 'row' },
   assetGrid: { flexDirection: 'row', gap: 10 },
   assetTile: { flex: 1, backgroundColor: palette.surfaceElevated, borderRadius: 12, borderWidth: 1, borderColor: palette.border, padding: 12 },
@@ -417,6 +482,7 @@ const styles = StyleSheet.create({
   modalLabel: { color: palette.textSecondary, marginTop: 6, marginBottom: 2, fontSize: 13 },
   modalValue: { color: palette.textPrimary, fontWeight: '600' },
   modalMono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12 },
+  cooldownHint: { color: palette.textSecondary, marginBottom: 8, fontSize: 12 },
   qrWrap: { alignItems: 'center', marginVertical: 12 },
   modalButtonRow: { flexDirection: 'row', marginTop: 8 },
   toastWrap: {

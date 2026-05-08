@@ -613,12 +613,6 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         status: 'pending',
         dedupe_key: dedupeKey,
       });
-      try {
-        await refreshWalletBalances(req.userId, wallet, { force: true, reason: 'send' });
-      } catch {
-        // keep send responsive even if refresh fails
-      }
-
       return res.json({
         id: txHash,
         txId: txHash,
