@@ -32,6 +32,9 @@
         "projectId": "29fed882-ad53-4349-8a4f-f8d3a542cc1f"
       }
     },
-    "owner": "willer256"
+    "owner": "willer256",
+    "plugins": [
+      "expo-font"
+    ]
   }
 }
