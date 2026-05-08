@@ -14,12 +14,16 @@ function resolveDefaultBaseUrl() {
   return Platform.OS === 'android' ? 'http://10.0.2.2:4000' : 'http://localhost:4000';
 }
 
-const BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
+const configuredBaseUrl = (process.env.EXPO_PUBLIC_API_URL ?? resolveDefaultBaseUrl()).replace(/\/+$/, '');
+const fallbackBaseUrls = ['https://ema-0gp3.onrender.com'];
+const BASE_URL_CANDIDATES = Array.from(
+  new Set([configuredBaseUrl, ...fallbackBaseUrls].map((u) => u.replace(/\/+$/, '')))
+);
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchWithAuth(path: string, options: RequestInit, token: string | null) {
-  return fetch(`${BASE_URL}${path}`, {
+async function fetchWithAuth(baseUrl: string, path: string, options: RequestInit, token: string | null) {
+  return fetch(`${baseUrl}${path}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
@@ -32,27 +36,45 @@ async function fetchWithAuth(path: string, options: RequestInit, token: string |
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = await authStorage.getToken();
   let response: Response | null = null;
+  let chosenBaseUrl: string | null = null;
   let lastNetworkError: unknown = null;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      response = await fetchWithAuth(path, options, token);
-      break;
-    } catch (error) {
-      lastNetworkError = error;
-      // Render instances may be cold; poke health and back off.
+  for (const baseUrl of BASE_URL_CANDIDATES) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        await fetch(`${BASE_URL}/health`);
-      } catch {
-        // ignore and retry with backoff
+        response = await fetchWithAuth(baseUrl, path, options, token);
+        chosenBaseUrl = baseUrl;
+        break;
+      } catch (error) {
+        lastNetworkError = error;
+        // Render instances may be cold; poke health and back off.
+        try {
+          await fetch(`${baseUrl}/health`);
+        } catch {
+          // ignore and retry with backoff
+        }
+        await sleep(700 * (attempt + 1));
       }
-      await sleep(700 * (attempt + 1));
     }
+    if (response) break;
+  }
+
+  if (!chosenBaseUrl) {
+    chosenBaseUrl = BASE_URL_CANDIDATES[0];
   }
 
   if (!response) {
     const hint = lastNetworkError instanceof Error ? ` (${lastNetworkError.message})` : '';
-    throw new Error(`Network request failed. API base URL: ${BASE_URL}${hint}`);
+    throw new Error(`Network request failed. API base URL: ${chosenBaseUrl}${hint}`);
+  }
+
+  // If fallback base URL worked, keep using it first in future requests.
+  if (chosenBaseUrl && BASE_URL_CANDIDATES[0] !== chosenBaseUrl) {
+    const idx = BASE_URL_CANDIDATES.indexOf(chosenBaseUrl);
+    if (idx > 0) {
+      BASE_URL_CANDIDATES.splice(idx, 1);
+      BASE_URL_CANDIDATES.unshift(chosenBaseUrl);
+    }
   }
 
   const contentType = response.headers.get('content-type') || '';
