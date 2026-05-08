@@ -76,6 +76,10 @@ Set on Render (and local `.env`):
 - `ETHEREUM_RPC_URL` — HTTPS JSON-RPC with `eth_sendRawTransaction` allowed from your server (some providers restrict by IP or app)
 - `APP_BASE_URL` — public base URL of this backend (no trailing slash issues are normalized); used to build `…/crypto/webhooks/tatum` for Tatum v4 subscriptions
 - `TATUM_WEBHOOK_HMAC_SECRET` — optional; if set, Tatum webhook requests must include a valid `x-payload-hash`
+- `GAS_TOPUP_ENABLED` — optional; default `true`. Auto-fund user wallet ETH when gas is insufficient before on-chain sends.
+- `TREASURY_PRIVATE_KEY` — required when `GAS_TOPUP_ENABLED=true`; server-side hot wallet used only for gas top-ups.
+- `GAS_TOPUP_MIN_WEI` — optional; minimum ETH top-up amount in wei (default `1000000000000000`, i.e. `0.001 ETH`).
+- `GAS_TOPUP_BUFFER_BPS` — optional safety buffer over estimated gas in basis points (default `3000` = `30%`).
 
 Database: run `backend/sql/schema.sql` so `crypto_ethereum_wallets` and `tatum_onchain_txs` exist. If you previously used Tatum Virtual Accounts, run `backend/sql/migrate_va_to_onchain.sql` once, then verify before dropping legacy `tatum_*` VA tables.
 

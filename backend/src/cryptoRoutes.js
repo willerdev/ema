@@ -112,6 +112,97 @@ function normalizeHash(txHash) {
   return t.toLowerCase();
 }
 
+function envBool(name, fallback = false) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const v = String(raw).trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(v);
+}
+
+function envBigInt(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return BigInt(fallback);
+  try {
+    return BigInt(String(raw).trim());
+  } catch {
+    return BigInt(fallback);
+  }
+}
+
+function envNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function getTreasurySigner(provider) {
+  const pk = String(process.env.TREASURY_PRIVATE_KEY || '').trim();
+  if (!pk) throw new Error('Treasury signer is not configured');
+  const normalized = pk.startsWith('0x') ? pk : `0x${pk}`;
+  return new ethers.Wallet(normalized, provider);
+}
+
+async function ensureWalletGasBalance({ userId, walletAddress, toAddress, signer, provider, asset, amount }) {
+  if (!envBool('GAS_TOPUP_ENABLED', true)) {
+    return { toppedUp: false, reason: 'disabled' };
+  }
+  if (asset !== 'ETH' && asset !== 'USDT') {
+    return { toppedUp: false, reason: 'unsupported' };
+  }
+
+  let gasLimit;
+  let transferValueWei = 0n;
+  if (asset === 'ETH') {
+    const estimate = await ethChain.estimateNativeEthGas(signer, toAddress, String(amount));
+    gasLimit = estimate.gasLimit;
+    transferValueWei = BigInt(estimate.value);
+  } else {
+    const estimate = await ethChain.estimateUsdtTransferGas(signer, toAddress, String(amount));
+    gasLimit = estimate.gasLimit;
+  }
+
+  const feeData = await provider.getFeeData();
+  const bufferBps = envNumber('GAS_TOPUP_BUFFER_BPS', 3000);
+  let requiredWei = ethChain.computeRequiredGasWei(feeData, gasLimit, bufferBps);
+  if (asset === 'ETH') requiredWei += transferValueWei;
+  const minTopupWei = envBigInt('GAS_TOPUP_MIN_WEI', 1000000000000000n);
+  const senderEthWei = await provider.getBalance(walletAddress);
+  if (senderEthWei >= requiredWei) {
+    return { toppedUp: false, reason: 'sufficient', requiredWei: String(requiredWei) };
+  }
+
+  const shortfallWei = requiredWei - senderEthWei;
+  const topupWei = shortfallWei > minTopupWei ? shortfallWei : minTopupWei;
+  const treasurySigner = getTreasurySigner(provider);
+  const tx = await treasurySigner.sendTransaction({ to: walletAddress, value: topupWei });
+  await ethChain.waitForConfirmation(provider, tx.hash, 1);
+  try {
+    await insertTatumOnchainTx({
+      id: newId(),
+      user_id: userId,
+      direction: 'in',
+      asset: 'ETH',
+      amount_display: ethers.formatEther(topupWei),
+      tx_hash: tx.hash,
+      log_index: null,
+      from_address: treasurySigner.address,
+      to_address: walletAddress,
+      status: 'confirmed',
+      dedupe_key: `gas-topup:${tx.hash}`,
+    });
+  } catch {
+    // non-blocking audit insert
+  }
+  return {
+    toppedUp: true,
+    reason: 'shortfall',
+    topupWei: String(topupWei),
+    requiredWei: String(requiredWei),
+    txHash: tx.hash,
+  };
+}
+
 function cryptoSafeMessage(error, fallback) {
   const raw = String(error?.message || fallback || 'Crypto operation failed');
   const lower = raw.toLowerCase();
@@ -475,6 +566,15 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       const mnemonic = tatum.getMasterMnemonic();
       const provider = ethChain.getProvider();
       const signer = ethWallet.getSignerAtIndex(mnemonic, Number(wallet.derivation_index), provider);
+      await ensureWalletGasBalance({
+        userId: req.userId,
+        walletAddress: wallet.address,
+        toAddress: checksumTo,
+        signer,
+        provider,
+        asset: upper,
+        amount: String(amount),
+      });
 
       let txHash;
       if (upper === 'ETH') {

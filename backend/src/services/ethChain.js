@@ -65,6 +65,33 @@ async function sendErc20Usdt(signer, toAddress, amountUsdtString) {
   return { txHash: tx.hash };
 }
 
+async function estimateNativeEthGas(signer, toAddress, amountEthString) {
+  const value = ethers.parseEther(String(amountEthString));
+  const gasLimit = await signer.estimateGas({ to: toAddress, value });
+  return { gasLimit, value };
+}
+
+async function estimateUsdtTransferGas(signer, toAddress, amountUsdtString) {
+  const c = new Contract(USDT_ETHEREUM_MAINNET, ERC20_MIN_ABI, signer);
+  const amount = ethers.parseUnits(String(amountUsdtString), 6);
+  const gasLimit = await c.transfer.estimateGas(toAddress, amount);
+  return { gasLimit, amount };
+}
+
+function computeRequiredGasWei(feeData, gasLimit, bufferBps = 3000) {
+  const maxFee = feeData?.maxFeePerGas || feeData?.gasPrice;
+  if (!maxFee || !gasLimit) throw new Error('Unable to estimate gas fee from provider');
+  const baseWei = BigInt(maxFee) * BigInt(gasLimit);
+  const bps = BigInt(Math.max(0, Number(bufferBps) || 0));
+  return baseWei + (baseWei * bps) / 10000n;
+}
+
+async function waitForConfirmation(provider, txHash, confirmations = 1) {
+  const tx = await provider.waitForTransaction(txHash, confirmations);
+  if (!tx || tx.status === 0) throw new Error('Top-up transaction failed');
+  return tx;
+}
+
 async function getTransactionByHash(txHash) {
   const provider = getProvider();
   return provider.getTransaction(txHash);
@@ -89,6 +116,10 @@ module.exports = {
   getUsdtBalanceFormatted,
   sendNativeEth,
   sendErc20Usdt,
+  estimateNativeEthGas,
+  estimateUsdtTransferGas,
+  computeRequiredGasWei,
+  waitForConfirmation,
   getTransactionByHash,
   getTransactionReceipt,
   getTransactionByHashRaw,
