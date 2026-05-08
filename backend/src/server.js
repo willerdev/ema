@@ -87,6 +87,64 @@ const toMt5Summary = (account) => ({
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
+app.get('/auth/email-confirmed', (_, res) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>All set</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #020617;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      .card {
+        width: min(92vw, 520px);
+        border: 1px solid #1e293b;
+        background: #0f172a;
+        border-radius: 16px;
+        padding: 28px 22px;
+        box-shadow: 0 20px 50px rgba(2, 6, 23, 0.45);
+        text-align: center;
+      }
+      .dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 999px;
+        background: #22c55e;
+        margin: 0 auto 14px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        color: #f8fafc;
+      }
+      p {
+        margin: 0;
+        color: #94a3b8;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <div class="dot"></div>
+      <h1>All set</h1>
+      <p>Your email is confirmed. You can close this page and open the Ema app now.</p>
+    </main>
+  </body>
+</html>`);
+});
+
 app.get('/health/db', async (_, res) => {
   try {
     const counts = await checkDatabaseHealth();
