@@ -8,8 +8,6 @@ import { walletService } from '../services/walletService';
 import { CryptoSummary, WalletTransaction } from '../types';
 import { palette } from '../theme/colors';
 
-const paymentMethods = ['bank_transfer', 'card', 'crypto'];
-
 type WalletTab = 'cash' | 'crypto';
 
 export function WalletScreen() {
@@ -17,12 +15,9 @@ export function WalletScreen() {
 
   const [balance, setBalance] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
-  const [method, setMethod] = useState('bank_transfer');
-  const [referenceId, setReferenceId] = useState(`REF-${Date.now()}`);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
-  const [resetToken, setResetToken] = useState('');
 
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
   const [cryptoSendTo, setCryptoSendTo] = useState('');
@@ -77,7 +72,7 @@ export function WalletScreen() {
 
   const onDeposit = async () => {
     try {
-      await walletService.deposit(Number(amount), method, referenceId);
+      await walletService.deposit(Number(amount), 'crypto', `REF-${Date.now()}`);
       refreshCash();
       Alert.alert('Done', 'Deposit request completed');
     } catch (error: any) {
@@ -87,22 +82,11 @@ export function WalletScreen() {
 
   const onWithdraw = async () => {
     try {
-      await walletService.withdraw(Number(amount), method);
+      await walletService.withdraw(Number(amount), 'crypto');
       refreshCash();
       Alert.alert('Done', 'Withdrawal request submitted');
     } catch (error: any) {
       Alert.alert('Wallet Error', error.message);
-    }
-  };
-
-  const onResetWallet = async () => {
-    try {
-      await walletService.resetWallet(resetToken);
-      setAmount('');
-      await refreshCash();
-      Alert.alert('Done', 'Wallet and transaction history reset');
-    } catch (error: any) {
-      Alert.alert('Reset Error', error.message);
     }
   };
 
@@ -149,12 +133,6 @@ export function WalletScreen() {
           <Card>
             <Text style={styles.label}>Deposit / Withdraw</Text>
             <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} keyboardType='numeric' />
-            <TextInput style={styles.input} value={referenceId} onChangeText={setReferenceId} placeholder='Reference ID' placeholderTextColor={palette.textSecondary} />
-            <View style={styles.row}>
-              {paymentMethods.map((m) => (
-                <Text key={m} style={[styles.pill, method === m && styles.active]} onPress={() => setMethod(m)}>{m}</Text>
-              ))}
-            </View>
             <View style={styles.actions}>
               <PrimaryButton label='Deposit' onPress={onDeposit} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
@@ -168,12 +146,6 @@ export function WalletScreen() {
               <Text key={t.id} style={styles.item}>{t.type.toUpperCase()} ${Number(t.amount).toFixed(2)} - {t.status} - {new Date(t.created_at).toLocaleDateString()}</Text>
             ))}
             {!transactions.length && <Text style={styles.item}>No transactions yet</Text>}
-          </Card>
-          <Card>
-            <Text style={styles.label}>Developer Wallet Reset</Text>
-            <Text style={styles.item}>Resets wallet balance and clears wallet transactions.</Text>
-            <TextInput style={styles.input} value={resetToken} onChangeText={setResetToken} placeholder='DEV_RESET_TOKEN' placeholderTextColor={palette.textSecondary} secureTextEntry />
-            <PrimaryButton label='Reset Wallet (Dev)' onPress={onResetWallet} variant='danger' disabled={!resetToken} />
           </Card>
         </>
       ) : (
