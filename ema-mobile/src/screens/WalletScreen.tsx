@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
@@ -26,6 +27,9 @@ export function WalletScreen() {
   const [cryptoSendAsset, setCryptoSendAsset] = useState<'ETH' | 'USDT'>('ETH');
   const [cryptoError, setCryptoError] = useState<string | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [receiveModalOpen, setReceiveModalOpen] = useState(false);
+  const [sendModalOpen, setSendModalOpen] = useState(false);
+  const [quickServicesModalOpen, setQuickServicesModalOpen] = useState(false);
 
   const refreshCash = useCallback(async () => {
     try {
@@ -189,9 +193,9 @@ export function WalletScreen() {
                   </View>
                 </View>
                 <View style={styles.quickActionsRow}>
-                  <PrimaryButton label='Receive' onPress={() => primaryWalletAddress && void onCopyAddress(primaryWalletAddress)} style={{ flex: 1 }} />
+                  <PrimaryButton label='Receive' onPress={() => setReceiveModalOpen(true)} style={{ flex: 1 }} />
                   <View style={{ width: 8 }} />
-                  <PrimaryButton label='Send' onPress={() => {}} style={{ flex: 1 }} />
+                  <PrimaryButton label='Send' onPress={() => setSendModalOpen(true)} style={{ flex: 1 }} />
                 </View>
               </Card>
 
@@ -212,33 +216,9 @@ export function WalletScreen() {
               </Card>
 
               <Card>
-                <Text style={styles.sectionTitle}>Quick Services</Text>
-                <View style={styles.serviceRow}>
-                  <Pressable style={styles.servicePill} onPress={() => primaryWalletAddress && void onCopyAddress(primaryWalletAddress)}>
-                    <Text style={styles.servicePillText}>Receive</Text>
-                  </Pressable>
-                  <Pressable style={styles.servicePill} onPress={() => setCryptoSendAsset('ETH')}>
-                    <Text style={styles.servicePillText}>Send ETH</Text>
-                  </Pressable>
-                  <Pressable style={styles.servicePill} onPress={() => setCryptoSendAsset('USDT')}>
-                    <Text style={styles.servicePillText}>Send USDT</Text>
-                  </Pressable>
-                  <Pressable style={styles.servicePill} onPress={() => Alert.alert('Swap', 'Swap is currently unavailable.')}>
-                    <Text style={styles.servicePillText}>Swap</Text>
-                  </Pressable>
-                </View>
-              </Card>
-
-              <Card>
-                <Text style={styles.sectionTitle}>Transfer</Text>
-                <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
-                <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
-                <View style={styles.row}>
-                  {(['ETH', 'USDT'] as const).map((a) => (
-                    <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
-                  ))}
-                </View>
-                <PrimaryButton label='Send on-chain' onPress={() => void onCryptoSend()} disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim()} />
+                <Text style={styles.sectionTitle}>Options</Text>
+                <Text style={styles.item}>Open quick actions to send, receive, or check services.</Text>
+                <PrimaryButton label='Open Quick Services' onPress={() => setQuickServicesModalOpen(true)} />
               </Card>
 
               <Card>
@@ -264,6 +244,111 @@ export function WalletScreen() {
           <Text style={styles.toastText}>{copyToast}</Text>
         </View>
       ) : null}
+
+      <Modal visible={receiveModalOpen} transparent animationType='fade' onRequestClose={() => setReceiveModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Receive Crypto</Text>
+            <Text style={styles.modalLabel}>Chain</Text>
+            <Text style={styles.modalValue}>Ethereum</Text>
+            <Text style={styles.modalLabel}>Address</Text>
+            <Text style={styles.modalMono}>{primaryWalletAddress || 'Not available'}</Text>
+            {primaryWalletAddress ? (
+              <View style={styles.qrWrap}>
+                <QRCode value={primaryWalletAddress} size={160} color={palette.textPrimary} backgroundColor='white' />
+              </View>
+            ) : null}
+            <View style={styles.modalButtonRow}>
+              <PrimaryButton
+                label='Copy address'
+                onPress={() => {
+                  if (primaryWalletAddress) void onCopyAddress(primaryWalletAddress);
+                }}
+                style={{ flex: 1 }}
+              />
+              <View style={{ width: 8 }} />
+              <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ flex: 1 }} />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={sendModalOpen} transparent animationType='fade' onRequestClose={() => setSendModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Send Crypto</Text>
+            <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
+            <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
+            <View style={styles.row}>
+              {(['ETH', 'USDT'] as const).map((a) => (
+                <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
+              ))}
+            </View>
+            <View style={styles.modalButtonRow}>
+              <PrimaryButton
+                label='Send on-chain'
+                onPress={async () => {
+                  await onCryptoSend();
+                  setSendModalOpen(false);
+                }}
+                disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim()}
+                style={{ flex: 1 }}
+              />
+              <View style={{ width: 8 }} />
+              <PrimaryButton label='Dismiss' onPress={() => setSendModalOpen(false)} style={{ flex: 1 }} />
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={quickServicesModalOpen} transparent animationType='fade' onRequestClose={() => setQuickServicesModalOpen(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Quick Services</Text>
+            <View style={styles.serviceRow}>
+              <Pressable
+                style={styles.servicePill}
+                onPress={() => {
+                  setQuickServicesModalOpen(false);
+                  setReceiveModalOpen(true);
+                }}
+              >
+                <Text style={styles.servicePillText}>Receive</Text>
+              </Pressable>
+              <Pressable
+                style={styles.servicePill}
+                onPress={() => {
+                  setCryptoSendAsset('ETH');
+                  setQuickServicesModalOpen(false);
+                  setSendModalOpen(true);
+                }}
+              >
+                <Text style={styles.servicePillText}>Send ETH</Text>
+              </Pressable>
+              <Pressable
+                style={styles.servicePill}
+                onPress={() => {
+                  setCryptoSendAsset('USDT');
+                  setQuickServicesModalOpen(false);
+                  setSendModalOpen(true);
+                }}
+              >
+                <Text style={styles.servicePillText}>Send USDT</Text>
+              </Pressable>
+              <Pressable
+                style={styles.servicePill}
+                onPress={() => {
+                  setQuickServicesModalOpen(false);
+                  Alert.alert('Swap', 'Swap is currently unavailable.');
+                }}
+              >
+                <Text style={styles.servicePillText}>Swap</Text>
+              </Pressable>
+            </View>
+            <PrimaryButton label='Dismiss' onPress={() => setQuickServicesModalOpen(false)} style={{ marginTop: 12 }} />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -300,6 +385,25 @@ const styles = StyleSheet.create({
   serviceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   servicePill: { borderRadius: 999, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surfaceElevated, paddingVertical: 10, paddingHorizontal: 14 },
   servicePillText: { color: palette.textPrimary, fontWeight: '600' },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  modalCard: {
+    backgroundColor: palette.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: 16,
+  },
+  modalTitle: { color: palette.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 10 },
+  modalLabel: { color: palette.textSecondary, marginTop: 6, marginBottom: 2, fontSize: 13 },
+  modalValue: { color: palette.textPrimary, fontWeight: '600' },
+  modalMono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12 },
+  qrWrap: { alignItems: 'center', marginVertical: 12 },
+  modalButtonRow: { flexDirection: 'row', marginTop: 8 },
   toastWrap: {
     position: 'absolute',
     left: 16,

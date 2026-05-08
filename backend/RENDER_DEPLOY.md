@@ -83,7 +83,13 @@ Optional: `TATUM_ETH_MASTER_XPUB` is no longer required for the app runtime (xpu
 
 Smoke test after deploy: `npm run check:tatum` from `backend` with `CHECK_BASE_URL`, `CHECK_EMAIL`, and `CHECK_PASSWORD` set.
 
-## 7) Production hardening checklist
+## 7) Airfarming, contracts, and daily accrual cron
+
+Run `backend/sql/schema.sql` (or `backend/sql/migrate_airfarming_contracts.sql` on an existing DB) so these tables exist: `airfarming_state`, `airfarming_events`, `contract_wallets`, `contract_accruals`.
+
+- **`INTERNAL_CRON_SECRET`** — shared secret for `POST /internal/contracts/daily-accrue`. Send header `x-internal-cron-secret: <value>` or JSON body `{ "secret": "<value>" }`. Configure a Render **Cron Job** (or external scheduler) to call this once per day in UTC so contract balances accrue **2%** per day (idempotent per user per UTC date).
+
+## 8) Production hardening checklist
 
 - Disable or strictly guard dev-only endpoints (`/wallet/reset`)
 - Rotate secrets if they were ever shared in plain text

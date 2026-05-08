@@ -25,6 +25,8 @@ const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
 const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
 
 const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
+const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
+const { registerContractRoutes } = require('./contractRoutes');
 
 const app = express();
 app.use(cors());
@@ -328,6 +330,8 @@ app.post('/alpaca/orders', async (req, res) => {
 });
 
 registerCryptoRoutes(app, { authMiddleware });
+registerAirfarmingRoutes(app, { authMiddleware });
+registerContractRoutes(app, { authMiddleware });
 
 app.get('/wallet', authMiddleware, async (req, res) => {
   try {

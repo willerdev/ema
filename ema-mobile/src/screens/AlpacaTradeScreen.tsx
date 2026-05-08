@@ -8,7 +8,7 @@ import { useTradingStore } from '../store/useTradingStore';
 import { OrderType, TradeSide } from '../types';
 import { palette } from '../theme/colors';
 
-export function TradesScreen() {
+export function AlpacaTradeScreen() {
   const { quote, positions, orders, setQuoteSymbol, refreshTrades, tradesError } = useTradingStore();
   const [search, setSearch] = useState('AAPL');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -87,7 +87,9 @@ export function TradesScreen() {
         <Text style={styles.label}>Search Stocks / Crypto</Text>
         <TextInput style={styles.input} value={search} onChangeText={onSearch} autoCapitalize='characters' />
         {suggestions.map((asset) => (
-          <Text key={asset.id || asset.symbol} style={styles.suggestion} onPress={() => setSearch(asset.symbol)}>{asset.symbol} - {asset.name || asset.class}</Text>
+          <Text key={asset.id || asset.symbol} style={styles.suggestion} onPress={() => setSearch(asset.symbol)}>
+            {asset.symbol} - {asset.name || asset.class}
+          </Text>
         ))}
       </Card>
 
@@ -101,20 +103,23 @@ export function TradesScreen() {
       </Card>
 
       <Card>
-        <Text style={styles.label}>Trade Ticket</Text>
-        <Text style={styles.meta}>
-          {alpacaConfigured
-            ? 'Open the modal ticket to place advanced orders with stop-loss/take-profit.'
-            : 'Configure Alpaca API keys in Settings to enable live trading.'}
-        </Text>
-        <PrimaryButton label='Open Trade Ticket' onPress={() => setTicketOpen(true)} disabled={!alpacaConfigured} />
+        <Text style={styles.label}>Quick trade</Text>
+        <Text style={styles.meta}>Market order for current symbol ({search}).</Text>
+        <View style={styles.row}>
+          <PrimaryButton label='Buy' onPress={() => { setSide('buy'); setOrderType('market'); setTicketOpen(true); }} variant='success' disabled={!alpacaConfigured} style={{ flex: 1 }} />
+          <View style={{ width: 8 }} />
+          <PrimaryButton label='Sell' onPress={() => { setSide('sell'); setOrderType('market'); setTicketOpen(true); }} variant='danger' disabled={!alpacaConfigured} style={{ flex: 1 }} />
+        </View>
+        <PrimaryButton label='Advanced ticket' onPress={() => setTicketOpen(true)} disabled={!alpacaConfigured} style={{ marginTop: 8 }} />
       </Card>
 
       <Card>
         <Text style={styles.label}>Open Positions</Text>
         {positions.map((p) => (
           <View key={p.symbol} style={styles.positionRow}>
-            <Text style={styles.positionText}>{p.symbol} ({p.qty})</Text>
+            <Text style={styles.positionText}>
+              {p.symbol} ({p.qty})
+            </Text>
             <Text style={{ color: Number(p.unrealized_pl || 0) >= 0 ? palette.success : palette.danger }}>${Number(p.unrealized_pl || 0).toFixed(2)}</Text>
           </View>
         ))}
@@ -123,9 +128,14 @@ export function TradesScreen() {
 
       <Card>
         <Text style={styles.label}>Order History</Text>
-        {orders.slice(0, 10).map((o) => <Text key={o.id} style={styles.meta}>{o.symbol} {o.side} x{o.qty} ({o.status})</Text>)}
+        {orders.slice(0, 10).map((o) => (
+          <Text key={o.id} style={styles.meta}>
+            {o.symbol} {o.side} x{o.qty} ({o.status})
+          </Text>
+        ))}
         {!orders.length && <Text style={styles.meta}>No orders yet</Text>}
       </Card>
+
       <Modal visible={ticketOpen} animationType='slide' transparent>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalContent}>
@@ -136,9 +146,15 @@ export function TradesScreen() {
               <PrimaryButton label='SELL' onPress={() => setSide('sell')} variant='danger' style={{ flex: 1 }} />
             </View>
             <View style={styles.rowPills}>
-              <Text style={[styles.pill, orderType === 'market' && styles.active]} onPress={() => setOrderType('market')}>Market</Text>
-              <Text style={[styles.pill, orderType === 'limit' && styles.active]} onPress={() => setOrderType('limit')}>Limit</Text>
-              <Text style={[styles.pill, orderType === 'stop' && styles.active]} onPress={() => setOrderType('stop')}>Stop</Text>
+              <Text style={[styles.pill, orderType === 'market' && styles.active]} onPress={() => setOrderType('market')}>
+                Market
+              </Text>
+              <Text style={[styles.pill, orderType === 'limit' && styles.active]} onPress={() => setOrderType('limit')}>
+                Limit
+              </Text>
+              <Text style={[styles.pill, orderType === 'stop' && styles.active]} onPress={() => setOrderType('stop')}>
+                Stop
+              </Text>
             </View>
             <TextInput style={styles.input} value={qty} onChangeText={setQty} placeholder='Quantity' placeholderTextColor={palette.textSecondary} keyboardType='numeric' />
             {(orderType === 'limit' || orderType === 'stop') && (

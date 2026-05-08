@@ -6,6 +6,21 @@ export type RootTabParamList = {
   Settings: undefined;
 };
 
+export type RootStackParamList = {
+  MainTabs: undefined;
+  AlpacaTrade: undefined;
+  AirfarmingTrade: undefined;
+  ContractsTrade: undefined;
+};
+
+export type ActivityFeedItem = {
+  id: string;
+  title: string;
+  subtitle: string;
+  amountLabel?: string;
+  kind: 'alpaca_order' | 'crypto_tx' | 'placeholder';
+};
+
 export type TradeSide = 'buy' | 'sell';
 export type OrderType = 'market' | 'limit' | 'stop';
 

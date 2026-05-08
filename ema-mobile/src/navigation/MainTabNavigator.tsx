@@ -1,14 +1,11 @@
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
-import { ActivityIndicator, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeScreen } from '../screens/HomeScreen';
-import { TradesScreen } from '../screens/TradesScreen';
+import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
 import { MT5Screen } from '../screens/MT5Screen';
 import { SettingsScreen } from '../screens/SettingsScreen';
-import { AuthScreen } from '../screens/AuthScreen';
-import { useAuth } from '../context/AuthContext';
 import { palette } from '../theme/colors';
 import { RootTabParamList } from '../types';
 
@@ -30,21 +27,8 @@ const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.gly
   Settings: 'settings-outline',
 };
 
-export function AppNavigator() {
-  const { user, loading } = useAuth();
+export function MainTabNavigator() {
   const insets = useSafeAreaInsets();
-
-  if (loading) {
-    return (
-      <View style={{ flex: 1, backgroundColor: palette.background, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator color={palette.primary} />
-      </View>
-    );
-  }
-
-  if (!user) {
-    return <AuthScreen />;
-  }
 
   return (
     <Tab.Navigator
@@ -69,7 +53,7 @@ export function AppNavigator() {
       })}
     >
       <Tab.Screen name='Home' component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
-      <Tab.Screen name='Trades' component={TradesScreen} options={{ tabBarLabel: 'Trades' }} />
+      <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
       <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
       <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
       <Tab.Screen name='Settings' component={SettingsScreen} options={{ tabBarLabel: 'Settings' }} />
