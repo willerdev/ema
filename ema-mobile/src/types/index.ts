@@ -65,9 +65,8 @@ export interface WalletTransaction {
 }
 
 export interface CryptoBalanceRow {
-  currency: string;
-  accountBalance: string;
-  availableBalance: string;
+  asset: string;
+  balance: string;
 }
 
 export interface CryptoActivityRow {

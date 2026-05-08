@@ -8,12 +8,6 @@ function getApiKey() {
   return key;
 }
 
-function getMasterXpub() {
-  const xpub = process.env.TATUM_ETH_MASTER_XPUB;
-  if (!xpub) throw new Error('TATUM_ETH_MASTER_XPUB is not configured');
-  return xpub;
-}
-
 function getMasterMnemonic() {
   const m = process.env.TATUM_ETH_MASTER_MNEMONIC;
   if (!m) throw new Error('TATUM_ETH_MASTER_MNEMONIC is not configured');
@@ -48,57 +42,6 @@ async function tatumFetch(path, { method = 'GET', body } = {}) {
   return data;
 }
 
-function createLedgerAccountEth({ externalId, accountingCurrency = 'USD' }) {
-  return tatumFetch('/v3/ledger/account', {
-    method: 'POST',
-    body: {
-      currency: 'ETH',
-      xpub: getMasterXpub(),
-      customer: { externalId, accountingCurrency },
-    },
-  });
-}
-
-function createLedgerAccountUsdt({ externalId, accountingCurrency = 'USD' }) {
-  return tatumFetch('/v3/ledger/account', {
-    method: 'POST',
-    body: {
-      currency: 'USDT',
-      xpub: getMasterXpub(),
-      customer: { externalId, accountingCurrency },
-    },
-  });
-}
-
-function generateDepositAddress(accountId, index) {
-  const q = typeof index === 'number' ? `?index=${index}` : '';
-  return tatumFetch(`/v3/offchain/account/${accountId}/address${q}`, { method: 'POST' });
-}
-
-function getAccountBalance(accountId) {
-  return tatumFetch(`/v3/ledger/account/${accountId}/balance`);
-}
-
-function ethTransferFromVirtualAccount(payload) {
-  return tatumFetch('/v3/offchain/ethereum/transfer', {
-    method: 'POST',
-    body: {
-      ...payload,
-      mnemonic: getMasterMnemonic(),
-    },
-  });
-}
-
-function erc20TransferFromVirtualAccount(payload) {
-  return tatumFetch('/v3/offchain/ethereum/erc20/transfer', {
-    method: 'POST',
-    body: {
-      ...payload,
-      mnemonic: getMasterMnemonic(),
-    },
-  });
-}
-
 function createSubscriptionV4(body) {
   return tatumFetch('/v4/subscription', { method: 'POST', body });
 }
@@ -130,15 +73,8 @@ function incomingFungibleSubscription({ address, webhookUrl }) {
 module.exports = {
   USDT_ETHEREUM_MAINNET,
   getApiKey,
-  getMasterXpub,
   getMasterMnemonic,
   tatumFetch,
-  createLedgerAccountEth,
-  createLedgerAccountUsdt,
-  generateDepositAddress,
-  getAccountBalance,
-  ethTransferFromVirtualAccount,
-  erc20TransferFromVirtualAccount,
   incomingNativeSubscription,
   incomingFungibleSubscription,
 };

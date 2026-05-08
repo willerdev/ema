@@ -169,10 +169,10 @@ export function WalletScreen() {
               </Card>
 
               <Card>
-                <Text style={styles.label}>Balances (Tatum ledger)</Text>
+                <Text style={styles.label}>Balances (on-chain)</Text>
                 {cryptoSummary.balances.map((b) => (
-                  <Text key={b.currency} style={styles.item}>
-                    {b.currency}: available {b.availableBalance} (account {b.accountBalance})
+                  <Text key={b.asset} style={styles.item}>
+                    {b.asset}: {b.balance}
                   </Text>
                 ))}
                 {!cryptoSummary.balances.length && <Text style={styles.item}>No balance data</Text>}

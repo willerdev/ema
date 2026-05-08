@@ -1,24 +1,23 @@
 const crypto = require('crypto');
 const { ethers } = require('ethers');
 const {
-  upsertTatumCryptoProfile,
-  listTatumVirtualAccountsByUserId,
-  insertTatumVirtualAccount,
-  getTatumVirtualAccountByUserAndCurrency,
+  getCryptoEthereumWalletByUserId,
+  getNextCryptoEthereumDerivationIndex,
+  insertCryptoEthereumWallet,
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
   isMissingTableError,
 } = require('./db');
 const tatum = require('./services/tatumClient');
-
-const CHAIN = 'ETHEREUM';
+const ethWallet = require('./services/ethWallet');
+const ethChain = require('./services/ethChain');
 
 function cryptoConfigured() {
   try {
     tatum.getApiKey();
-    tatum.getMasterXpub();
     tatum.getMasterMnemonic();
+    ethChain.getProvider();
     return true;
   } catch {
     return false;
@@ -68,62 +67,24 @@ async function ensureSubscriptionsForAddress(address) {
   }
 }
 
-async function provisionUserCryptoAccounts(userId) {
-  let ethRow = await getTatumVirtualAccountByUserAndCurrency(userId, 'ETH');
-  let usdtRow = await getTatumVirtualAccountByUserAndCurrency(userId, 'USDT');
-
-  if (ethRow && usdtRow) {
-    await ensureSubscriptionsForAddress(ethRow.deposit_address);
-    return { ethRow, usdtRow };
+async function provisionUserEthereumWallet(userId) {
+  const existing = await getCryptoEthereumWalletByUserId(userId);
+  if (existing) {
+    await ensureSubscriptionsForAddress(existing.address);
+    return existing;
   }
 
-  if (!ethRow && usdtRow) {
-    throw new Error('Inconsistent crypto wallet state (USDT without ETH). Contact support.');
-  }
+  const mnemonic = tatum.getMasterMnemonic();
+  const derivationIndex = await getNextCryptoEthereumDerivationIndex();
+  const address = ethers.getAddress(ethWallet.deriveAddress(mnemonic, derivationIndex));
 
-  let derivationIndex;
-
-  if (!ethRow) {
-    const ethAccount = await tatum.createLedgerAccountEth({
-      externalId: String(userId),
-      accountingCurrency: 'USD',
-    });
-    if (ethAccount.customerId) await upsertTatumCryptoProfile(userId, ethAccount.customerId);
-    const ethDeposit = await tatum.generateDepositAddress(ethAccount.id);
-    derivationIndex = ethDeposit.derivationKey ?? ethDeposit.index ?? 0;
-    ethRow = await insertTatumVirtualAccount({
-      id: newId(),
-      user_id: userId,
-      currency: 'ETH',
-      chain: CHAIN,
-      tatum_account_id: ethAccount.id,
-      deposit_address: ethDeposit.address,
-      derivation_index: derivationIndex,
-    });
-  } else {
-    derivationIndex = ethRow.derivation_index;
-  }
-
-  if (!usdtRow) {
-    const usdtAccount = await tatum.createLedgerAccountUsdt({
-      externalId: String(userId),
-      accountingCurrency: 'USD',
-    });
-    if (usdtAccount.customerId) await upsertTatumCryptoProfile(userId, usdtAccount.customerId);
-    const usdtDeposit = await tatum.generateDepositAddress(usdtAccount.id, derivationIndex);
-    usdtRow = await insertTatumVirtualAccount({
-      id: newId(),
-      user_id: userId,
-      currency: 'USDT',
-      chain: CHAIN,
-      tatum_account_id: usdtAccount.id,
-      deposit_address: usdtDeposit.address,
-      derivation_index: usdtDeposit.derivationKey ?? derivationIndex,
-    });
-  }
-
-  await ensureSubscriptionsForAddress(ethRow.deposit_address);
-  return { ethRow, usdtRow };
+  const row = await insertCryptoEthereumWallet({
+    user_id: userId,
+    derivation_index: derivationIndex,
+    address,
+  });
+  await ensureSubscriptionsForAddress(row.address);
+  return row;
 }
 
 function formatAmountDisplay(asset, rawValueStr) {
@@ -205,23 +166,20 @@ async function handleTatumWebhook(req, res) {
 
 function registerCryptoRoutes(app, { authMiddleware }) {
   const schemaErrorMessage =
-    'Crypto DB schema is not initialized. Run backend/sql/schema.sql in Supabase SQL editor to create tatum_* tables.';
+    'Crypto DB schema is not initialized. Run backend/sql/schema.sql in Supabase SQL editor to create crypto_ethereum_wallets and tatum_onchain_txs.';
+
+  const notConfiguredMessage =
+    'Crypto is not configured. Set TATUM_API_KEY, TATUM_ETH_MASTER_MNEMONIC, ETHEREUM_RPC_URL, and APP_BASE_URL (for webhooks) on the server.';
 
   app.post('/crypto/onboard', authMiddleware, async (req, res) => {
     try {
       if (!cryptoConfigured()) {
-        return res.status(503).json({
-          message:
-            'Crypto is not configured. Set TATUM_API_KEY, TATUM_ETH_MASTER_XPUB, and TATUM_ETH_MASTER_MNEMONIC on the server.',
-        });
+        return res.status(503).json({ message: notConfiguredMessage });
       }
-      const { ethRow, usdtRow } = await provisionUserCryptoAccounts(req.userId);
+      const wallet = await provisionUserEthereumWallet(req.userId);
       return res.json({
-        depositAddress: ethRow.deposit_address,
-        accounts: [
-          { currency: 'ETH', tatumAccountId: ethRow.tatum_account_id, derivationIndex: ethRow.derivation_index },
-          { currency: 'USDT', tatumAccountId: usdtRow.tatum_account_id, derivationIndex: usdtRow.derivation_index },
-        ],
+        depositAddress: wallet.address,
+        derivationIndex: wallet.derivation_index,
       });
     } catch (e) {
       if (isMissingTableError(e)) {
@@ -236,15 +194,10 @@ function registerCryptoRoutes(app, { authMiddleware }) {
   app.get('/crypto/summary', authMiddleware, async (req, res) => {
     try {
       if (!cryptoConfigured()) {
-        return res.status(503).json({
-          message:
-            'Crypto is not configured. Set TATUM_API_KEY, TATUM_ETH_MASTER_XPUB, and TATUM_ETH_MASTER_MNEMONIC on the server.',
-        });
+        return res.status(503).json({ message: notConfiguredMessage });
       }
-      const rows = (await listTatumVirtualAccountsByUserId(req.userId)).sort((a, b) =>
-        String(a.currency).localeCompare(String(b.currency))
-      );
-      if (!rows.length) {
+      const wallet = await getCryptoEthereumWalletByUserId(req.userId);
+      if (!wallet) {
         return res.json({
           onboarded: false,
           depositAddress: null,
@@ -253,24 +206,29 @@ function registerCryptoRoutes(app, { authMiddleware }) {
           swap: { enabled: false, message: 'Swap is not available yet (phase 2).' },
         });
       }
-      const depositAddress = rows[0]?.deposit_address || null;
-      const balances = [];
-      for (const row of rows) {
-        try {
-          const b = await tatum.getAccountBalance(row.tatum_account_id);
-          balances.push({
-            currency: row.currency,
-            accountBalance: b.accountBalance,
-            availableBalance: b.availableBalance,
-          });
-        } catch {
-          balances.push({ currency: row.currency, accountBalance: '0', availableBalance: '0' });
-        }
+
+      let ethBalance = '0';
+      let usdtBalance = '0';
+      try {
+        ethBalance = await ethChain.getEthBalanceFormatted(wallet.address);
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') console.warn('ETH balance:', e.message);
       }
+      try {
+        usdtBalance = await ethChain.getUsdtBalanceFormatted(wallet.address);
+      } catch (e) {
+        if (process.env.NODE_ENV !== 'production') console.warn('USDT balance:', e.message);
+      }
+
+      const balances = [
+        { asset: 'ETH', balance: ethBalance },
+        { asset: 'USDT', balance: usdtBalance },
+      ];
+
       const activity = await listTatumOnchainTxsByUserId(req.userId, 40);
       return res.json({
         onboarded: true,
-        depositAddress,
+        depositAddress: wallet.address,
         balances,
         activity: activity.map((t) => ({
           id: t.id,
@@ -297,10 +255,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
   app.post('/crypto/send', authMiddleware, async (req, res) => {
     try {
       if (!cryptoConfigured()) {
-        return res.status(503).json({
-          message:
-            'Crypto is not configured. Set TATUM_API_KEY, TATUM_ETH_MASTER_XPUB, and TATUM_ETH_MASTER_MNEMONIC on the server.',
-        });
+        return res.status(503).json({ message: notConfiguredMessage });
       }
       const { to, amount, asset } = req.body || {};
       const upper = String(asset || '').toUpperCase();
@@ -309,48 +264,44 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       }
       if (!ethers.isAddress(to)) return res.status(400).json({ message: 'Invalid recipient address' });
 
-      const va = await getTatumVirtualAccountByUserAndCurrency(req.userId, upper);
-      if (!va) return res.status(400).json({ message: 'Crypto wallet not onboarded. Call POST /crypto/onboard first.' });
-
-      const checksumTo = ethers.getAddress(to);
-      let result;
-
-      if (upper === 'ETH') {
-        result = await tatum.ethTransferFromVirtualAccount({
-          senderAccountId: va.tatum_account_id,
-          address: checksumTo,
-          amount: String(amount),
-          index: Number(va.derivation_index),
-        });
-      } else {
-        const units = ethers.parseUnits(String(amount), 6).toString();
-        result = await tatum.erc20TransferFromVirtualAccount({
-          senderAccountId: va.tatum_account_id,
-          address: checksumTo,
-          amount: units,
-          index: Number(va.derivation_index),
-        });
+      const wallet = await getCryptoEthereumWalletByUserId(req.userId);
+      if (!wallet) {
+        return res.status(400).json({ message: 'Crypto wallet not onboarded. Call POST /crypto/onboard first.' });
       }
 
-      const txHash = result.txId || result.id;
+      const checksumTo = ethers.getAddress(to);
+      const mnemonic = tatum.getMasterMnemonic();
+      const provider = ethChain.getProvider();
+      const signer = ethWallet.getSignerAtIndex(mnemonic, Number(wallet.derivation_index), provider);
+
+      let txHash;
+      if (upper === 'ETH') {
+        const out = await ethChain.sendNativeEth(signer, checksumTo, String(amount));
+        txHash = out.txHash;
+      } else {
+        const out = await ethChain.sendErc20Usdt(signer, checksumTo, String(amount));
+        txHash = out.txHash;
+      }
+
+      const dedupeKey = `out:${txHash}:${upper}`;
       await insertTatumOnchainTx({
         id: newId(),
         user_id: req.userId,
         direction: 'out',
         asset: upper,
         amount_display: String(amount),
-        tx_hash: txHash || `pending-${result.id}`,
+        tx_hash: txHash,
         log_index: null,
-        from_address: va.deposit_address,
+        from_address: wallet.address,
         to_address: checksumTo,
-        status: result.completed === false ? 'pending' : 'confirmed',
-        dedupe_key: `out:${result.id}:${upper}`,
+        status: 'pending',
+        dedupe_key: dedupeKey,
       });
 
       return res.json({
-        id: result.id,
-        txId: result.txId,
-        completed: result.completed,
+        id: txHash,
+        txId: txHash,
+        completed: false,
       });
     } catch (e) {
       if (isMissingTableError(e)) {

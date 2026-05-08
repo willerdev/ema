@@ -171,62 +171,49 @@ async function updateMt5AccountSnapshot(userId, accountId, snapshot) {
 }
 
 async function checkDatabaseHealth() {
-  const [usersResult, walletsResult, transactionsResult, mt5Result, tatumVaResult] = await Promise.all([
+  const [usersResult, walletsResult, transactionsResult, mt5Result, cryptoEthResult] = await Promise.all([
     supabase.from('users').select('*').limit(1),
     supabase.from('wallets').select('*').limit(1),
     supabase.from('transactions').select('*').limit(1),
     supabase.from('mt5_accounts').select('*').limit(1),
-    supabase.from('tatum_virtual_accounts').select('*').limit(1),
+    supabase.from('crypto_ethereum_wallets').select('*').limit(1),
   ]);
-  const tatumError = tatumVaResult?.error;
+  const cryptoError = cryptoEthResult?.error;
   const firstError = usersResult.error || walletsResult.error || transactionsResult.error || mt5Result?.error;
   if (firstError) throw firstError;
-  if (tatumError && !isMissingTableError(tatumError)) throw tatumError;
+  if (cryptoError && !isMissingTableError(cryptoError)) throw cryptoError;
 
   return {
     users: usersResult.data?.length ?? 0,
     wallets: walletsResult.data?.length ?? 0,
     transactions: transactionsResult.data?.length ?? 0,
     mt5_accounts: mt5Result?.data?.length ?? 0,
-    tatum_virtual_accounts: tatumError ? null : tatumVaResult?.data?.length ?? 0,
-    tatum_schema_ready: !tatumError,
+    crypto_ethereum_wallets: cryptoError ? null : cryptoEthResult?.data?.length ?? 0,
+    crypto_wallets_schema_ready: !cryptoError,
   };
 }
 
-async function upsertTatumCryptoProfile(userId, tatumCustomerId) {
-  const { data, error } = await supabase
-    .from('tatum_crypto_profiles')
-    .upsert({ user_id: userId, tatum_customer_id: tatumCustomerId || null }, { onConflict: 'user_id' })
-    .select('*')
-    .single();
+async function getCryptoEthereumWalletByUserId(userId) {
+  const { data, error } = await supabase.from('crypto_ethereum_wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
   return data;
 }
 
-async function listTatumVirtualAccountsByUserId(userId) {
+async function getNextCryptoEthereumDerivationIndex() {
   const { data, error } = await supabase
-    .from('tatum_virtual_accounts')
-    .select('*')
-    .eq('user_id', userId)
-    .order('currency', { ascending: true });
-  if (error) throw error;
-  return data || [];
-}
-
-async function insertTatumVirtualAccount(row) {
-  const { data, error } = await supabase.from('tatum_virtual_accounts').insert(row).select('*').single();
-  if (error) throw error;
-  return data;
-}
-
-async function getTatumVirtualAccountByUserAndCurrency(userId, currency) {
-  const { data, error } = await supabase
-    .from('tatum_virtual_accounts')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('currency', currency)
-    .eq('chain', 'ETHEREUM')
+    .from('crypto_ethereum_wallets')
+    .select('derivation_index')
+    .order('derivation_index', { ascending: false })
+    .limit(1)
     .maybeSingle();
+  if (error) throw error;
+  const max = data?.derivation_index;
+  if (max === undefined || max === null) return 0;
+  return Number(max) + 1;
+}
+
+async function insertCryptoEthereumWallet(row) {
+  const { data, error } = await supabase.from('crypto_ethereum_wallets').insert(row).select('*').single();
   if (error) throw error;
   return data;
 }
@@ -235,9 +222,9 @@ async function findUserIdByDepositAddress(address) {
   if (!address) return null;
   const normalized = String(address).toLowerCase();
   const { data, error } = await supabase
-    .from('tatum_virtual_accounts')
+    .from('crypto_ethereum_wallets')
     .select('user_id')
-    .ilike('deposit_address', normalized)
+    .ilike('address', normalized)
     .limit(1)
     .maybeSingle();
   if (error) throw error;
@@ -280,10 +267,9 @@ module.exports = {
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
   checkDatabaseHealth,
-  upsertTatumCryptoProfile,
-  listTatumVirtualAccountsByUserId,
-  insertTatumVirtualAccount,
-  getTatumVirtualAccountByUserAndCurrency,
+  getCryptoEthereumWalletByUserId,
+  getNextCryptoEthereumDerivationIndex,
+  insertCryptoEthereumWallet,
   findUserIdByDepositAddress,
   insertTatumOnchainTx,
   listTatumOnchainTxsByUserId,
