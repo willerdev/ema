@@ -112,6 +112,21 @@ function normalizeHash(txHash) {
   return t.toLowerCase();
 }
 
+function cryptoSafeMessage(error, fallback) {
+  const raw = String(error?.message || fallback || 'Crypto operation failed');
+  const lower = raw.toLowerCase();
+  if (lower.includes('too many requests') || lower.includes('429') || lower.includes('exceeded maximum retry limit')) {
+    return 'Provider rate limit reached. Please retry in about 1 minute.';
+  }
+  if (lower.includes('missing revert data') || lower.includes('call_exception')) {
+    return 'Operation failed on-chain. Check token balance and ETH gas, then retry.';
+  }
+  if (lower.includes('insufficient funds')) {
+    return 'Insufficient funds for this transfer (token amount and/or ETH gas).';
+  }
+  return fallback || 'Crypto operation failed';
+}
+
 function shouldRefreshBalances(wallet, force = false) {
   if (force) return true;
   const ts = wallet?.balances_updated_at ? Date.parse(wallet.balances_updated_at) : NaN;
@@ -435,7 +450,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       if (isMissingTableError(e)) {
         return res.status(503).json({ message: schemaErrorMessage });
       }
-      return res.status(500).json({ message: e?.message || 'Balance refresh failed' });
+      return res.status(500).json({ message: cryptoSafeMessage(e, 'Balance refresh failed') });
     }
   });
 
@@ -466,6 +481,10 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         const out = await ethChain.sendNativeEth(signer, checksumTo, String(amount));
         txHash = out.txHash;
       } else {
+        const tracked = await getTrackedUsdtBalanceByUserId(req.userId);
+        if (Number(tracked || 0) > 0 && Number(amount) > Number(tracked)) {
+          return res.status(400).json({ message: 'Insufficient USDT balance for this transfer.' });
+        }
         const out = await ethChain.sendErc20Usdt(signer, checksumTo, String(amount));
         txHash = out.txHash;
       }
@@ -499,7 +518,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       if (isMissingTableError(e)) {
         return res.status(503).json({ message: schemaErrorMessage });
       }
-      const msg = e?.message || 'Send failed';
+      const msg = cryptoSafeMessage(e, 'Send failed');
       const status = e?.status && e.status < 600 ? e.status : 500;
       return res.status(status).json({ message: msg });
     }
@@ -570,7 +589,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       if (isMissingTableError(e)) {
         return res.status(503).json({ message: schemaErrorMessage });
       }
-      const msg = e?.message || 'Reconcile failed';
+      const msg = cryptoSafeMessage(e, 'Reconcile failed');
       return res.status(500).json({ message: msg });
     }
   });

@@ -51,14 +51,14 @@ export function WalletScreen() {
           await cryptoWalletService.onboard();
           summary = await cryptoWalletService.getSummary();
         } catch (e: any) {
-          setCryptoError(e?.message || 'Crypto onboarding failed');
+          setCryptoError(sanitizeCryptoError(e?.message || 'Crypto onboarding failed'));
           setCryptoSummary(null);
           return;
         }
       }
       setCryptoSummary(summary);
     } catch (e: any) {
-      setCryptoError(e?.message || 'Failed to load crypto wallet');
+      setCryptoError(sanitizeCryptoError(e?.message || 'Failed to load crypto wallet'));
       setCryptoSummary(null);
     }
   }, []);
@@ -115,9 +115,24 @@ export function WalletScreen() {
       await refreshCrypto();
       Alert.alert('Sent', r.txId ? `Tx: ${r.txId}` : 'Transaction submitted');
     } catch (e: any) {
-      setCryptoError(e?.message || 'Send failed');
+      setCryptoError(sanitizeCryptoError(e?.message || 'Send failed'));
     }
   };
+
+  function sanitizeCryptoError(raw: string) {
+    const text = String(raw || '');
+    const lower = text.toLowerCase();
+    if (lower.includes('too many requests') || lower.includes('429') || lower.includes('exceeded maximum retry limit')) {
+      return 'Provider rate limit reached. Please wait about 1 minute and tap Retry.';
+    }
+    if (lower.includes('missing revert data') || lower.includes('call_exception')) {
+      return 'Transfer failed on-chain. Check USDT amount and ETH gas, then retry.';
+    }
+    if (lower.includes('missing token') || lower.includes('unauthorized') || lower.includes('401')) {
+      return 'Your session expired. Please log in again.';
+    }
+    return text.length > 180 ? 'Crypto service is temporarily unavailable. Please retry shortly.' : text;
+  }
 
   const primaryWalletAddress = cryptoSummary?.depositAddress || cryptoSummary?.wallets?.[0]?.address || null;
   const ethBalance = cryptoSummary?.balances.find((b) => b.asset === 'ETH')?.balance || '0';
