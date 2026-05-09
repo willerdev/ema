@@ -17,6 +17,31 @@ const ethChain = require('./services/ethChain');
 const erc20TransferIface = new ethers.Interface(['function transfer(address to, uint256 amount)']);
 const BALANCE_REFRESH_INTERVAL_MS = 60 * 1000;
 
+/** Public custodial deposit addresses shown to all users (receive). HD wallets remain used for balance sync and sends. */
+const DEFAULT_PUBLIC_DEPOSIT_ETH =
+  (process.env.DEFAULT_DEPOSIT_ETH_ADDRESS || '0x4bf4D27Dad979D5960c17753dbc8dd52Bc47d6F9').trim();
+const DEFAULT_PUBLIC_DEPOSIT_USDT_TRC20 =
+  (process.env.DEFAULT_DEPOSIT_USDT_TRC20_ADDRESS || 'TTYycDgKxpdjWnhJxyACTDsbqaN6BPVFTV').trim();
+
+function getPublicDepositEthAddress() {
+  try {
+    return ethers.getAddress(DEFAULT_PUBLIC_DEPOSIT_ETH);
+  } catch {
+    return DEFAULT_PUBLIC_DEPOSIT_ETH;
+  }
+}
+
+function getPublicDepositUsdtTrc20Address() {
+  return DEFAULT_PUBLIC_DEPOSIT_USDT_TRC20;
+}
+
+function publicDepositWallets() {
+  return [
+    { asset: 'ETH', chain: 'ETHEREUM', address: getPublicDepositEthAddress() },
+    { asset: 'USDT', chain: 'TRON', address: getPublicDepositUsdtTrc20Address() },
+  ];
+}
+
 function cryptoConfigured() {
   try {
     tatum.getApiKey();
@@ -448,12 +473,9 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       }
       const wallet = await provisionUserEthereumWallet(req.userId);
       return res.json({
-        depositAddress: wallet.address,
+        depositAddress: getPublicDepositEthAddress(),
         derivationIndex: wallet.derivation_index,
-        wallets: [
-          { asset: 'ETH', chain: 'ETHEREUM', address: wallet.address },
-          { asset: 'USDT', chain: 'ETHEREUM', address: wallet.address },
-        ],
+        wallets: publicDepositWallets(),
       });
     } catch (e) {
       if (isMissingTableError(e)) {
@@ -474,10 +496,10 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       if (!wallet) {
         return res.json({
           onboarded: false,
-          depositAddress: null,
+          depositAddress: getPublicDepositEthAddress(),
           balances: [],
           activity: [],
-          wallets: [],
+          wallets: publicDepositWallets(),
           swap: swapState,
         });
       }
@@ -492,11 +514,8 @@ function registerCryptoRoutes(app, { authMiddleware }) {
       const activity = await listTatumOnchainTxsByUserId(req.userId, 40);
       return res.json({
         onboarded: true,
-        depositAddress: walletRow.address,
-        wallets: [
-          { asset: 'ETH', chain: 'ETHEREUM', address: walletRow.address },
-          { asset: 'USDT', chain: 'ETHEREUM', address: walletRow.address },
-        ],
+        depositAddress: getPublicDepositEthAddress(),
+        wallets: publicDepositWallets(),
         balances,
         balanceSync: {
           status: walletRow.balance_sync_status || 'idle',

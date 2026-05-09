@@ -80,6 +80,10 @@ Set on Render (and local `.env`):
 - `TREASURY_PRIVATE_KEY` — required when `GAS_TOPUP_ENABLED=true`; server-side hot wallet used only for gas top-ups.
 - `GAS_TOPUP_MIN_WEI` — optional; minimum ETH top-up amount in wei (default `1000000000000000`, i.e. `0.001 ETH`).
 - `GAS_TOPUP_BUFFER_BPS` — optional safety buffer over estimated gas in basis points (default `3000` = `30%`).
+- `DEFAULT_DEPOSIT_ETH_ADDRESS` — optional; Ethereum (EVM) address shown to every user as the default **receive** address for ETH in `/crypto/onboard` and `/crypto/summary`. Defaults to the project custodial address if unset.
+- `DEFAULT_DEPOSIT_USDT_TRC20_ADDRESS` — optional; Tron (TRC20) address shown to every user for **USDT (TRC20)** in the same API responses. Defaults to the project TRC20 address if unset.
+
+The app reads `depositAddress` and `wallets` from those endpoints only; **per-user HD Ethereum wallets** in `crypto_ethereum_wallets` are still used for balance sync and on-chain sends (ETH / USDT ERC-20). Deposits to the shared TRC20 address are not wired into this backend unless you add Tron monitoring separately.
 
 Database: run `backend/sql/schema.sql` so `crypto_ethereum_wallets` and `tatum_onchain_txs` exist. If you previously used Tatum Virtual Accounts, run `backend/sql/migrate_va_to_onchain.sql` once, then verify before dropping legacy `tatum_*` VA tables.
 
