@@ -18,6 +18,8 @@ export type ActivityFeedItem = {
   title: string;
   subtitle: string;
   amountLabel?: string;
+  directionLabel?: 'incoming' | 'outgoing' | 'neutral';
+  timestampLabel?: string;
   kind: 'alpaca_order' | 'crypto_tx' | 'placeholder';
 };
 

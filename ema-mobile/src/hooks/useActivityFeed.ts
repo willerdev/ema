@@ -12,6 +12,11 @@ function parseCryptoTime(c: CryptoActivityRow): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
+function formatTs(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return 'Unknown time';
+  return new Date(ms).toLocaleString();
+}
+
 export function buildActivityFeed(orders: Order[], cryptoActivity: CryptoActivityRow[], maxItems = 20): ActivityFeedItem[] {
   type Entry = { item: ActivityFeedItem; ts: number };
   const entries: Entry[] = [];
@@ -24,6 +29,8 @@ export function buildActivityFeed(orders: Order[], cryptoActivity: CryptoActivit
         title: `${o.symbol} ${String(o.side).toUpperCase()}`,
         subtitle: o.status || 'order',
         amountLabel: `Qty ${o.qty}`,
+        directionLabel: String(o.side).toLowerCase() === 'buy' ? 'incoming' : 'outgoing',
+        timestampLabel: formatTs(parseOrderTime(o)),
         kind: 'alpaca_order',
       },
     });
@@ -37,6 +44,8 @@ export function buildActivityFeed(orders: Order[], cryptoActivity: CryptoActivit
         title: `${c.direction === 'in' ? 'Receive' : 'Send'} ${c.asset}`,
         subtitle: (c.txHash || '').slice(0, 14) + (c.txHash && c.txHash.length > 14 ? '…' : ''),
         amountLabel: c.amountDisplay,
+        directionLabel: c.direction === 'in' ? 'incoming' : 'outgoing',
+        timestampLabel: formatTs(parseCryptoTime(c)),
         kind: 'crypto_tx',
       },
     });
@@ -55,6 +64,8 @@ export function useActivityFeed(orders: Order[], cryptoActivity: CryptoActivityR
         id: 'placeholder:1',
         title: 'Activity feed',
         subtitle: 'Your unified timeline will appear here soon.',
+        directionLabel: 'neutral',
+        timestampLabel: '—',
         kind: 'placeholder',
       },
     ] as ActivityFeedItem[];
