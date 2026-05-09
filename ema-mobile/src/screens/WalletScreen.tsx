@@ -1,11 +1,26 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
+import { authService } from '../services/authService';
 import { cryptoWalletService } from '../services/cryptoWalletService';
 import { walletService } from '../services/walletService';
 import { CryptoSummary, WalletTransaction } from '../types';
@@ -16,12 +31,15 @@ const SEND_COOLDOWN_MS = 60 * 1000;
 const SEND_COOLDOWN_STORAGE_KEY = 'wallet_crypto_last_send_attempt_at';
 
 export function WalletScreen() {
+  const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<WalletTab>('cash');
 
   const [balance, setBalance] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
   const [withdrawAddress, setWithdrawAddress] = useState('');
   const [withdrawNetwork, setWithdrawNetwork] = useState('');
+  const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
+  const [totpEnabled, setTotpEnabled] = useState(false);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -84,6 +102,12 @@ export function WalletScreen() {
     } catch {
       // keep previous values on transient network failure
     }
+    try {
+      const totp = await authService.getTotpStatus();
+      setTotpEnabled(Boolean(totp.enabled));
+    } catch {
+      setTotpEnabled(false);
+    }
   }, []);
 
   const refreshCrypto = useCallback(async () => {
@@ -136,9 +160,11 @@ export function WalletScreen() {
       await walletService.withdraw(Number(amount), 'crypto', {
         network: withdrawNetwork.trim(),
         destinationAddress: withdrawAddress.trim(),
+        ...(totpEnabled ? { totpCode: withdrawTotpCode.replace(/\s/g, '') } : {}),
       });
       setWithdrawAddress('');
       setWithdrawNetwork('');
+      setWithdrawTotpCode('');
       setAmount('');
       refreshCash();
       Alert.alert('Done', 'Withdrawal request submitted');
@@ -215,12 +241,14 @@ export function WalletScreen() {
   const sendWindowOpen = sendCooldownLeftMs <= 0;
 
   const withdrawAmountNum = Number(amount);
+  const withdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
   const withdrawFormReady =
     amount.trim().length > 0 &&
     Number.isFinite(withdrawAmountNum) &&
     withdrawAmountNum > 0 &&
     withdrawAddress.trim().length > 0 &&
-    withdrawNetwork.trim().length > 0;
+    withdrawNetwork.trim().length > 0 &&
+    withdrawTotpOk;
 
   return (
     <View style={styles.container}>
@@ -272,6 +300,20 @@ export function WalletScreen() {
               placeholderTextColor={palette.textSecondary}
               autoCapitalize='none'
             />
+            {totpEnabled ? (
+              <>
+                <Text style={styles.withdrawSectionLabel}>Authenticator (required)</Text>
+                <TextInput
+                  style={styles.input}
+                  value={withdrawTotpCode}
+                  onChangeText={setWithdrawTotpCode}
+                  placeholder='6-digit Google Authenticator code'
+                  placeholderTextColor={palette.textSecondary}
+                  keyboardType='number-pad'
+                  maxLength={10}
+                />
+              </>
+            ) : null}
             <View style={styles.actions}>
               <PrimaryButton
                 label='Deposit'
@@ -384,127 +426,168 @@ export function WalletScreen() {
       ) : null}
 
       <Modal visible={receiveModalOpen} transparent animationType='fade' onRequestClose={() => setReceiveModalOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <ScrollView contentContainerStyle={styles.receiveScrollContent} keyboardShouldPersistTaps='handled'>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Receive Crypto</Text>
-              <Text style={styles.receiveIntro}>Use the address for the network you are sending on.</Text>
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 24 : 0}
+        >
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+              onPress={() => {
+                Keyboard.dismiss();
+                setReceiveModalOpen(false);
+              }}
+            />
+            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
+              <ScrollView
+                keyboardShouldPersistTaps='handled'
+                style={{ maxHeight: '92%', width: '100%' }}
+                contentContainerStyle={{ flexGrow: 0 }}
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={styles.modalCard}>
+                  <Text style={styles.modalTitle}>Receive Crypto</Text>
+                  <Text style={styles.receiveIntro}>Use the address for the network you are sending on.</Text>
 
-              <View style={[styles.receiveBlock, styles.receiveBlockFirst]}>
-                <Text style={styles.receiveBlockTitle}>ETH · Ethereum</Text>
-                <Text style={styles.modalMono}>{ethReceiveAddress || 'Not available'}</Text>
-                {ethReceiveAddress ? (
-                  <View style={styles.qrWrap}>
-                    <QRCode value={ethReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                  <View style={[styles.receiveBlock, styles.receiveBlockFirst]}>
+                    <Text style={styles.receiveBlockTitle}>ETH · Ethereum</Text>
+                    <Text style={styles.modalMono}>{ethReceiveAddress || 'Not available'}</Text>
+                    {ethReceiveAddress ? (
+                      <View style={styles.qrWrap}>
+                        <QRCode value={ethReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                      </View>
+                    ) : null}
+                    <PrimaryButton
+                      label='Copy ETH address'
+                      onPress={() => {
+                        if (ethReceiveAddress) void onCopyAddress(ethReceiveAddress);
+                      }}
+                      disabled={!ethReceiveAddress}
+                      style={{ marginTop: 8 }}
+                    />
                   </View>
-                ) : null}
-                <PrimaryButton
-                  label='Copy ETH address'
-                  onPress={() => {
-                    if (ethReceiveAddress) void onCopyAddress(ethReceiveAddress);
-                  }}
-                  disabled={!ethReceiveAddress}
-                  style={{ marginTop: 8 }}
-                />
-              </View>
 
-              <View style={styles.receiveBlock}>
-                <Text style={styles.receiveBlockTitle}>USDT · {usdtReceiveSubtitle}</Text>
-                <Text style={styles.modalMono}>{usdtTrc20ReceiveAddress || 'Not available'}</Text>
-                {usdtTrc20ReceiveAddress ? (
-                  <View style={styles.qrWrap}>
-                    <QRCode value={usdtTrc20ReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                  <View style={styles.receiveBlock}>
+                    <Text style={styles.receiveBlockTitle}>USDT · {usdtReceiveSubtitle}</Text>
+                    <Text style={styles.modalMono}>{usdtTrc20ReceiveAddress || 'Not available'}</Text>
+                    {usdtTrc20ReceiveAddress ? (
+                      <View style={styles.qrWrap}>
+                        <QRCode value={usdtTrc20ReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                      </View>
+                    ) : null}
+                    <PrimaryButton
+                      label='Copy USDT (TRC20) address'
+                      onPress={() => {
+                        if (usdtTrc20ReceiveAddress) void onCopyAddress(usdtTrc20ReceiveAddress);
+                      }}
+                      disabled={!usdtTrc20ReceiveAddress}
+                      style={{ marginTop: 8 }}
+                    />
                   </View>
-                ) : null}
-                <PrimaryButton
-                  label='Copy USDT (TRC20) address'
-                  onPress={() => {
-                    if (usdtTrc20ReceiveAddress) void onCopyAddress(usdtTrc20ReceiveAddress);
-                  }}
-                  disabled={!usdtTrc20ReceiveAddress}
-                  style={{ marginTop: 8 }}
-                />
-              </View>
 
-              <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ marginTop: 12 }} />
+                  <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ marginTop: 12 }} />
+                </View>
+              </ScrollView>
             </View>
-          </ScrollView>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={sendModalOpen} transparent animationType='fade' onRequestClose={() => setSendModalOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Send Crypto</Text>
-            <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
-            <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
-            <View style={styles.row}>
-              {(['ETH', 'USDT'] as const).map((a) => (
-                <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
-              ))}
-            </View>
-            <Text style={styles.cooldownHint}>
-              {sendWindowOpen ? 'Window open: send is enabled.' : `Window closed: send unlocks in ${sendCooldownSec}s.`}
-            </Text>
-            <View style={styles.modalButtonRow}>
-              <PrimaryButton
-                label='Send on-chain'
-                onPress={onCryptoSend}
-                disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim() || !sendWindowOpen}
-                style={{ flex: 1 }}
-              />
-              <View style={{ width: 8 }} />
-              <PrimaryButton label='Dismiss' onPress={() => setSendModalOpen(false)} style={{ flex: 1 }} />
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 24 : 0}
+        >
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+              onPress={() => {
+                Keyboard.dismiss();
+                setSendModalOpen(false);
+              }}
+            />
+            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
+              <View style={styles.modalCard}>
+                <Text style={styles.modalTitle}>Send Crypto</Text>
+                <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
+                <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
+                <View style={styles.row}>
+                  {(['ETH', 'USDT'] as const).map((a) => (
+                    <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
+                  ))}
+                </View>
+                <Text style={styles.cooldownHint}>
+                  {sendWindowOpen ? 'Window open: send is enabled.' : `Window closed: send unlocks in ${sendCooldownSec}s.`}
+                </Text>
+                <View style={styles.modalButtonRow}>
+                  <PrimaryButton
+                    label='Send on-chain'
+                    onPress={onCryptoSend}
+                    disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim() || !sendWindowOpen}
+                    style={{ flex: 1 }}
+                  />
+                  <View style={{ width: 8 }} />
+                  <PrimaryButton label='Dismiss' onPress={() => setSendModalOpen(false)} style={{ flex: 1 }} />
+                </View>
+              </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={quickServicesModalOpen} transparent animationType='fade' onRequestClose={() => setQuickServicesModalOpen(false)}>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Quick Services</Text>
-            <View style={styles.serviceRow}>
-              <Pressable
-                style={styles.servicePill}
-                onPress={() => {
-                  setQuickServicesModalOpen(false);
-                  setReceiveModalOpen(true);
-                }}
-              >
-                <Text style={styles.servicePillText}>Receive</Text>
-              </Pressable>
-              <Pressable
-                style={styles.servicePill}
-                onPress={() => {
-                  setCryptoSendAsset('ETH');
-                  setQuickServicesModalOpen(false);
-                  setSendModalOpen(true);
-                }}
-              >
-                <Text style={styles.servicePillText}>Send ETH</Text>
-              </Pressable>
-              <Pressable
-                style={styles.servicePill}
-                onPress={() => {
-                  setCryptoSendAsset('USDT');
-                  setQuickServicesModalOpen(false);
-                  setSendModalOpen(true);
-                }}
-              >
-                <Text style={styles.servicePillText}>Send USDT</Text>
-              </Pressable>
-              <Pressable
-                style={styles.servicePill}
-                onPress={() => {
-                  setQuickServicesModalOpen(false);
-                  Alert.alert('Swap', 'Swap is currently unavailable.');
-                }}
-              >
-                <Text style={styles.servicePillText}>Swap</Text>
-              </Pressable>
+        <View style={{ flex: 1 }}>
+          <Pressable
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
+            onPress={() => setQuickServicesModalOpen(false)}
+          />
+          <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Quick Services</Text>
+              <View style={styles.serviceRow}>
+                <Pressable
+                  style={styles.servicePill}
+                  onPress={() => {
+                    setQuickServicesModalOpen(false);
+                    setReceiveModalOpen(true);
+                  }}
+                >
+                  <Text style={styles.servicePillText}>Receive</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.servicePill}
+                  onPress={() => {
+                    setCryptoSendAsset('ETH');
+                    setQuickServicesModalOpen(false);
+                    setSendModalOpen(true);
+                  }}
+                >
+                  <Text style={styles.servicePillText}>Send ETH</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.servicePill}
+                  onPress={() => {
+                    setCryptoSendAsset('USDT');
+                    setQuickServicesModalOpen(false);
+                    setSendModalOpen(true);
+                  }}
+                >
+                  <Text style={styles.servicePillText}>Send USDT</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.servicePill}
+                  onPress={() => {
+                    setQuickServicesModalOpen(false);
+                    Alert.alert('Swap', 'Swap is currently unavailable.');
+                  }}
+                >
+                  <Text style={styles.servicePillText}>Swap</Text>
+                </Pressable>
+              </View>
+              <PrimaryButton label='Dismiss' onPress={() => setQuickServicesModalOpen(false)} style={{ marginTop: 12 }} />
             </View>
-            <PrimaryButton label='Dismiss' onPress={() => setQuickServicesModalOpen(false)} style={{ marginTop: 12 }} />
           </View>
         </View>
       </Modal>
@@ -550,13 +633,6 @@ const styles = StyleSheet.create({
   serviceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   servicePill: { borderRadius: 999, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surfaceElevated, paddingVertical: 10, paddingHorizontal: 14 },
   servicePillText: { color: palette.textPrimary, fontWeight: '600' },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  receiveScrollContent: { flexGrow: 1, justifyContent: 'center' },
   receiveIntro: { color: palette.textSecondary, fontSize: 13, marginBottom: 6, lineHeight: 18 },
   receiveBlock: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: palette.border },
   receiveBlockFirst: { marginTop: 0, paddingTop: 0, borderTopWidth: 0 },

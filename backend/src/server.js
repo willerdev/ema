@@ -589,6 +589,33 @@ app.post('/wallet/withdraw', authMiddleware, async (req, res) => {
     const network = req.body.network != null ? String(req.body.network).trim() : '';
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.totp_enabled) {
+      const code =
+        req.body?.totpCode != null ? String(req.body.totpCode).replace(/\s/g, '') : '';
+      if (!code || code.length < 6) {
+        return res.status(400).json({ message: 'Authenticator code is required for withdrawal' });
+      }
+      if (!user.totp_secret_enc) {
+        return res.status(500).json({ message: 'Server configuration error' });
+      }
+      let secret;
+      try {
+        secret = decryptTotpSecret(user.totp_secret_enc);
+      } catch {
+        return res.status(500).json({ message: 'Server configuration error' });
+      }
+      const totpResult = verifySync({
+        secret,
+        token: code,
+        epochTolerance: 1,
+      });
+      if (!totpResult.valid) {
+        return res.status(401).json({ message: 'Invalid authenticator code' });
+      }
+    }
+
     const wallet = await ensureWalletForUser(req.userId);
     const current = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
     if (current < amount) return res.status(400).json({ message: 'Insufficient wallet balance' });

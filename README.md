@@ -93,6 +93,9 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `GET /mt5/accounts/:id/balance`
 - `GET /mt5/accounts/:id/positions`
 - `GET /health/db`
+- `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields)
+- `POST /airfarming/activate` — move amount from internal cash wallet into airfarming
+- `POST /airfarming/return-to-cash` — move amount from airfarming back to cash (required before wallet withdraw)
 
 ## Notes / limitations
 
@@ -104,7 +107,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 ## Supabase schema setup
 
 1. Open Supabase SQL Editor.
-2. Run `backend/sql/schema.sql`.
+2. Run `backend/sql/schema.sql` (or apply incremental files under `backend/sql/migrations/`, e.g. `20260510_airfarming_wallet.sql` for `airfarming_wallets` + `airfarming_transfers`).
 3. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
 4. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
 
