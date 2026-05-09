@@ -87,7 +87,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `POST /alpaca/orders`
 - `GET /wallet`
 - `POST /wallet/deposit`
-- `POST /wallet/withdraw`
+- `POST /wallet/withdraw` (body may include `totpCode` when the user has 2FA enabled; required in that case)
 - `GET /mt5/accounts`
 - `POST /mt5/accounts`
 - `GET /mt5/accounts/:id/balance`

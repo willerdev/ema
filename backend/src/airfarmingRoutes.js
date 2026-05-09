@@ -1,5 +1,16 @@
 const crypto = require('crypto');
-const { getAirfarmingStateByUserId, upsertAirfarmingState, insertAirfarmingEvent, listAirfarmingEventsByUserId, isMissingTableError } = require('./db');
+const {
+  getAirfarmingStateByUserId,
+  upsertAirfarmingState,
+  insertAirfarmingEvent,
+  listAirfarmingEventsByUserId,
+  getAirfarmingWalletByUserId,
+  upsertAirfarmingWalletRow,
+  insertAirfarmingTransfer,
+  ensureWalletForUser,
+  setWalletBalance,
+  isMissingTableError,
+} = require('./db');
 
 function newId() {
   return crypto.randomUUID();
@@ -111,14 +122,25 @@ async function maybeFireEvents(userId, row) {
 
 function registerAirfarmingRoutes(app, { authMiddleware }) {
   const schemaMsg =
-    'Airfarming schema missing. Run backend/sql/schema.sql in Supabase (airfarming_state, airfarming_events).';
+    'Airfarming schema missing. Run backend/sql/schema.sql in Supabase (airfarming_state, airfarming_events, airfarming_wallets, airfarming_transfers).';
+
+  async function balancesForUser(userId) {
+    const wallet = await ensureWalletForUser(userId);
+    const cashWallet = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+    const af = await getAirfarmingWalletByUserId(userId);
+    const airfarmingBalance = Number.parseFloat(String(af?.balance ?? 0)) || 0;
+    return { cashWallet, airfarmingBalance };
+  }
 
   app.get('/airfarming/status', authMiddleware, async (req, res) => {
     try {
       let state = await ensureWeekState(req.userId);
       state = await maybeFireEvents(req.userId, state);
       const history = await listAirfarmingEventsByUserId(req.userId, 25);
+      const { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
       return res.json({
+        cashWallet,
+        airfarmingBalance,
         weekStart: state.week_start,
         weeklyTarget: state.weekly_event_target,
         weeklyUsed: state.weekly_events_used,
@@ -133,6 +155,81 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e?.message || 'Airfarming status failed' });
+    }
+  });
+
+  app.post('/airfarming/activate', authMiddleware, async (req, res) => {
+    try {
+      const amount = Number(req.body?.amount);
+      if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+
+      const wallet = await ensureWalletForUser(req.userId);
+      const cash = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+      if (cash < amount) return res.status(400).json({ message: 'Insufficient cash wallet balance' });
+
+      const af = await getAirfarmingWalletByUserId(req.userId);
+      const nextAf = (Number.parseFloat(String(af?.balance ?? 0)) || 0) + amount;
+      const now = new Date().toISOString();
+
+      await setWalletBalance(req.userId, cash - amount);
+      await upsertAirfarmingWalletRow({
+        user_id: req.userId,
+        balance: nextAf,
+        updated_at: now,
+      });
+      await insertAirfarmingTransfer({
+        id: newId(),
+        user_id: req.userId,
+        direction: 'to_airfarming',
+        amount,
+        created_at: now,
+      });
+
+      return res.json({
+        cashWallet: cash - amount,
+        airfarmingBalance: nextAf,
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e?.message || 'Activate failed' });
+    }
+  });
+
+  app.post('/airfarming/return-to-cash', authMiddleware, async (req, res) => {
+    try {
+      const amount = Number(req.body?.amount);
+      if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+
+      const wallet = await ensureWalletForUser(req.userId);
+      const cash = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+      const af = await getAirfarmingWalletByUserId(req.userId);
+      const afBal = Number.parseFloat(String(af?.balance ?? 0)) || 0;
+      if (afBal < amount) return res.status(400).json({ message: 'Insufficient airfarming balance' });
+
+      const nextAf = afBal - amount;
+      const now = new Date().toISOString();
+
+      await upsertAirfarmingWalletRow({
+        user_id: req.userId,
+        balance: nextAf,
+        updated_at: now,
+      });
+      await setWalletBalance(req.userId, cash + amount);
+      await insertAirfarmingTransfer({
+        id: newId(),
+        user_id: req.userId,
+        direction: 'to_cash',
+        amount,
+        created_at: now,
+      });
+
+      return res.json({
+        cashWallet: cash + amount,
+        airfarmingBalance: nextAf,
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e?.message || 'Return to cash failed' });
     }
   });
 }

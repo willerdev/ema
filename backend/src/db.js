@@ -208,23 +208,34 @@ async function updateMt5AccountSnapshot(userId, accountId, snapshot) {
 }
 
 async function checkDatabaseHealth() {
-  const [usersResult, walletsResult, transactionsResult, mt5Result, cryptoEthResult, airResult, contractResult] =
-    await Promise.all([
-      supabase.from('users').select('*').limit(1),
-      supabase.from('wallets').select('*').limit(1),
-      supabase.from('transactions').select('*').limit(1),
-      supabase.from('mt5_accounts').select('*').limit(1),
-      supabase.from('crypto_ethereum_wallets').select('*').limit(1),
-      supabase.from('airfarming_state').select('*').limit(1),
-      supabase.from('contract_wallets').select('*').limit(1),
-    ]);
+  const [
+    usersResult,
+    walletsResult,
+    transactionsResult,
+    mt5Result,
+    cryptoEthResult,
+    airResult,
+    airWalletResult,
+    contractResult,
+  ] = await Promise.all([
+    supabase.from('users').select('*').limit(1),
+    supabase.from('wallets').select('*').limit(1),
+    supabase.from('transactions').select('*').limit(1),
+    supabase.from('mt5_accounts').select('*').limit(1),
+    supabase.from('crypto_ethereum_wallets').select('*').limit(1),
+    supabase.from('airfarming_state').select('*').limit(1),
+    supabase.from('airfarming_wallets').select('*').limit(1),
+    supabase.from('contract_wallets').select('*').limit(1),
+  ]);
   const cryptoError = cryptoEthResult?.error;
   const airError = airResult?.error;
+  const airWalletError = airWalletResult?.error;
   const contractError = contractResult?.error;
   const firstError = usersResult.error || walletsResult.error || transactionsResult.error || mt5Result?.error;
   if (firstError) throw firstError;
   if (cryptoError && !isMissingTableError(cryptoError)) throw cryptoError;
   if (airError && !isMissingTableError(airError)) throw airError;
+  if (airWalletError && !isMissingTableError(airWalletError)) throw airWalletError;
   if (contractError && !isMissingTableError(contractError)) throw contractError;
 
   return {
@@ -236,6 +247,8 @@ async function checkDatabaseHealth() {
     crypto_wallets_schema_ready: !cryptoError,
     airfarming_state: airError ? null : airResult?.data?.length ?? 0,
     airfarming_schema_ready: !airError,
+    airfarming_wallets: airWalletError ? null : airWalletResult?.data?.length ?? 0,
+    airfarming_wallet_schema_ready: !airWalletError,
     contract_wallets: contractError ? null : contractResult?.data?.length ?? 0,
     contract_schema_ready: !contractError,
   };
@@ -352,6 +365,24 @@ async function listAirfarmingEventsByUserId(userId, limit = 30) {
   return data || [];
 }
 
+async function getAirfarmingWalletByUserId(userId) {
+  const { data, error } = await supabase.from('airfarming_wallets').select('*').eq('user_id', userId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertAirfarmingWalletRow(row) {
+  const { data, error } = await supabase.from('airfarming_wallets').upsert(row, { onConflict: 'user_id' }).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function insertAirfarmingTransfer(row) {
+  const { data, error } = await supabase.from('airfarming_transfers').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
 async function getContractWalletByUserId(userId) {
   const { data, error } = await supabase.from('contract_wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
@@ -420,6 +451,9 @@ module.exports = {
   upsertAirfarmingState,
   insertAirfarmingEvent,
   listAirfarmingEventsByUserId,
+  getAirfarmingWalletByUserId,
+  upsertAirfarmingWalletRow,
+  insertAirfarmingTransfer,
   getContractWalletByUserId,
   upsertContractWalletRow,
   getContractAccrualForUserDay,
