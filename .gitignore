@@ -12,3 +12,5 @@ ema-mobile/android/
 ema-mobile/ios/
 backend/sql/metaapi.txt
 backend/tatum.txt
+supabase.txt
+**/supabase.txt

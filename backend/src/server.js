@@ -25,6 +25,7 @@ const {
 } = require('./db');
 const { authMiddleware, totpPendingMiddleware, TOTP_PENDING_PURPOSE } = require('./middleware/auth');
 const { encryptTotpSecret, decryptTotpSecret } = require('./totpCrypto');
+const { mapTotpConfigurationError } = require('./totpErrors');
 const { generateSecret, generateURI, verifySync } = require('otplib');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
 const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
@@ -82,6 +83,15 @@ function signTotpPendingToken(userId) {
     process.env.JWT_SECRET || 'ema-dev-secret',
     { expiresIn: '5m' }
   );
+}
+
+function sendTotpRouteError(res, error, fallbackProd, logLabel) {
+  const mapped = mapTotpConfigurationError(error);
+  console.error(logLabel, error);
+  if (mapped) return res.status(mapped.status).json({ message: mapped.message });
+  const message =
+    process.env.NODE_ENV === 'production' ? fallbackProd : error?.message || fallbackProd;
+  return res.status(500).json({ message });
 }
 
 const currentUser = (req) => getUserById(req.userId);
@@ -229,8 +239,7 @@ app.post('/auth/totp/verify', totpPendingMiddleware, async (req, res) => {
     }
     return res.json({ token: signToken(user), user: { id: user.id, email: user.email } });
   } catch (error) {
-    const message = process.env.NODE_ENV === 'production' ? 'Verification failed' : error?.message || 'Verification failed';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Verification failed', '[auth/totp/verify]');
   }
 });
 
@@ -242,8 +251,7 @@ app.get('/auth/totp/status', authMiddleware, async (req, res) => {
     const setupPending = Boolean(!enabled && user.totp_secret_enc);
     return res.json({ enabled, setupPending });
   } catch (error) {
-    const message = process.env.NODE_ENV === 'production' ? 'Failed to load status' : error?.message || 'Failed to load status';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Failed to load status', '[auth/totp/status]');
   }
 });
 
@@ -258,9 +266,7 @@ app.post('/auth/totp/setup/start', authMiddleware, async (req, res) => {
     const otpauthUrl = generateURI({ issuer: 'EMA', label: user.email, secret });
     return res.json({ otpauthUrl, secretBase32: secret });
   } catch (error) {
-    const message =
-      process.env.NODE_ENV === 'production' ? 'Failed to start setup' : error?.message || 'Failed to start setup';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Failed to start setup', '[auth/totp/setup/start]');
   }
 });
 
@@ -289,9 +295,7 @@ app.post('/auth/totp/setup/confirm', authMiddleware, async (req, res) => {
     await setTotpEnabled(user.id, true);
     return res.json({ success: true });
   } catch (error) {
-    const message =
-      process.env.NODE_ENV === 'production' ? 'Failed to confirm setup' : error?.message || 'Failed to confirm setup';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Failed to confirm setup', '[auth/totp/setup/confirm]');
   }
 });
 
@@ -305,9 +309,7 @@ app.post('/auth/totp/setup/cancel', authMiddleware, async (req, res) => {
     if (user.totp_secret_enc) await updateUserTotpSecretEnc(user.id, null);
     return res.json({ success: true });
   } catch (error) {
-    const message =
-      process.env.NODE_ENV === 'production' ? 'Failed to cancel setup' : error?.message || 'Failed to cancel setup';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Failed to cancel setup', '[auth/totp/setup/cancel]');
   }
 });
 
@@ -342,9 +344,7 @@ app.post('/auth/totp/disable', authMiddleware, async (req, res) => {
     await clearTotp(user.id);
     return res.json({ success: true });
   } catch (error) {
-    const message =
-      process.env.NODE_ENV === 'production' ? 'Failed to disable two-factor' : error?.message || 'Failed to disable two-factor';
-    return res.status(500).json({ message });
+    return sendTotpRouteError(res, error, 'Failed to disable two-factor', '[auth/totp/disable]');
   }
 });
 

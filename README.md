@@ -11,7 +11,7 @@ EMA is a fintech-style mobile app built with Expo React Native and a secure Node
 
 - Alpaca keys are saved on backend per user and never exposed publicly in frontend code.
 - JWT auth protects trading and wallet endpoints.
-- Optional TOTP (Google Authenticator–compatible) second factor: run [`backend/sql/migrations/20260509_totp.sql`](backend/sql/migrations/20260509_totp.sql) on your database, then set **`TOTP_ENCRYPTION_KEY`** to a 32-byte value (64 hex characters or standard base64) in the backend environment. In production this key is required so stored TOTP secrets can be encrypted at rest.
+- Optional TOTP (Google Authenticator–compatible) second factor: run [`backend/sql/migrations/20260509_totp.sql`](backend/sql/migrations/20260509_totp.sql) on your database, then set **`TOTP_ENCRYPTION_KEY`** to a 32-byte value (64 hex characters or standard base64) in the backend environment. In production this key is required so stored TOTP secrets can be encrypted at rest. Generate one locally with `openssl rand -hex 32`. Without the migration or this env var, authenticator setup returns a clear error instead of a generic failure.
 - Wallet funds are fully separate from Alpaca trading funds.
 
 ## Features delivered
