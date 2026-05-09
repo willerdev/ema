@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const {
-  getWalletByUserId,
+  ensureWalletForUser,
   setWalletBalance,
   getContractWalletByUserId,
   upsertContractWalletRow,
@@ -31,10 +31,10 @@ function registerContractRoutes(app, { authMiddleware }) {
 
   app.get('/contracts/summary', authMiddleware, async (req, res) => {
     try {
-      const wallet = await getWalletByUserId(req.userId);
+      const wallet = await ensureWalletForUser(req.userId);
       const cw = await getContractWalletByUserId(req.userId);
       return res.json({
-        cashWallet: Number(wallet?.balance || 0),
+        cashWallet: Number.parseFloat(String(wallet.balance ?? 0)) || 0,
         contractBalance: Number(cw?.balance || 0),
         updatedAt: cw?.updated_at || null,
       });
@@ -49,9 +49,8 @@ function registerContractRoutes(app, { authMiddleware }) {
       const amount = Number(req.body?.amount);
       if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
-      const wallet = await getWalletByUserId(req.userId);
-      if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-      const cash = Number(wallet.balance);
+      const wallet = await ensureWalletForUser(req.userId);
+      const cash = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
       if (cash < amount) return res.status(400).json({ message: 'Insufficient cash wallet balance' });
 
       const cw = await getContractWalletByUserId(req.userId);
@@ -76,13 +75,12 @@ function registerContractRoutes(app, { authMiddleware }) {
       const amount = Number(req.body?.amount);
       if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
-      const wallet = await getWalletByUserId(req.userId);
-      if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
+      const wallet = await ensureWalletForUser(req.userId);
       const cw = await getContractWalletByUserId(req.userId);
       const cBal = Number(cw?.balance || 0);
       if (cBal < amount) return res.status(400).json({ message: 'Insufficient contract balance' });
 
-      const cash = Number(wallet.balance);
+      const cash = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
       const nextContract = cBal - amount;
 
       await setWalletBalance(req.userId, cash + amount);

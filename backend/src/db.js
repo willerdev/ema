@@ -63,9 +63,46 @@ async function updateAlpacaKeys(userId, apiKey, secretKey) {
   if (error) throw error;
 }
 
+async function updateUserTotpSecretEnc(userId, totpSecretEnc) {
+  const { error } = await supabase.from('users').update({ totp_secret_enc: totpSecretEnc }).eq('id', userId);
+  if (error) throw error;
+}
+
+async function setTotpEnabled(userId, enabled) {
+  const { error } = await supabase.from('users').update({ totp_enabled: enabled }).eq('id', userId);
+  if (error) throw error;
+}
+
+async function clearTotp(userId) {
+  const { error } = await supabase
+    .from('users')
+    .update({ totp_enabled: false, totp_secret_enc: null })
+    .eq('id', userId);
+  if (error) throw error;
+}
+
 async function getWalletByUserId(userId) {
   const { data, error } = await supabase.from('wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
+  return data;
+}
+
+/** Ensures a `wallets` row exists for the user (internal cash ledger). */
+async function ensureWalletForUser(userId) {
+  const existing = await getWalletByUserId(userId);
+  if (existing) return existing;
+  const walletId = id();
+  const { data, error } = await supabase
+    .from('wallets')
+    .insert({ id: walletId, user_id: userId, balance: 0 })
+    .select('*')
+    .single();
+  if (error) {
+    if (error.code === '23505') {
+      return getWalletByUserId(userId);
+    }
+    throw error;
+  }
   return data;
 }
 
@@ -355,7 +392,11 @@ module.exports = {
   getUserById,
   createUser,
   updateAlpacaKeys,
+  updateUserTotpSecretEnc,
+  setTotpEnabled,
+  clearTotp,
   getWalletByUserId,
+  ensureWalletForUser,
   setWalletBalance,
   createTransaction,
   getTransactionsByUserId,

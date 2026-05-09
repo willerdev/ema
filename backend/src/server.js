@@ -8,7 +8,10 @@ const {
   getUserById,
   createUser,
   updateAlpacaKeys,
-  getWalletByUserId,
+  updateUserTotpSecretEnc,
+  setTotpEnabled,
+  clearTotp,
+  ensureWalletForUser,
   setWalletBalance,
   createTransaction,
   getTransactionsByUserId,
@@ -20,7 +23,9 @@ const {
   updateMt5AccountSnapshot,
   checkDatabaseHealth,
 } = require('./db');
-const { authMiddleware } = require('./middleware/auth');
+const { authMiddleware, totpPendingMiddleware, TOTP_PENDING_PURPOSE } = require('./middleware/auth');
+const { encryptTotpSecret, decryptTotpSecret } = require('./totpCrypto');
+const { generateSecret, generateURI, verifySync } = require('otplib');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
 const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
 
@@ -69,6 +74,14 @@ function mt5SafeErrorMessage(error, fallback) {
 
 function signToken(user) {
   return jwt.sign({ sub: user.id }, process.env.JWT_SECRET || 'ema-dev-secret', { expiresIn: '7d' });
+}
+
+function signTotpPendingToken(userId) {
+  return jwt.sign(
+    { sub: userId, purpose: TOTP_PENDING_PURPOSE },
+    process.env.JWT_SECRET || 'ema-dev-secret',
+    { expiresIn: '5m' }
+  );
 }
 
 const currentUser = (req) => getUserById(req.userId);
@@ -182,9 +195,155 @@ app.post('/auth/login', async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash))) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
+    if (user.totp_enabled) {
+      return res.json({ requiresTotp: true, preAuthToken: signTotpPendingToken(user.id) });
+    }
     return res.json({ token: signToken(user), user: { id: user.id, email: user.email } });
   } catch (error) {
     const message = process.env.NODE_ENV === 'production' ? 'Login failed' : error?.message || 'Login failed';
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/auth/totp/verify', totpPendingMiddleware, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code || typeof code !== 'string') return res.status(400).json({ message: 'Missing code' });
+    const user = await getUserById(req.userId);
+    if (!user || !user.totp_enabled || !user.totp_secret_enc) {
+      return res.status(400).json({ message: 'Two-factor authentication is not enabled for this account' });
+    }
+    let secret;
+    try {
+      secret = decryptTotpSecret(user.totp_secret_enc);
+    } catch {
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+    const totpResult = verifySync({
+      secret,
+      token: String(code).replace(/\s/g, ''),
+      epochTolerance: 1,
+    });
+    if (!totpResult.valid) {
+      return res.status(401).json({ message: 'Invalid code' });
+    }
+    return res.json({ token: signToken(user), user: { id: user.id, email: user.email } });
+  } catch (error) {
+    const message = process.env.NODE_ENV === 'production' ? 'Verification failed' : error?.message || 'Verification failed';
+    return res.status(500).json({ message });
+  }
+});
+
+app.get('/auth/totp/status', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    const enabled = Boolean(user.totp_enabled);
+    const setupPending = Boolean(!enabled && user.totp_secret_enc);
+    return res.json({ enabled, setupPending });
+  } catch (error) {
+    const message = process.env.NODE_ENV === 'production' ? 'Failed to load status' : error?.message || 'Failed to load status';
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/auth/totp/setup/start', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.totp_enabled) return res.status(400).json({ message: 'Two-factor authentication is already enabled' });
+    const secret = generateSecret();
+    const enc = encryptTotpSecret(secret);
+    await updateUserTotpSecretEnc(user.id, enc);
+    const otpauthUrl = generateURI({ issuer: 'EMA', label: user.email, secret });
+    return res.json({ otpauthUrl, secretBase32: secret });
+  } catch (error) {
+    const message =
+      process.env.NODE_ENV === 'production' ? 'Failed to start setup' : error?.message || 'Failed to start setup';
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/auth/totp/setup/confirm', authMiddleware, async (req, res) => {
+  try {
+    const { code } = req.body;
+    if (!code || typeof code !== 'string') return res.status(400).json({ message: 'Missing code' });
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.totp_enabled) return res.status(400).json({ message: 'Two-factor authentication is already enabled' });
+    if (!user.totp_secret_enc) return res.status(400).json({ message: 'No setup in progress' });
+    let secret;
+    try {
+      secret = decryptTotpSecret(user.totp_secret_enc);
+    } catch {
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+    const confirmResult = verifySync({
+      secret,
+      token: String(code).replace(/\s/g, ''),
+      epochTolerance: 1,
+    });
+    if (!confirmResult.valid) {
+      return res.status(401).json({ message: 'Invalid code' });
+    }
+    await setTotpEnabled(user.id, true);
+    return res.json({ success: true });
+  } catch (error) {
+    const message =
+      process.env.NODE_ENV === 'production' ? 'Failed to confirm setup' : error?.message || 'Failed to confirm setup';
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/auth/totp/setup/cancel', authMiddleware, async (req, res) => {
+  try {
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.totp_enabled) {
+      return res.status(400).json({ message: 'Cannot cancel while two-factor authentication is enabled' });
+    }
+    if (user.totp_secret_enc) await updateUserTotpSecretEnc(user.id, null);
+    return res.json({ success: true });
+  } catch (error) {
+    const message =
+      process.env.NODE_ENV === 'production' ? 'Failed to cancel setup' : error?.message || 'Failed to cancel setup';
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/auth/totp/disable', authMiddleware, async (req, res) => {
+  try {
+    const { password, code } = req.body;
+    if (!password || typeof password !== 'string' || !code || typeof code !== 'string') {
+      return res.status(400).json({ message: 'Missing password or code' });
+    }
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.totp_enabled || !user.totp_secret_enc) {
+      return res.status(400).json({ message: 'Two-factor authentication is not enabled' });
+    }
+    if (!(await bcrypt.compare(password, user.password_hash))) {
+      return res.status(401).json({ message: 'Invalid password' });
+    }
+    let secret;
+    try {
+      secret = decryptTotpSecret(user.totp_secret_enc);
+    } catch {
+      return res.status(500).json({ message: 'Server configuration error' });
+    }
+    const disableResult = verifySync({
+      secret,
+      token: String(code).replace(/\s/g, ''),
+      epochTolerance: 1,
+    });
+    if (!disableResult.valid) {
+      return res.status(401).json({ message: 'Invalid code' });
+    }
+    await clearTotp(user.id);
+    return res.json({ success: true });
+  } catch (error) {
+    const message =
+      process.env.NODE_ENV === 'production' ? 'Failed to disable two-factor' : error?.message || 'Failed to disable two-factor';
     return res.status(500).json({ message });
   }
 });
@@ -393,9 +552,10 @@ registerContractRoutes(app, { authMiddleware });
 
 app.get('/wallet', authMiddleware, async (req, res) => {
   try {
-    const wallet = await getWalletByUserId(req.userId);
+    const wallet = await ensureWalletForUser(req.userId);
     const transactions = await getTransactionsByUserId(req.userId);
-    return res.json({ balance: Number(wallet?.balance || 0), transactions });
+    const balance = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+    return res.json({ balance, transactions });
   } catch {
     return res.status(500).json({ message: 'Failed to fetch wallet' });
   }
@@ -408,10 +568,9 @@ app.post('/wallet/deposit', authMiddleware, async (req, res) => {
     const referenceId = req.body.referenceId || `DEP-${Date.now()}`;
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
-    const wallet = await getWalletByUserId(req.userId);
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
+    const wallet = await ensureWalletForUser(req.userId);
 
-    const nextBalance = Number(wallet.balance) + amount;
+    const nextBalance = Number.parseFloat(String(wallet.balance ?? 0)) + amount;
     await setWalletBalance(req.userId, nextBalance);
     const transaction = await createTransaction({ userId: req.userId, type: 'deposit', amount, status: `completed:${method}:${referenceId}` });
 
@@ -425,15 +584,27 @@ app.post('/wallet/withdraw', authMiddleware, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
     const method = req.body.method || 'bank_transfer';
+    const destinationAddress =
+      req.body.destinationAddress != null ? String(req.body.destinationAddress).trim() : '';
+    const network = req.body.network != null ? String(req.body.network).trim() : '';
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
-    const wallet = await getWalletByUserId(req.userId);
-    if (!wallet) return res.status(404).json({ message: 'Wallet not found' });
-    if (Number(wallet.balance) < amount) return res.status(400).json({ message: 'Insufficient wallet balance' });
+    const wallet = await ensureWalletForUser(req.userId);
+    const current = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+    if (current < amount) return res.status(400).json({ message: 'Insufficient wallet balance' });
 
-    const nextBalance = Number(wallet.balance) - amount;
+    const nextBalance = current - amount;
     await setWalletBalance(req.userId, nextBalance);
-    const transaction = await createTransaction({ userId: req.userId, type: 'withdraw', amount, status: `pending:${method}` });
+    const statusMeta =
+      network && destinationAddress
+        ? `${method}:${JSON.stringify({ network, destinationAddress })}`
+        : method;
+    const transaction = await createTransaction({
+      userId: req.userId,
+      type: 'withdraw',
+      amount,
+      status: `pending:${statusMeta}`,
+    });
 
     return res.json({ balance: nextBalance, transaction });
   } catch {
@@ -448,6 +619,7 @@ app.post('/wallet/reset', authMiddleware, async (req, res) => {
     if (!expectedToken || suppliedToken !== expectedToken) {
       return res.status(403).json({ message: 'Invalid or missing reset token' });
     }
+    await ensureWalletForUser(req.userId);
     await setWalletBalance(req.userId, 0);
     await clearTransactionsByUserId(req.userId);
     return res.json({ success: true, balance: 0 });

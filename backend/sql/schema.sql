@@ -4,6 +4,8 @@ create table if not exists public.users (
   password_hash text not null,
   alpaca_api_key text default '' not null,
   alpaca_secret_key text default '' not null,
+  totp_enabled boolean default false not null,
+  totp_secret_enc text,
   created_at timestamptz default now() not null
 );
 

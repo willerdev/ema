@@ -20,6 +20,8 @@ export function WalletScreen() {
 
   const [balance, setBalance] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
+  const [withdrawAddress, setWithdrawAddress] = useState('');
+  const [withdrawNetwork, setWithdrawNetwork] = useState('');
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -129,8 +131,15 @@ export function WalletScreen() {
   };
 
   const onWithdraw = async () => {
+    if (!withdrawFormReady) return;
     try {
-      await walletService.withdraw(Number(amount), 'crypto');
+      await walletService.withdraw(Number(amount), 'crypto', {
+        network: withdrawNetwork.trim(),
+        destinationAddress: withdrawAddress.trim(),
+      });
+      setWithdrawAddress('');
+      setWithdrawNetwork('');
+      setAmount('');
       refreshCash();
       Alert.alert('Done', 'Withdrawal request submitted');
     } catch (error: any) {
@@ -205,6 +214,14 @@ export function WalletScreen() {
   const sendCooldownSec = Math.ceil(sendCooldownLeftMs / 1000);
   const sendWindowOpen = sendCooldownLeftMs <= 0;
 
+  const withdrawAmountNum = Number(amount);
+  const withdrawFormReady =
+    amount.trim().length > 0 &&
+    Number.isFinite(withdrawAmountNum) &&
+    withdrawAmountNum > 0 &&
+    withdrawAddress.trim().length > 0 &&
+    withdrawNetwork.trim().length > 0;
+
   return (
     <View style={styles.container}>
       <ScrollView
@@ -212,7 +229,13 @@ export function WalletScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
       <View style={styles.tabRow}>
-        <Text style={[styles.tab, tab === 'cash' && styles.tabActive]} onPress={() => setTab('cash')}>
+        <Text
+          style={[styles.tab, tab === 'cash' && styles.tabActive]}
+          onPress={() => {
+            setTab('cash');
+            void refreshCash();
+          }}
+        >
           Cash wallet
         </Text>
         <Text style={[styles.tab, tab === 'crypto' && styles.tabActive]} onPress={() => { setTab('crypto'); void refreshCrypto(); }}>
@@ -223,18 +246,41 @@ export function WalletScreen() {
       {tab === 'cash' ? (
         <>
           <Card>
-            <Text style={styles.label}>Internal Wallet Balance</Text>
+            <Text style={styles.label}>Cash wallet balance</Text>
             <Text style={styles.balance}>{balance === null ? '--' : `$${balance.toFixed(2)}`}</Text>
+            <Text style={styles.item}>Synced from your saved cash balance on the server.</Text>
             <Text style={styles.item}>{lastUpdatedAt ? `Status: ${Date.now() - lastUpdatedAt > 20000 ? 'stale' : 'live'}` : 'Status: unavailable'}</Text>
           </Card>
 
           <Card>
             <Text style={styles.label}>Deposit / Withdraw</Text>
             <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} keyboardType='numeric' />
+            <Text style={styles.withdrawSectionLabel}>Withdraw details (required to withdraw)</Text>
+            <TextInput
+              style={styles.input}
+              value={withdrawNetwork}
+              onChangeText={setWithdrawNetwork}
+              placeholder='Network (e.g. Ethereum, Tron TRC20)'
+              placeholderTextColor={palette.textSecondary}
+              autoCapitalize='words'
+            />
+            <TextInput
+              style={styles.input}
+              value={withdrawAddress}
+              onChangeText={setWithdrawAddress}
+              placeholder='Destination address'
+              placeholderTextColor={palette.textSecondary}
+              autoCapitalize='none'
+            />
             <View style={styles.actions}>
-              <PrimaryButton label='Deposit' onPress={onDeposit} style={{ flex: 1 }} />
+              <PrimaryButton
+                label='Deposit'
+                onPress={onDeposit}
+                style={{ flex: 1 }}
+                disabled={!amount.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0}
+              />
               <View style={{ width: 8 }} />
-              <PrimaryButton label='Withdraw' onPress={onWithdraw} variant='danger' style={{ flex: 1 }} />
+              <PrimaryButton label='Withdraw' onPress={onWithdraw} variant='danger' style={{ flex: 1 }} disabled={!withdrawFormReady} />
             </View>
           </Card>
 
@@ -472,6 +518,7 @@ const styles = StyleSheet.create({
   tab: { flex: 1, textAlign: 'center', color: palette.textSecondary, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: palette.border },
   tabActive: { color: palette.primary, borderColor: palette.primary },
   label: { color: palette.textSecondary, marginBottom: 8 },
+  withdrawSectionLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 4, marginBottom: 6, fontWeight: '600' },
   sectionTitle: { color: palette.textSecondary, marginBottom: 10, fontSize: 16, fontWeight: '700' },
   balance: { color: palette.textPrimary, fontSize: 34, fontWeight: '800' },
   input: { backgroundColor: palette.surfaceElevated, borderWidth: 1, borderColor: palette.border, color: palette.textPrimary, borderRadius: 12, padding: 10, marginBottom: 8 },

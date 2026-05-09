@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { authService } from '../services/authService';
+import { authService, LoginResult } from '../services/authService';
 import { authStorage } from '../services/storage';
 import { User } from '../types';
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  completeTotpLogin: (preAuthToken: string, code: string) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -32,8 +33,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const response = await authService.login(email, password);
+  const login = async (email: string, password: string): Promise<LoginResult> => {
+    const result = await authService.login(email, password);
+    if (result.kind === 'session') {
+      await authStorage.setToken(result.token);
+      setUser(result.user);
+    }
+    return result;
+  };
+
+  const completeTotpLogin = async (preAuthToken: string, code: string) => {
+    const response = await authService.verifyTotp(code, preAuthToken);
     await authStorage.setToken(response.token);
     setUser(response.user);
   };
@@ -49,7 +59,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
-  const value = useMemo(() => ({ user, loading, login, register, logout }), [user, loading]);
+  const value = useMemo(
+    () => ({ user, loading, login, completeTotpLogin, register, logout }),
+    [user, loading]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
