@@ -182,7 +182,18 @@ export function WalletScreen() {
     return text.length > 180 ? 'Crypto service is temporarily unavailable. Please retry shortly.' : text;
   }
 
-  const primaryWalletAddress = cryptoSummary?.depositAddress || cryptoSummary?.wallets?.[0]?.address || null;
+  const receiveWallets = cryptoSummary?.wallets ?? [];
+  const ethReceiveWallet = receiveWallets.find((w) => String(w.asset).toUpperCase() === 'ETH');
+  const usdtReceiveWallet =
+    receiveWallets.find(
+      (w) => String(w.asset).toUpperCase() === 'USDT' && String(w.chain).toUpperCase() === 'TRON'
+    ) || receiveWallets.find((w) => String(w.asset).toUpperCase() === 'USDT');
+  const primaryWalletAddress =
+    cryptoSummary?.depositAddress || ethReceiveWallet?.address || receiveWallets[0]?.address || null;
+  const ethReceiveAddress = ethReceiveWallet?.address || primaryWalletAddress;
+  const usdtTrc20ReceiveAddress = usdtReceiveWallet?.address || null;
+  const usdtReceiveSubtitle =
+    String(usdtReceiveWallet?.chain || '').toUpperCase() === 'TRON' ? 'TRC20 (Tron)' : `USDT (${usdtReceiveWallet?.chain || 'network'})`;
   const ethBalance = cryptoSummary?.balances.find((b) => b.asset === 'ETH')?.balance || '0';
   const usdtBalance = cryptoSummary?.balances.find((b) => b.asset === 'USDT')?.balance || '0';
   const totalBalanceDisplay = (() => {
@@ -251,12 +262,18 @@ export function WalletScreen() {
                 <Text style={styles.heroBalance}>{totalBalanceDisplay}</Text>
                 <View style={styles.heroMetaRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.heroMetaLabel}>Ethereum Address</Text>
-                    <Text style={styles.heroMetaValue}>{primaryWalletAddress ? `${primaryWalletAddress.slice(0, 8)}...${primaryWalletAddress.slice(-6)}` : 'Not ready'}</Text>
+                    <Text style={styles.heroMetaLabel}>Receive · ETH (Ethereum)</Text>
+                    <Text style={styles.heroMetaValue}>
+                      {ethReceiveAddress ? `${ethReceiveAddress.slice(0, 8)}…${ethReceiveAddress.slice(-6)}` : 'Not ready'}
+                    </Text>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.heroMetaLabel}>Assets Enabled</Text>
-                    <Text style={styles.heroMetaValue}>ETH + USDT</Text>
+                    <Text style={styles.heroMetaLabel}>Receive · {usdtReceiveSubtitle}</Text>
+                    <Text style={styles.heroMetaValue}>
+                      {usdtTrc20ReceiveAddress
+                        ? `${usdtTrc20ReceiveAddress.slice(0, 6)}…${usdtTrc20ReceiveAddress.slice(-6)}`
+                        : '—'}
+                    </Text>
                   </View>
                 </View>
                 <View style={styles.rateRow}>
@@ -322,29 +339,50 @@ export function WalletScreen() {
 
       <Modal visible={receiveModalOpen} transparent animationType='fade' onRequestClose={() => setReceiveModalOpen(false)}>
         <View style={styles.modalBackdrop}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Receive Crypto</Text>
-            <Text style={styles.modalLabel}>Chain</Text>
-            <Text style={styles.modalValue}>Ethereum</Text>
-            <Text style={styles.modalLabel}>Address</Text>
-            <Text style={styles.modalMono}>{primaryWalletAddress || 'Not available'}</Text>
-            {primaryWalletAddress ? (
-              <View style={styles.qrWrap}>
-                <QRCode value={primaryWalletAddress} size={160} color='#111827' backgroundColor='white' />
+          <ScrollView contentContainerStyle={styles.receiveScrollContent} keyboardShouldPersistTaps='handled'>
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Receive Crypto</Text>
+              <Text style={styles.receiveIntro}>Use the address for the network you are sending on.</Text>
+
+              <View style={[styles.receiveBlock, styles.receiveBlockFirst]}>
+                <Text style={styles.receiveBlockTitle}>ETH · Ethereum</Text>
+                <Text style={styles.modalMono}>{ethReceiveAddress || 'Not available'}</Text>
+                {ethReceiveAddress ? (
+                  <View style={styles.qrWrap}>
+                    <QRCode value={ethReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                  </View>
+                ) : null}
+                <PrimaryButton
+                  label='Copy ETH address'
+                  onPress={() => {
+                    if (ethReceiveAddress) void onCopyAddress(ethReceiveAddress);
+                  }}
+                  disabled={!ethReceiveAddress}
+                  style={{ marginTop: 8 }}
+                />
               </View>
-            ) : null}
-            <View style={styles.modalButtonRow}>
-              <PrimaryButton
-                label='Copy address'
-                onPress={() => {
-                  if (primaryWalletAddress) void onCopyAddress(primaryWalletAddress);
-                }}
-                style={{ flex: 1 }}
-              />
-              <View style={{ width: 8 }} />
-              <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ flex: 1 }} />
+
+              <View style={styles.receiveBlock}>
+                <Text style={styles.receiveBlockTitle}>USDT · {usdtReceiveSubtitle}</Text>
+                <Text style={styles.modalMono}>{usdtTrc20ReceiveAddress || 'Not available'}</Text>
+                {usdtTrc20ReceiveAddress ? (
+                  <View style={styles.qrWrap}>
+                    <QRCode value={usdtTrc20ReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                  </View>
+                ) : null}
+                <PrimaryButton
+                  label='Copy USDT (TRC20) address'
+                  onPress={() => {
+                    if (usdtTrc20ReceiveAddress) void onCopyAddress(usdtTrc20ReceiveAddress);
+                  }}
+                  disabled={!usdtTrc20ReceiveAddress}
+                  style={{ marginTop: 8 }}
+                />
+              </View>
+
+              <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ marginTop: 12 }} />
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
 
@@ -471,6 +509,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 20,
   },
+  receiveScrollContent: { flexGrow: 1, justifyContent: 'center' },
+  receiveIntro: { color: palette.textSecondary, fontSize: 13, marginBottom: 6, lineHeight: 18 },
+  receiveBlock: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: palette.border },
+  receiveBlockFirst: { marginTop: 0, paddingTop: 0, borderTopWidth: 0 },
+  receiveBlockTitle: { color: palette.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8 },
   modalCard: {
     backgroundColor: palette.surface,
     borderRadius: 16,
