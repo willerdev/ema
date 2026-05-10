@@ -108,8 +108,9 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 
 1. Open Supabase SQL Editor.
 2. Run `backend/sql/schema.sql` (or apply incremental files under `backend/sql/migrations/`, e.g. `20260510_airfarming_wallet.sql` for `airfarming_wallets` + `airfarming_transfers`).
-3. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
-4. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
+3. Optional one-off crypto ledger rows: edit and run [`backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql`](backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql) in the SQL editor if you need to backfill `tatum_onchain_txs` for a user (verify the `user_id` UUID in the file).
+4. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
+5. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
 
 The backend reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from `backend/.env`.
 For MT5 integration via MetaApi, set `MT5_METAAPI_TOKEN` and keep the default MetaApi URLs (or override them in env).
