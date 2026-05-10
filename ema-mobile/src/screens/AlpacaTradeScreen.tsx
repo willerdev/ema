@@ -1,5 +1,19 @@
 import { useCallback, useState } from 'react';
-import { Alert, Modal, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
@@ -9,6 +23,7 @@ import { OrderType, TradeSide } from '../types';
 import { palette } from '../theme/colors';
 
 export function AlpacaTradeScreen() {
+  const insets = useSafeAreaInsets();
   const { quote, positions, orders, setQuoteSymbol, refreshTrades, tradesError } = useTradingStore();
   const [search, setSearch] = useState('AAPL');
   const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -136,9 +151,30 @@ export function AlpacaTradeScreen() {
         {!orders.length && <Text style={styles.meta}>No orders yet</Text>}
       </Card>
 
-      <Modal visible={ticketOpen} animationType='slide' transparent>
-        <View style={styles.modalBackdrop}>
-          <View style={styles.modalContent}>
+      <Modal
+        visible={ticketOpen}
+        animationType='slide'
+        transparent
+        onRequestClose={() => {
+          Keyboard.dismiss();
+          setTicketOpen(false);
+        }}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 56 : 0}
+        >
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+              onPress={() => {
+                Keyboard.dismiss();
+                setTicketOpen(false);
+              }}
+            />
+            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'flex-end' }]}>
+              <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Trade Ticket ({search})</Text>
             <View style={styles.row}>
               <PrimaryButton label='BUY' onPress={() => setSide('buy')} variant='success' style={{ flex: 1 }} />
@@ -174,8 +210,10 @@ export function AlpacaTradeScreen() {
               <View style={{ width: 8 }} />
               <PrimaryButton label='Cancel' onPress={() => setTicketOpen(false)} variant='danger' style={{ flex: 1 }} />
             </View>
+              </View>
+            </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </ScrollView>
   );
@@ -194,7 +232,6 @@ const styles = StyleSheet.create({
   active: { borderColor: palette.primary, color: palette.primary },
   positionRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   positionText: { color: palette.textPrimary },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: palette.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
   modalTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 10 },
   error: { color: palette.danger, marginBottom: 8 },

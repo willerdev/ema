@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -190,9 +191,21 @@ export function MT5Screen() {
         <Ionicons name='add' size={28} color={palette.background} />
       </Pressable>
 
-      <Modal visible={addOpen} transparent animationType='slide'>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.modalBackdrop}>
-          <Pressable style={StyleSheet.absoluteFillObject} onPress={() => setAddOpen(false)} />
+      <Modal visible={addOpen} transparent animationType='slide' onRequestClose={() => setAddOpen(false)}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) + 48 : 0}
+          style={{ flex: 1 }}
+        >
+          <View style={{ flex: 1 }}>
+            <Pressable
+              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
+              onPress={() => {
+                Keyboard.dismiss();
+                setAddOpen(false);
+              }}
+            />
+            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'flex-end' }]}>
           <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
             <Text style={styles.label}>Add MT5 Account</Text>
             <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
@@ -203,6 +216,8 @@ export function MT5Screen() {
               <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
               <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
+            </View>
+          </View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -289,7 +304,6 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: palette.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
   modalRow: { flexDirection: 'row' },
   detailContainer: { flex: 1, backgroundColor: palette.background },

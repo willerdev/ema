@@ -191,7 +191,14 @@ export function SettingsScreen() {
           <>
             <Text style={styles.value}>Two-factor authentication is on.</Text>
             {!showDisableForm ? (
-              <PrimaryButton label='Turn off authenticator' onPress={() => setShowDisableForm(true)} variant='danger' />
+              <View style={styles.buttonRowCentered}>
+                <PrimaryButton
+                  compact
+                  label='Turn off 2FA'
+                  onPress={() => setShowDisableForm(true)}
+                  variant='danger'
+                />
+              </View>
             ) : (
               <View style={{ gap: 8, marginTop: 8 }}>
                 <TextInput
@@ -210,8 +217,26 @@ export function SettingsScreen() {
                   onChangeText={setDisableCode}
                   keyboardType='number-pad'
                 />
-                <PrimaryButton label={totpBusy ? 'Working…' : 'Confirm disable'} onPress={submitDisableTotp} disabled={totpBusy} variant='danger' />
-                <PrimaryButton label='Cancel' onPress={() => { setShowDisableForm(false); setDisablePassword(''); setDisableCode(''); }} />
+                <View style={styles.buttonRow}>
+                  <PrimaryButton
+                    compact
+                    label={totpBusy ? '…' : 'Disable'}
+                    onPress={submitDisableTotp}
+                    disabled={totpBusy}
+                    variant='danger'
+                    style={{ flex: 1 }}
+                  />
+                  <PrimaryButton
+                    compact
+                    label='Cancel'
+                    onPress={() => {
+                      setShowDisableForm(false);
+                      setDisablePassword('');
+                      setDisableCode('');
+                    }}
+                    style={{ flex: 1 }}
+                  />
+                </View>
               </View>
             )}
           </>
@@ -230,9 +255,6 @@ export function SettingsScreen() {
                 {setupSecret}
               </Text>
             ) : null}
-            {setupSecret ? (
-              <PrimaryButton label='Copy secret key' onPress={copySecret} />
-            ) : null}
             <TextInput
               style={styles.input}
               placeholder='6-digit code'
@@ -241,16 +263,44 @@ export function SettingsScreen() {
               onChangeText={setTotpConfirmCode}
               keyboardType='number-pad'
             />
-            <PrimaryButton label={totpBusy ? 'Working…' : 'Confirm and enable'} onPress={confirmTotpSetup} disabled={totpBusy} />
-            <PrimaryButton label='Cancel setup' onPress={cancelTotpSetup} disabled={totpBusy} />
+            <View style={styles.buttonRow}>
+              {setupSecret ? (
+                <PrimaryButton compact label='Copy' onPress={copySecret} style={{ flex: 1 }} />
+              ) : null}
+              <PrimaryButton
+                compact
+                label={totpBusy ? '…' : 'Enable'}
+                onPress={confirmTotpSetup}
+                disabled={totpBusy}
+                style={{ flex: 1 }}
+              />
+              <PrimaryButton
+                compact
+                label='Cancel'
+                onPress={cancelTotpSetup}
+                disabled={totpBusy}
+                variant='danger'
+                style={{ flex: 1 }}
+              />
+            </View>
             {!showQr && !setupSecret ? (
-              <PrimaryButton label='Start setup again (new QR)' onPress={startTotpSetup} disabled={totpBusy} />
+              <View style={[styles.buttonRow, styles.buttonRowCentered]}>
+                <PrimaryButton compact label='New QR' onPress={startTotpSetup} disabled={totpBusy} style={{ minWidth: 120 }} />
+              </View>
             ) : null}
           </>
         ) : (
           <>
             <Text style={styles.value}>Add a second step at sign-in with any TOTP app.</Text>
-            <PrimaryButton label={totpBusy ? 'Working…' : 'Set up authenticator'} onPress={startTotpSetup} disabled={totpBusy} />
+            <View style={styles.buttonRowCentered}>
+              <PrimaryButton
+                compact
+                label={totpBusy ? '…' : 'Set up'}
+                onPress={startTotpSetup}
+                disabled={totpBusy}
+                style={{ minWidth: 140 }}
+              />
+            </View>
           </>
         )}
       </Card>
@@ -277,4 +327,17 @@ const styles = StyleSheet.create({
   input: { backgroundColor: palette.surfaceElevated, borderColor: palette.border, borderWidth: 1, borderRadius: 10, color: palette.textPrimary, padding: 10, marginBottom: 8 },
   rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   qrWrap: { alignSelf: 'center', marginVertical: 12, padding: 12, backgroundColor: palette.surfaceElevated, borderRadius: 12 },
+  buttonRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: 8,
+    marginTop: 8,
+  },
+  buttonRowCentered: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
 });
