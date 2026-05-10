@@ -15,7 +15,7 @@ export type AirfarmingStatus = {
   scheduleHours: number[];
   lastEventAt: string | null;
   platformHighlight: AirfarmingPlatformHighlight | null;
-  history: { id: string; percent: number; createdAt: string }[];
+  history: { id: string; percent: number; createdAt: string; source?: 'platform' }[];
 };
 
 export type AirfarmingBalances = {
@@ -56,6 +56,7 @@ function normalizeStatus(raw: unknown): AirfarmingStatus {
             id: String(row.id ?? ''),
             percent: num(row.percent),
             createdAt: String(row.createdAt ?? ''),
+            ...(row.source === 'platform' ? { source: 'platform' as const } : {}),
           };
         })
       : [],

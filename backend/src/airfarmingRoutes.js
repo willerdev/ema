@@ -1,10 +1,11 @@
 const crypto = require('crypto');
 
-/** Platform-reported yield highlight for the airfarming screen (`GET /airfarming/status`). Calendar date is UTC YYYY-MM-DD. */
-const AIRFARMING_PLATFORM_HIGHLIGHT = Object.freeze({
-  date: '2026-05-09',
-  percent: 34.49,
-});
+/** Platform-reported milestones merged into `history` on GET `/airfarming/status`. Calendar dates UTC YYYY-MM-DD. */
+const AIRFARMING_PLATFORM_HIGHLIGHTS = Object.freeze([
+  { date: '2026-05-09', percent: 34.49 },
+]);
+
+const AIRFARMING_PLATFORM_HIGHLIGHT = AIRFARMING_PLATFORM_HIGHLIGHTS[0] ?? null;
 
 const {
   getAirfarmingStateByUserId,
@@ -53,7 +54,7 @@ function buildFourOffsets(seed) {
   while (set.size < 4 && guard < 50) {
     guard += 1;
     x = (Math.imul(1664525, x) + 1013904223) >>> 0;
-    const hr = 28 + (x % 120); // 28..147 hours from week start
+    const hr = 6 + (x % 90); // 6..95 hours from Monday UTC — simulated fires sooner than legacy 28–147h
     set.add(hr);
   }
   return [...set].sort((a, b) => a - b);
@@ -127,6 +128,30 @@ async function maybeFireEvents(userId, row) {
   return row;
 }
 
+function mergeAirfarmingHistory(dbEvents, highlights, limit = 25) {
+  const rows = (dbEvents || []).map((e) => ({
+    id: String(e.id),
+    percent: Number(e.percent),
+    createdAt: e.created_at,
+    source: 'schedule',
+  }));
+  for (const h of highlights) {
+    const date = String(h?.date ?? '').trim();
+    const pct = Number(h?.percent);
+    if (!date || !Number.isFinite(pct)) continue;
+    rows.push({
+      id: `platform:${date}:${pct}`,
+      percent: Number(pct.toFixed(2)),
+      createdAt: `${date}T12:00:00.000Z`,
+      source: 'platform',
+    });
+  }
+  rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return rows.slice(0, limit).map(({ id, percent, createdAt, source }) =>
+    source === 'platform' ? { id, percent, createdAt, source: 'platform' } : { id, percent, createdAt }
+  );
+}
+
 function registerAirfarmingRoutes(app, { authMiddleware }) {
   const schemaMsg =
     'Airfarming schema missing. Run backend/sql/schema.sql in Supabase (airfarming_state, airfarming_events, airfarming_wallets, airfarming_transfers).';
@@ -143,7 +168,8 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
     try {
       let state = await ensureWeekState(req.userId);
       state = await maybeFireEvents(req.userId, state);
-      const history = await listAirfarmingEventsByUserId(req.userId, 25);
+      const dbHistory = await listAirfarmingEventsByUserId(req.userId, 50);
+      const history = mergeAirfarmingHistory(dbHistory, AIRFARMING_PLATFORM_HIGHLIGHTS, 25);
       const { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
       return res.json({
         cashWallet,
@@ -154,11 +180,7 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         scheduleHours: state.event_offsets_hours,
         lastEventAt: state.last_event_at,
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
-        history: history.map((e) => ({
-          id: e.id,
-          percent: Number(e.percent),
-          createdAt: e.created_at,
-        })),
+        history,
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });

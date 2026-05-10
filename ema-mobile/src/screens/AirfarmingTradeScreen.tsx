@@ -177,10 +177,13 @@ export function AirfarmingTradeScreen() {
 
             <Card>
               <Text style={styles.section}>Recent events</Text>
-              {!status.history.length && <Text style={styles.meta}>No events yet this week.</Text>}
+              <Text style={[styles.meta, { marginBottom: 8 }]}>
+                Scheduled rows unlock when their hour passes (UTC week). Platform rows are fixed-date milestones.
+              </Text>
+              {!status.history.length && <Text style={styles.meta}>Nothing to show yet.</Text>}
               {status.history.map((h) => (
                 <Text key={h.id || String(h.createdAt)} style={styles.row}>
-                  +{Number(h.percent ?? 0).toFixed(0)}% —{' '}
+                  {h.source === 'platform' ? 'Platform · ' : ''}+{Number(h.percent ?? 0).toFixed(2)}% —{' '}
                   {h.createdAt ? new Date(h.createdAt).toLocaleString() : '—'}
                 </Text>
               ))}
