@@ -1,4 +1,11 @@
 const crypto = require('crypto');
+
+/** Platform-reported yield highlight for the airfarming screen (`GET /airfarming/status`). Calendar date is UTC YYYY-MM-DD. */
+const AIRFARMING_PLATFORM_HIGHLIGHT = Object.freeze({
+  date: '2026-05-09',
+  percent: 34.49,
+});
+
 const {
   getAirfarmingStateByUserId,
   upsertAirfarmingState,
@@ -146,6 +153,7 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         weeklyUsed: state.weekly_events_used,
         scheduleHours: state.event_offsets_hours,
         lastEventAt: state.last_event_at,
+        platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
         history: history.map((e) => ({
           id: e.id,
           percent: Number(e.percent),

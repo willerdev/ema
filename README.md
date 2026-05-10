@@ -93,7 +93,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `GET /mt5/accounts/:id/balance`
 - `GET /mt5/accounts/:id/positions`
 - `GET /health/db`
-- `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields)
+- `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields, optional `platformHighlight` with `{ date, percent }` for dated platform-reported yields)
 - `POST /airfarming/activate` — move amount from internal cash wallet into airfarming
 - `POST /airfarming/return-to-cash` — move amount from airfarming back to cash (required before wallet withdraw)
 
