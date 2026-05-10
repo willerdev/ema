@@ -108,7 +108,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 
 1. Open Supabase SQL Editor.
 2. Run `backend/sql/schema.sql` (or apply incremental files under `backend/sql/migrations/`, e.g. `20260510_airfarming_wallet.sql` for `airfarming_wallets` + `airfarming_transfers`).
-3. Optional one-off crypto ledger rows: edit and run [`backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql`](backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql) in the SQL editor if you need to backfill `tatum_onchain_txs` for a user (verify the `user_id` UUID in the file).
+3. Optional one-off crypto ledger rows: run [`backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql`](backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql) (EVM USDT out) and/or [`backend/sql/migrations/20260512_manual_trc20_usdt_deposit.sql`](backend/sql/migrations/20260512_manual_trc20_usdt_deposit.sql) (Tron USDT in; same `user_id` as the ETH wallet row when that wallet exists in `crypto_ethereum_wallets`).
 4. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
 5. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
 
