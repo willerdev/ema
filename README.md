@@ -93,7 +93,7 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `GET /mt5/accounts/:id/balance`
 - `GET /mt5/accounts/:id/positions`
 - `GET /health/db`
-- `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields; `history` merges scheduled weekly rows from the DB with optional platform milestones — items may include `source`=`platform`; `platformHighlight` echoes the headline `{ date, percent }`)
+- `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields; scheduled weekly yield events use a pseudo-random percent in **20–85** per event, stable per user/week/slot; `history` merges DB rows with optional platform milestones — items may include `source`=`platform`; `platformHighlight` echoes the headline `{ date, percent }`)
 - `POST /airfarming/activate` — move amount from internal cash wallet into airfarming
 - `POST /airfarming/return-to-cash` — move amount from airfarming back to cash (required before wallet withdraw)
 

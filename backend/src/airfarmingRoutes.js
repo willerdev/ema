@@ -84,6 +84,15 @@ async function ensureWeekState(userId) {
   return row;
 }
 
+/** Simulated weekly event return (%), pseudo-random in [minPct, maxPct] inclusive, stable per user/week/slot. */
+function simulatedReturnPercent(userId, weekStart, eventIndex, lastEventAt) {
+  const minPct = 20;
+  const maxPct = 85;
+  const span = maxPct - minPct + 1;
+  const h = hash32(`${userId}:${weekStart}:${eventIndex}:${lastEventAt || 0}:airfarmingReturn`);
+  return minPct + (h % span);
+}
+
 async function maybeFireEvents(userId, row) {
   const weekStartMs = ymdToUtcMs(row.week_start);
   let rawOffsets = row.event_offsets_hours;
@@ -103,7 +112,7 @@ async function maybeFireEvents(userId, row) {
   while (used < target && used < offsets.length) {
     const due = weekStartMs + offsets[used] * 3600 * 1000;
     if (now < due) break;
-    const pct = 30 + (hash32(`${userId}:${row.week_start}:${used}:${lastAt || 0}`) % 471);
+    const pct = simulatedReturnPercent(userId, row.week_start, used, lastAt);
     await insertAirfarmingEvent({
       id: newId(),
       user_id: userId,
