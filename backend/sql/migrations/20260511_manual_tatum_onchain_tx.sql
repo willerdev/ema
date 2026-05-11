@@ -1,12 +1,8 @@
--- Manual crypto activity row: outbound USDT on Ethereum mainnet.
--- On-chain: tx 0x3b925bee7c099d437393f3d1d444f67aea24039d700f945d124ae99f9b554f92
---   from 0x56eddb7aa87536c09ccc2793473599fd21a8b17f
---   to   0x4bf4d27dad979d5960c17753dbc8dd52bc47d6f9 (transfer() arg on USDT contract)
---   amount: 100 USDT (6 decimals, value 0x5f5e100)
---
--- Resolves user_id from crypto_ethereum_wallets using the sender address (must match onboarded HD wallet).
--- If this inserts 0 rows, run the diagnostic SELECTs at the bottom, then use the manual block with a real users.id.
+-- Supabase shows "Success" whenever the query finishes without error.
+-- That does NOT mean a row was inserted: (1) INSERT...SELECT can match 0 rows;
+-- (2) ON CONFLICT DO NOTHING skips duplicates with no error. Use the SELECT at the bottom.
 
+with inserted as (
 insert into public.tatum_onchain_txs (
   id,
   user_id,
@@ -35,7 +31,20 @@ select
 from public.crypto_ethereum_wallets w
 inner join public.users u on u.id = w.user_id
 where lower(trim(w.address)) = lower('0x56eddb7aa87536c09ccc2793473599fd21a8b17f')
-on conflict (dedupe_key) do nothing;
+on conflict (dedupe_key) do nothing
+returning id
+)
+select
+  (select count(*)::int from inserted) as rows_inserted_this_run,
+  (select count(*)::int
+   from public.crypto_ethereum_wallets w
+   inner join public.users u on u.id = w.user_id
+   where lower(trim(w.address)) = lower('0x56eddb7aa87536c09ccc2793473599fd21a8b17f')) as wallet_join_rows_for_insert,
+  (select count(*)::int from public.tatum_onchain_txs
+   where dedupe_key = 'out:0x3b925bee7c099d437393f3d1d444f67aea24039d700f945d124ae99f9b554f92:USDT') as rows_with_this_dedupe_key_total;
+
+-- If rows_inserted_this_run = 0 and rows_with_this_dedupe_key_total >= 1: duplicate (already had row).
+-- If wallet_join_rows_for_insert = 0: no ETH wallet row — use manual INSERT below with a real users.id.
 
 -- Diagnostics (run separately if insert affected 0 rows):
 -- select id, email from public.users order by created_at desc limit 20;

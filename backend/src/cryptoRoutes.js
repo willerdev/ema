@@ -493,12 +493,22 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         return res.status(503).json({ message: notConfiguredMessage });
       }
       const wallet = await getCryptoEthereumWalletByUserId(req.userId);
+      const activity = await listTatumOnchainTxsByUserId(req.userId, 40);
+      const activityPayload = activity.map((t) => ({
+        id: t.id,
+        direction: t.direction,
+        asset: t.asset,
+        amountDisplay: t.amount_display,
+        txHash: t.tx_hash,
+        createdAt: t.created_at,
+      }));
+
       if (!wallet) {
         return res.json({
           onboarded: false,
           depositAddress: getPublicDepositEthAddress(),
           balances: [],
-          activity: [],
+          activity: activityPayload,
           wallets: publicDepositWallets(),
           swap: swapState,
         });
@@ -510,8 +520,6 @@ function registerCryptoRoutes(app, { authMiddleware }) {
         { asset: 'ETH', balance: String(walletRow.cached_eth_balance || '0') },
         { asset: 'USDT', balance: String(walletRow.cached_usdt_balance || '0') },
       ];
-
-      const activity = await listTatumOnchainTxsByUserId(req.userId, 40);
       return res.json({
         onboarded: true,
         depositAddress: getPublicDepositEthAddress(),
@@ -523,14 +531,7 @@ function registerCryptoRoutes(app, { authMiddleware }) {
           updatedAt: walletRow.balances_updated_at || null,
           refreshIntervalSec: 60,
         },
-        activity: activity.map((t) => ({
-          id: t.id,
-          direction: t.direction,
-          asset: t.asset,
-          amountDisplay: t.amount_display,
-          txHash: t.tx_hash,
-          createdAt: t.created_at,
-        })),
+        activity: activityPayload,
         swap: swapState,
       });
     } catch (e) {
