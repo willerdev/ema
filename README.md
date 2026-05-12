@@ -120,6 +120,6 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 The backend reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from `backend/.env`.
 For MT5 integration via MetaApi, set `MT5_METAAPI_TOKEN` and keep the default MetaApi URLs (or override them in env).
 
-**MT5 EA webhooks:** run [`backend/sql/migrations/20260513_mt5_ea_webhook.sql`](backend/sql/migrations/20260513_mt5_ea_webhook.sql). Optional env **`MT5_EA_WEBHOOK_SECRET`** enables HMAC auth on `POST /webhooks/mt5-ea/telemetry` (body must include `login` and `server` matching an `mt5_accounts` row). MQL5 sample: [`backend/docs/mt5_ea_webhook_sample.mq5`](backend/docs/mt5_ea_webhook_sample.mq5) — add your Render URL under **Tools → Options → Expert Advisors → Allow WebRequest**.
+**MT5 EA webhooks:** run [`backend/sql/migrations/20260513_mt5_ea_webhook.sql`](backend/sql/migrations/20260513_mt5_ea_webhook.sql). Optional env **`MT5_EA_WEBHOOK_SECRET`** enables HMAC auth on `POST /webhooks/mt5-ea/telemetry` (body must include `login` and `server` matching an `mt5_accounts` row). Compile the EA from [`backend/docs/EmaWebhookEa.mq5`](backend/docs/EmaWebhookEa.mq5) in MetaEditor: add your API host under **Tools → Options → Expert Advisors → Allow WebRequest**, set **InpEaBearerToken** from `POST /mt5/accounts/:id/ea-webhook-token`, attach to chart.
 
 Use `GET /health/db` to verify table connectivity and basic counts from Supabase.
