@@ -92,12 +92,17 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 - `POST /mt5/accounts`
 - `GET /mt5/accounts/:id/balance`
 - `GET /mt5/accounts/:id/positions`
-- `GET /health/db`
+- `POST /mt5/accounts/:id/refresh-balance`
+- `POST /mt5/accounts/:id/ea-webhook-token` — issue/rotate **EA webhook bearer** for `Authorization: Bearer …` on `/webhooks/mt5-ea/*`
+- `POST /mt5/accounts/:id/ea-commands` — enqueue buy/sell for EA to poll (`clientId`, `side`, `symbol`, `volume`, optional `stopLoss`, `takeProfit`, `magic`)
+- `POST /mt5/accounts/:id/orders` — place **market** order via **MetaApi** (`symbol`, `volume`, `side`, optional `stopLoss`, `takeProfit`)
+- `POST /webhooks/mt5-ea/telemetry` — EA pushes JSON (auth: **Bearer** token from above, or **HMAC** with `MT5_EA_WEBHOOK_SECRET` + header `X-MT5-EA-Signature: sha256=<hex>` and JSON body including `login`, `server`)
+- `GET /webhooks/mt5-ea/commands` — EA polls pending commands (**Bearer** only)
+- `POST /webhooks/mt5-ea/commands/:commandId/ack` — EA reports result (`status`: `acked` | `failed`, optional `ticket`, `error`, `meta`)
 - `GET /airfarming/status` (includes `cashWallet`, `airfarmingBalance`, weekly event fields; scheduled weekly yield events use a pseudo-random percent in **20–85** per event, stable per user/week/slot; `history` merges DB rows with optional platform milestones — items may include `source`=`platform`; `platformHighlight` echoes the headline `{ date, percent }`)
 - `POST /airfarming/activate` — move amount from internal cash wallet into airfarming
 - `POST /airfarming/return-to-cash` — move amount from airfarming back to cash (required before wallet withdraw)
-
-## Notes / limitations
+- `GET /health/db`
 
 - Backend is now wired to Supabase Postgres tables for persistence.
 - Light mode toggle is placeholder UI; dark mode is default.
@@ -107,12 +112,14 @@ If Alpaca keys are missing, relevant trading endpoints return safe validation er
 ## Supabase schema setup
 
 1. Open Supabase SQL Editor.
-2. Run `backend/sql/schema.sql` (or apply incremental files under `backend/sql/migrations/`, e.g. `20260510_airfarming_wallet.sql` for `airfarming_wallets` + `airfarming_transfers`).
+2. Run `backend/sql/schema.sql` (or apply incremental files under `backend/sql/migrations/`, e.g. `20260510_airfarming_wallet.sql` for `airfarming_wallets` + `airfarming_transfers`, and `20260513_mt5_ea_webhook.sql` for EA telemetry/commands + `ea_webhook_token` on `mt5_accounts`).
 3. Optional one-off crypto ledger rows: [`20260511_manual_tatum_onchain_tx.sql`](backend/sql/migrations/20260511_manual_tatum_onchain_tx.sql) (EVM USDT out) and [`20260512_manual_trc20_usdt_deposit.sql`](backend/sql/migrations/20260512_manual_trc20_usdt_deposit.sql) (Tron USDT in). If **`wallet_join_rows_for_eth_address`** is **0**, set **`explicit_user_id`** in the `cfg` CTE to that user’s `public.users.id` (from `select id, email from public.users`) — otherwise the `INSERT` has no `user_id` to attach.
 4. Confirm `users`, `wallets`, `transactions`, and `mt5_accounts` tables exist.
 5. If migrating from old single-MT5 schema, remove unique constraint on `mt5_accounts.user_id`.
 
 The backend reads `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` from `backend/.env`.
 For MT5 integration via MetaApi, set `MT5_METAAPI_TOKEN` and keep the default MetaApi URLs (or override them in env).
+
+**MT5 EA webhooks:** run [`backend/sql/migrations/20260513_mt5_ea_webhook.sql`](backend/sql/migrations/20260513_mt5_ea_webhook.sql). Optional env **`MT5_EA_WEBHOOK_SECRET`** enables HMAC auth on `POST /webhooks/mt5-ea/telemetry` (body must include `login` and `server` matching an `mt5_accounts` row). MQL5 sample: [`backend/docs/mt5_ea_webhook_sample.mq5`](backend/docs/mt5_ea_webhook_sample.mq5) — add your Render URL under **Tools → Options → Expert Advisors → Allow WebRequest**.
 
 Use `GET /health/db` to verify table connectivity and basic counts from Supabase.

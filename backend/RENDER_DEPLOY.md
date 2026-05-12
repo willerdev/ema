@@ -38,6 +38,8 @@ In Render service settings, add:
 - `ALPACA_BASE_URL=https://paper-api.alpaca.markets`
 - `ALPACA_LIVE_URL=https://api.alpaca.markets`
 - `DEV_RESET_TOKEN=<set-random-token-or-remove-route-for-prod>`
+- `MT5_METAAPI_TOKEN=<MetaApi token>` (for MT5 balance, positions, server-side orders)
+- `MT5_EA_WEBHOOK_SECRET=<optional>` (HMAC on `POST /webhooks/mt5-ea/telemetry` when EA does not use Bearer token; body must include `login` and `server`)
 
 Important:
 - Use the **service role key** only on backend.

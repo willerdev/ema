@@ -148,4 +148,53 @@ async function fetchMt5OpenPositions({ accountId }) {
   throw lastError || new Error('Unable to fetch positions from MetaApi regional endpoints');
 }
 
-module.exports = { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage };
+/**
+ * Place a market order via MetaApi trade RPC (same regional client API as balance).
+ * @param {{ accountId: string, symbol: string, volume: number, side: 'buy'|'sell', stopLoss?: number|null, takeProfit?: number|null }} params
+ */
+async function placeMetaApiTrade({ accountId, symbol, volume, side, stopLoss, takeProfit }) {
+  const token = getMetaApiToken();
+  const actionType =
+    String(side || '').toLowerCase() === 'sell' ? 'ORDER_TYPE_SELL' : 'ORDER_TYPE_BUY';
+  const payload = {
+    actionType,
+    symbol: String(symbol || '').trim().toUpperCase(),
+    volume: Number(volume),
+  };
+  if (stopLoss != null && stopLoss !== '' && Number.isFinite(Number(stopLoss))) {
+    payload.stopLoss = Number(stopLoss);
+  }
+  if (takeProfit != null && takeProfit !== '' && Number.isFinite(Number(takeProfit))) {
+    payload.takeProfit = Number(takeProfit);
+  }
+
+  const candidates = getClientApiCandidates();
+  let lastError = null;
+  for (const baseUrl of candidates) {
+    try {
+      const response = await axios.post(
+        `${baseUrl.replace(/\/+$/, '')}/users/current/accounts/${accountId}/trade`,
+        payload,
+        {
+          timeout: 45000,
+          headers: {
+            'Content-Type': 'application/json',
+            'auth-token': token,
+            'transaction-id': txId(),
+          },
+        }
+      );
+      return response.data || {};
+    } catch (error) {
+      lastError = error;
+      const message = extractErrorMessage(error, '').toLowerCase();
+      const status = error?.response?.status;
+      const accountNotFound = status === 404 || (message.includes('account id') && message.includes('not found'));
+      if (accountNotFound) continue;
+      throw error;
+    }
+  }
+  throw lastError || new Error('Unable to place trade via MetaApi regional endpoints');
+}
+
+module.exports = { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, placeMetaApiTrade, extractErrorMessage };

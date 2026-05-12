@@ -207,6 +207,88 @@ async function updateMt5AccountSnapshot(userId, accountId, snapshot) {
   if (error) throw error;
 }
 
+async function getMt5AccountByEaWebhookToken(token) {
+  if (!token) return null;
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*')
+    .eq('ea_webhook_token', String(token).trim())
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getMt5AccountByLoginAndServer(login, server) {
+  if (!login || !server) return null;
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*')
+    .eq('login', String(login).trim())
+    .eq('server', String(server).trim())
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function setMt5EaWebhookToken(userId, accountId, token) {
+  const { error } = await supabase
+    .from('mt5_accounts')
+    .update({ ea_webhook_token: token, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', accountId);
+  if (error) throw error;
+}
+
+async function insertMt5EaTelemetry({ mt5AccountId, payload }) {
+  const { data, error } = await supabase
+    .from('mt5_ea_telemetry')
+    .insert({
+      mt5_account_id: mt5AccountId,
+      payload: payload && typeof payload === 'object' ? payload : {},
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function insertMt5EaCommand(row) {
+  const { data, error } = await supabase.from('mt5_ea_commands').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listPendingMt5EaCommands(mt5AccountId, limit = 50) {
+  const { data, error } = await supabase
+    .from('mt5_ea_commands')
+    .select('id, client_id, side, symbol, volume, stop_loss, take_profit, magic, status, created_at')
+    .eq('mt5_account_id', mt5AccountId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function ackMt5EaCommand(mt5AccountId, commandId, { status, ackTicket, ackError, ackMeta }) {
+  const { data, error } = await supabase
+    .from('mt5_ea_commands')
+    .update({
+      status,
+      ack_ticket: ackTicket ?? null,
+      ack_error: ackError ?? null,
+      ack_meta: ackMeta ?? null,
+      acked_at: new Date().toISOString(),
+    })
+    .eq('id', commandId)
+    .eq('mt5_account_id', mt5AccountId)
+    .eq('status', 'pending')
+    .select('id');
+  if (error) throw error;
+  return data && data.length ? data[0] : null;
+}
+
 async function checkDatabaseHealth() {
   const [
     usersResult,
@@ -437,6 +519,13 @@ module.exports = {
   createMt5AccountForUser,
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
+  getMt5AccountByEaWebhookToken,
+  getMt5AccountByLoginAndServer,
+  setMt5EaWebhookToken,
+  insertMt5EaTelemetry,
+  insertMt5EaCommand,
+  listPendingMt5EaCommands,
+  ackMt5EaCommand,
   checkDatabaseHealth,
   getCryptoEthereumWalletByUserId,
   getNextCryptoEthereumDerivationIndex,

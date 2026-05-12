@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const crypto = require('crypto');
 const cors = require('cors');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
@@ -21,18 +22,22 @@ const {
   createMt5AccountForUser,
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
+  insertMt5EaCommand,
+  setMt5EaWebhookToken,
   checkDatabaseHealth,
+  isMissingTableError,
 } = require('./db');
 const { authMiddleware, totpPendingMiddleware, TOTP_PENDING_PURPOSE } = require('./middleware/auth');
 const { encryptTotpSecret, decryptTotpSecret } = require('./totpCrypto');
 const { mapTotpConfigurationError } = require('./totpErrors');
 const { generateSecret, generateURI, verifySync } = require('otplib');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
-const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, extractErrorMessage } = require('./services/mt5Client');
+const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, placeMetaApiTrade, extractErrorMessage } = require('./services/mt5Client');
 
 const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
 const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
 const { registerContractRoutes } = require('./contractRoutes');
+const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
 
 const app = express();
 app.use(cors());
@@ -48,6 +53,7 @@ app.post(
     handleTatumWebhook(req, res).catch(next);
   }
 );
+registerMt5EaWebhookRoutes(app);
 app.use(express.json());
 
 function alpacaErrorMessage(error, fallback) {
@@ -778,6 +784,110 @@ app.get('/mt5/accounts/:id/positions', authMiddleware, async (req, res) => {
     return res.json({ positions });
   } catch (error) {
     const message = mt5SafeErrorMessage(error, 'Failed to fetch MT5 positions');
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/mt5/accounts/:id/ea-webhook-token', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
+    const token = crypto.randomBytes(32).toString('hex');
+    await setMt5EaWebhookToken(req.userId, account.id, token);
+    return res.json({ eaWebhookToken: token });
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return res.status(503).json({ message: 'MT5 EA schema not applied. Run migrations/20260513_mt5_ea_webhook.sql' });
+    }
+    const message = process.env.NODE_ENV === 'production' ? 'Failed to rotate EA token' : extractErrorMessage(error, 'Failed to rotate EA token');
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/mt5/accounts/:id/ea-commands', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
+    const { clientId, side, symbol, volume, stopLoss, takeProfit, magic } = req.body || {};
+    if (!clientId || !side || !symbol || volume === undefined || volume === null) {
+      return res.status(400).json({ message: 'clientId, side, symbol, and volume are required' });
+    }
+    const s = String(side).toLowerCase();
+    if (s !== 'buy' && s !== 'sell') return res.status(400).json({ message: 'side must be buy or sell' });
+    const vol = Number(volume);
+    if (!Number.isFinite(vol) || vol <= 0) return res.status(400).json({ message: 'volume must be a positive number' });
+    try {
+      const row = await insertMt5EaCommand({
+        id: crypto.randomUUID(),
+        mt5_account_id: account.id,
+        client_id: String(clientId),
+        side: s,
+        symbol: String(symbol).trim(),
+        volume: vol,
+        stop_loss: stopLoss != null && stopLoss !== '' && Number.isFinite(Number(stopLoss)) ? Number(stopLoss) : null,
+        take_profit: takeProfit != null && takeProfit !== '' && Number.isFinite(Number(takeProfit)) ? Number(takeProfit) : null,
+        magic: magic != null && magic !== '' && Number.isFinite(Number(magic)) ? Number(magic) : 0,
+        status: 'pending',
+      });
+      return res.json({ id: row.id, clientId: row.client_id });
+    } catch (error) {
+      if (isMissingTableError(error)) {
+        return res.status(503).json({ message: 'MT5 EA schema not applied. Run migrations/20260513_mt5_ea_webhook.sql' });
+      }
+      if (error?.code === '23505') {
+        return res.status(409).json({ message: 'Duplicate clientId for this MT5 account' });
+      }
+      throw error;
+    }
+  } catch (error) {
+    if (isMissingTableError(error)) {
+      return res.status(503).json({ message: 'MT5 EA schema not applied. Run migrations/20260513_mt5_ea_webhook.sql' });
+    }
+    const message = process.env.NODE_ENV === 'production' ? 'Failed to enqueue EA command' : extractErrorMessage(error, 'Failed to enqueue EA command');
+    return res.status(500).json({ message });
+  }
+});
+
+app.post('/mt5/accounts/:id/orders', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
+
+    const { symbol, volume, side, stopLoss, takeProfit } = req.body || {};
+    if (!symbol || volume === undefined || volume === null || !side) {
+      return res.status(400).json({ message: 'symbol, volume, and side are required' });
+    }
+    const s = String(side).toLowerCase();
+    if (s !== 'buy' && s !== 'sell') return res.status(400).json({ message: 'side must be buy or sell' });
+    const vol = Number(volume);
+    if (!Number.isFinite(vol) || vol <= 0) return res.status(400).json({ message: 'volume must be a positive number' });
+
+    const { accountId } = await ensureMetaApiAccount({
+      metaapiAccountId: account.metaapi_account_id,
+      login: account.login,
+      password: account.password,
+      server: account.server,
+      accountName: account.account_name || '',
+    });
+    if (accountId && accountId !== account.metaapi_account_id) {
+      await setMt5AccountMetaApiId(req.userId, account.id, accountId);
+    }
+
+    const result = await placeMetaApiTrade({
+      accountId,
+      symbol: String(symbol).trim(),
+      volume: vol,
+      side: s,
+      stopLoss,
+      takeProfit,
+    });
+    return res.json({ ok: true, result });
+  } catch (error) {
+    const message = mt5SafeErrorMessage(error, 'Order placement failed');
+    const httpStatus = error?.response?.status;
+    if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 600) {
+      return res.status(httpStatus).json({ message });
+    }
     return res.status(500).json({ message });
   }
 });
