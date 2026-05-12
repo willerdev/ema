@@ -12,8 +12,8 @@ export function TradesHubScreen() {
 
       <Pressable onPress={() => (navigation as any).navigate('AlpacaTrade')}>
         <Card style={styles.hubCard}>
-          <Text style={styles.cardTitle}>Trade on Alpaca</Text>
-          <Text style={styles.cardMeta}>Stocks & crypto via your linked Alpaca account</Text>
+          <Text style={styles.cardTitle}>Trade on forex market</Text>
+          <Text style={styles.cardMeta}>Stocks & crypto via your linked broker (Alpaca)</Text>
           <Text style={styles.roi}>Illustrative ROI range: -1% to +100%</Text>
         </Card>
       </Pressable>
@@ -22,7 +22,7 @@ export function TradesHubScreen() {
         <Card style={styles.hubCard}>
           <Text style={styles.cardTitle}>Trade Airfarming</Text>
           <Text style={styles.cardMeta}>Server-tracked yield events (2–4 per week)</Text>
-          <Text style={styles.roi}>Event range: 30% to 500%</Text>
+          <Text style={styles.roi}>Event range: 20% to 85%</Text>
         </Card>
       </Pressable>
 
@@ -31,6 +31,14 @@ export function TradesHubScreen() {
           <Text style={styles.cardTitle}>Trade Contracts</Text>
           <Text style={styles.cardMeta}>Dedicated contract balance — accrues daily while funded</Text>
           <Text style={styles.roi}>Daily accrual: 2%</Text>
+        </Card>
+      </Pressable>
+
+      <Pressable onPress={() => (navigation as any).navigate('ExpertAutoTrading')}>
+        <Card style={styles.hubCard}>
+          <Text style={styles.cardTitle}>Expert auto trading</Text>
+          <Text style={styles.cardMeta}>EA-style automation on derived markets and/or forex — requires MT5</Text>
+          <Text style={styles.roi}>Link MT5, then choose markets and activate</Text>
         </Card>
       </Pressable>
     </ScrollView>

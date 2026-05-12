@@ -1,3 +1,5 @@
+import type { NavigatorScreenParams } from '@react-navigation/native';
+
 export type RootTabParamList = {
   Home: undefined;
   Trades: undefined;
@@ -7,10 +9,11 @@ export type RootTabParamList = {
 };
 
 export type RootStackParamList = {
-  MainTabs: undefined;
+  MainTabs: NavigatorScreenParams<RootTabParamList> | undefined;
   AlpacaTrade: undefined;
   AirfarmingTrade: undefined;
   ContractsTrade: undefined;
+  ExpertAutoTrading: undefined;
 };
 
 export type ActivityFeedItem = {
