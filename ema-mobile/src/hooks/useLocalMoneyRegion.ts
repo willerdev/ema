@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import * as Location from 'expo-location';
-import { complianceService } from '../services/complianceService';
-import { localMoneyService, LocalMoneyConfigResponse, LocalMoneyRegion } from '../services/localMoneyService';
+import { localMoneyService, LocalMoneyConfigResponse } from '../services/localMoneyService';
 
 const COUNTRY_ALIASES: Record<string, string> = {
   RW: 'RW',
@@ -24,8 +23,7 @@ export function useLocalMoneyRegion() {
   const [countryCode, setCountryCode] = useState<string | null>(null);
   const [locationStatus, setLocationStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle');
   const [config, setConfig] = useState<LocalMoneyConfigResponse | null>(null);
-  const [regions, setRegions] = useState<LocalMoneyRegion[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const loadConfig = useCallback(async (code: string) => {
@@ -37,80 +35,52 @@ export function useLocalMoneyRegion() {
   const detectLocation = useCallback(async () => {
     setLocationStatus('requesting');
     setError(null);
+    setLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setLocationStatus('denied');
-        const profile = await complianceService.getProfile();
-        const fromProfile = normalizeCountryCode(profile.profile?.country);
-        if (fromProfile) {
-          setCountryCode(fromProfile);
-          await loadConfig(fromProfile);
-        }
+        setCountryCode(null);
+        setConfig(null);
         return;
       }
-      setLocationStatus('granted');
       const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       const places = await Location.reverseGeocodeAsync({
         latitude: pos.coords.latitude,
         longitude: pos.coords.longitude,
       });
       const iso = normalizeCountryCode(places[0]?.isoCountryCode);
-      if (iso) {
-        setCountryCode(iso);
-        await loadConfig(iso);
+      if (!iso) {
+        setLocationStatus('denied');
+        setCountryCode(null);
+        setConfig(null);
+        setError('Could not determine your country from location.');
         return;
       }
-      setLocationStatus('denied');
+      setLocationStatus('granted');
+      setCountryCode(iso);
+      await loadConfig(iso);
     } catch (e: any) {
       setLocationStatus('denied');
+      setCountryCode(null);
+      setConfig(null);
       setError(e?.message || 'Could not detect location');
+    } finally {
+      setLoading(false);
     }
   }, [loadConfig]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const { regions: list } = await localMoneyService.getRegions();
-        if (!cancelled) setRegions(list);
-        await detectLocation();
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || 'Failed to load local money settings');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [detectLocation]);
-
-  const selectCountry = useCallback(
-    async (code: string) => {
-      const normalized = normalizeCountryCode(code);
-      if (!normalized) return;
-      setCountryCode(normalized);
-      setLoading(true);
-      try {
-        await loadConfig(normalized);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [loadConfig]
-  );
+  const locationReady = locationStatus === 'granted' && Boolean(countryCode);
 
   return {
     countryCode,
     config,
-    regions,
     loading,
     error,
     locationStatus,
+    locationReady,
     detectLocation,
-    selectCountry,
-    supported: Boolean(config?.supported && config.region),
+    supported: Boolean(locationReady && config?.supported && config.region),
     region: config?.region ?? null,
     usdtPairLabel: config?.usdtPairLabel ?? 'USDT',
     sampleOffers: config?.sampleOffers ?? [],

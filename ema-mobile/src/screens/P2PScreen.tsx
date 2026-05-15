@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
+import { LocationGateCard } from '../components/LocationGateCard';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useLocalMoneyRegion } from '../hooks/useLocalMoneyRegion';
 import { ExtraStackParamList } from '../types';
@@ -36,10 +37,9 @@ export function P2PScreen() {
     sampleOffers,
     loading,
     locationStatus,
+    locationReady,
     detectLocation,
-    regions,
-    selectCountry,
-    countryCode,
+    error,
   } = useLocalMoneyRegion();
   const [sideFilter, setSideFilter] = useState<SideFilter>('all');
   const [assetFilter, setAssetFilter] = useState<string>('all');
@@ -73,43 +73,39 @@ export function P2PScreen() {
     });
   }, [offers, sideFilter, assetFilter]);
 
+  if (!locationReady) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+        <Text style={styles.sub}>
+          Enable location to see peer offers and local USDT rates for where you are.
+        </Text>
+        <LocationGateCard locationStatus={locationStatus} error={error} onEnableLocation={detectLocation} />
+      </ScrollView>
+    );
+  }
+
+  if (!supported || !region) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+        <Card>
+          <Text style={styles.emptyTitle}>Not available in your region</Text>
+          <Text style={styles.meta}>Local P2P and mobile money are not offered where you are located.</Text>
+        </Card>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
       <Text style={styles.sub}>
-        {supported && region
-          ? `Rates for ${region.countryName}: ${usdtPairLabel}. Trade USDT using mobile money.`
-          : 'Allow location or select your country below to see local USDT rates.'}
+        Rates for {region.countryName}: {usdtPairLabel}. Trade USDT using mobile money.
       </Text>
 
-      {regions.length > 0 ? (
-        <View style={styles.countryRow}>
-          {regions.map((r) => (
-            <Pressable
-              key={r.countryCode}
-              style={[styles.countryChip, countryCode === r.countryCode && styles.countryChipActive]}
-              onPress={() => void selectCountry(r.countryCode)}
-            >
-              <Text
-                style={[styles.countryChipText, countryCode === r.countryCode && styles.countryChipTextActive]}
-              >
-                {r.countryName}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
-
-      {locationStatus === 'denied' ? (
-        <PrimaryButton compact label='Use my location' onPress={detectLocation} style={{ marginBottom: 12 }} />
-      ) : null}
-
-      {supported && region ? (
-        <Card style={styles.rateCard}>
-          <Text style={styles.rateValue}>
-            1 USDT ≈ {region.usdtToFiatRate.toLocaleString()} {region.fiatLabel}
-          </Text>
-        </Card>
-      ) : null}
+      <Card style={styles.rateCard}>
+        <Text style={styles.rateValue}>
+          1 USDT ≈ {region.usdtToFiatRate.toLocaleString()} {region.fiatLabel}
+        </Text>
+      </Card>
 
       <PrimaryButton
         label='Deposit or withdraw (mobile money)'
@@ -150,11 +146,7 @@ export function P2PScreen() {
       {!loading && !filtered.length ? (
         <Card>
           <Text style={styles.emptyTitle}>No local offers</Text>
-          <Text style={styles.meta}>
-            {region
-              ? `Open Mobile money from Extra to deposit or withdraw in ${region.countryName}.`
-              : 'Select a supported country or open Mobile money from Extra.'}
-          </Text>
+          <Text style={styles.meta}>Open Mobile money from Extra to deposit or withdraw.</Text>
         </Card>
       ) : null}
 
@@ -174,8 +166,7 @@ export function P2PScreen() {
           </View>
 
           <Text style={styles.price}>
-            {offer.price.toLocaleString(undefined, { maximumFractionDigits: offer.asset === 'USDT' ? 2 : 2 })}{' '}
-            {offer.fiat}
+            {offer.price.toLocaleString(undefined, { maximumFractionDigits: 2 })} {offer.fiat}
           </Text>
           <Text style={styles.meta}>
             Limit {offer.limitMin.toLocaleString()} – {offer.limitMax.toLocaleString()} {offer.fiat}
@@ -192,9 +183,7 @@ export function P2PScreen() {
       ))}
 
       <Text style={styles.footerNote}>
-        {supported
-          ? 'Complete a trade via Mobile money. Two-factor authentication is required for withdrawals.'
-          : 'Local P2P is not available in your region yet.'}
+        Complete a trade via Mobile money. Two-factor authentication is required for withdrawals.
       </Text>
     </ScrollView>
   );
@@ -241,17 +230,4 @@ const styles = StyleSheet.create({
   meta: { color: palette.textSecondary, fontSize: 12, marginBottom: 2 },
   emptyTitle: { color: palette.textPrimary, fontWeight: '700', marginBottom: 4 },
   footerNote: { color: palette.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 8, lineHeight: 16 },
-  countryRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  countryChip: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: palette.border,
-    alignItems: 'center',
-    backgroundColor: palette.surfaceElevated,
-  },
-  countryChipActive: { borderColor: palette.primary, backgroundColor: '#1f2937' },
-  countryChipText: { color: palette.textSecondary, fontWeight: '600', fontSize: 13 },
-  countryChipTextActive: { color: palette.primary },
 });

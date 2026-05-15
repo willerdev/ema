@@ -46,6 +46,26 @@ function payoutIpnUrl() {
   return base ? `${base}/webhooks/nowpayments/payout` : '';
 }
 
+/** NOWPayments allows max 6 decimal places on payout amounts. */
+function roundPayoutAmount(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n * 1e6) / 1e6;
+}
+
+function resolveClientIp(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  if (forwarded) {
+    const first = String(forwarded).split(',')[0].trim();
+    if (first) return first;
+  }
+  const realIp = req.headers['x-real-ip'];
+  if (realIp) return String(realIp).trim();
+  const sock = req.socket?.remoteAddress || req.connection?.remoteAddress;
+  if (sock) return String(sock).replace(/^::ffff:/, '');
+  return null;
+}
+
 function sortObjectKeys(obj) {
   if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return obj;
   return Object.keys(obj)
@@ -227,6 +247,11 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
   const schemaErrorMessage =
     'NOWPayments DB schema missing. Run backend/sql/migrations/20260515_nowpayments_wallet.sql in Supabase.';
 
+  app.get('/nowpayments/client-ip', authMiddleware, (req, res) => {
+    const ip = resolveClientIp(req);
+    return res.json({ ip: ip || 'unknown' });
+  });
+
   app.get('/nowpayments/currencies', authMiddleware, async (req, res) => {
     try {
       if (!np.configured()) return res.status(503).json({ message: notConfiguredMessage });
@@ -406,10 +431,11 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       const currency = normalizeCurrency(req.body.currency);
       const address = String(req.body.address || '').trim();
-      const amount = Number(req.body.amount);
+      const amountRaw = Number(req.body.amount);
+      const amount = roundPayoutAmount(amountRaw);
       if (!currency) return res.status(400).json({ message: 'currency is required' });
       if (!address) return res.status(400).json({ message: 'address is required' });
-      if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+      if (!amount) return res.status(400).json({ message: 'Invalid amount' });
 
       const whitelisted = await isAddressWhitelistedForUser(req.userId, currency, address);
       if (!whitelisted) {
@@ -440,7 +466,6 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       const ipnUrl = payoutIpnUrl();
       const npBody = {
-        payout_description: `Ema withdrawal ${uniqueExternalId}`,
         withdrawals: [
           {
             unique_external_id: uniqueExternalId,

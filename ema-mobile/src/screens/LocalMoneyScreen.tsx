@@ -12,6 +12,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
+import { LocationGateCard } from '../components/LocationGateCard';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useLocalMoneyRegion } from '../hooks/useLocalMoneyRegion';
 import { useToast } from '../hooks/useToast';
@@ -37,10 +38,10 @@ export function LocalMoneyScreen() {
     supported,
     loading: regionLoading,
     locationStatus,
+    locationReady,
     detectLocation,
-    selectCountry,
-    regions,
     usdtPairLabel,
+    error,
   } = useLocalMoneyRegion();
 
   const [tab, setTab] = useState<Tab>('deposit');
@@ -155,51 +156,41 @@ export function LocalMoneyScreen() {
       ? Math.round(Number(cryptoAmount) * region.usdtToFiatRate)
       : null;
 
+  if (!locationReady) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <Text style={styles.sub}>
+          Deposit or withdraw using mobile money. Enable location to see rates for where you are.
+        </Text>
+        <LocationGateCard locationStatus={locationStatus} error={error} onEnableLocation={detectLocation} />
+      </ScrollView>
+    );
+  }
+
+  if (!supported || !region) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <Card>
+          <Text style={styles.emptyTitle}>Not available in your region</Text>
+          <Text style={styles.meta}>Mobile money is not offered where you are located.</Text>
+        </Card>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
       <Text style={styles.sub}>
-        Deposit or withdraw using mobile money. Rates are shown in your local currency based on where you are.
+        Rates for {region.countryName}: {usdtPairLabel}. Deposit or withdraw with mobile money.
       </Text>
-
-      {locationStatus === 'denied' ? (
-        <Card style={styles.banner}>
-          <Text style={styles.bannerText}>
-            Location access helps us show the right local rate. You can pick your country below.
-          </Text>
-          <PrimaryButton compact label='Use my location' onPress={detectLocation} style={{ marginTop: 8 }} />
-        </Card>
-      ) : null}
-
-      <View style={styles.countryRow}>
-        {regions.map((r) => (
-          <Pressable
-            key={r.countryCode}
-            style={[styles.countryChip, countryCode === r.countryCode && styles.countryChipActive]}
-            onPress={() => selectCountry(r.countryCode)}
-          >
-            <Text
-              style={[styles.countryChipText, countryCode === r.countryCode && styles.countryChipTextActive]}
-            >
-              {r.countryName}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
 
       {regionLoading ? (
         <Text style={styles.meta}>Loading rates…</Text>
-      ) : supported && region ? (
+      ) : (
         <Card style={styles.rateCard}>
           <Text style={styles.rateLabel}>{usdtPairLabel}</Text>
           <Text style={styles.rateValue}>
             1 USDT ≈ {region.usdtToFiatRate.toLocaleString()} {region.fiatLabel}
-          </Text>
-        </Card>
-      ) : (
-        <Card>
-          <Text style={styles.emptyTitle}>Not available in your region</Text>
-          <Text style={styles.meta}>
-            Mobile money is not available in your region yet. Select a supported country above.
           </Text>
         </Card>
       )}
@@ -357,19 +348,6 @@ const styles = StyleSheet.create({
   sub: { color: palette.textSecondary, lineHeight: 20, marginBottom: 14, fontSize: 13 },
   banner: { marginBottom: 12, borderColor: '#f59e0b' },
   bannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
-  countryRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  countryChip: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: palette.border,
-    alignItems: 'center',
-    backgroundColor: palette.surfaceElevated,
-  },
-  countryChipActive: { borderColor: palette.primary, backgroundColor: '#1f2937' },
-  countryChipText: { color: palette.textSecondary, fontWeight: '600' },
-  countryChipTextActive: { color: palette.primary },
   rateCard: { marginBottom: 14 },
   rateLabel: { color: palette.textSecondary, fontSize: 12 },
   rateValue: { color: palette.primary, fontSize: 22, fontWeight: '800', marginTop: 4 },

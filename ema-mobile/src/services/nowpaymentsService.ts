@@ -7,6 +7,7 @@ import {
 import { api } from './api';
 
 export const nowpaymentsService = {
+  getClientIp: () => api.get<{ ip: string }>('/nowpayments/client-ip'),
   getCurrencies: () => api.get<{ currencies: string[] }>('/nowpayments/currencies'),
   getSummary: () => api.get<NowpaymentsSummary>('/nowpayments/summary'),
   createDeposit: (priceAmount: number, payCurrency: string, priceCurrency = 'usd') =>

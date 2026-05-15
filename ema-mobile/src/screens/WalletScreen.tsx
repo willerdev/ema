@@ -12,6 +12,7 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
+import { OptionGrid } from '../components/OptionGrid';
 import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
@@ -32,6 +33,7 @@ import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacing
 import { findBalanceForNetwork, formatLedgerSource, maxWithdrawableAmount } from '../utils/walletDisplay';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
+const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
 
 export function WalletScreen() {
   const { showToast } = useToast();
@@ -56,6 +58,7 @@ export function WalletScreen() {
   const [withdrawCurrency, setWithdrawCurrency] = useState('usdttrc20');
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [clientIp, setClientIp] = useState<string | null>(null);
   const [complianceComplete, setComplianceComplete] = useState(false);
 
   const alertComplianceRequired = () => {
@@ -228,6 +231,10 @@ export function WalletScreen() {
       setSelectedWhitelistId(forCurrency[0].id);
     }
     setWithdrawModalOpen(true);
+    void nowpaymentsService
+      .getClientIp()
+      .then((r) => setClientIp(r.ip || null))
+      .catch(() => setClientIp(null));
   };
 
   const onCopyAddress = async (addr: string) => {
@@ -401,8 +408,22 @@ export function WalletScreen() {
         )}
       </FormModal>
 
-      <FormModal visible={withdrawModalOpen} title='Withdraw' onClose={() => setWithdrawModalOpen(false)}>
+      <FormModal
+        visible={withdrawModalOpen}
+        title='Withdraw'
+        onClose={() => {
+          setWithdrawModalOpen(false);
+          setClientIp(null);
+        }}
+      >
         <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
+        {clientIp ? (
+          <Text style={styles.ipText}>
+            Your IP: {clientIp}
+            {'\n'}
+            If withdrawals fail, ask support to whitelist this IP for payouts.
+          </Text>
+        ) : null}
         <Text style={styles.gasTextModal}>
           Keep 5% in your wallet for gas. Max withdrawable: {maxWithdraw > 0 ? maxWithdraw.toFixed(6) : '—'}{' '}
           {formatNetworkLabel(withdrawCurrency)}. Emptying the wallet can block future deposits.
@@ -416,9 +437,9 @@ export function WalletScreen() {
           keyboardType='numeric'
         />
         <Text style={styles.fieldLabel}>Network</Text>
-        <OptionHighlightList
-          options={PAY_CURRENCY_OPTIONS}
-          value={withdrawCurrency}
+        <OptionGrid
+          options={WITHDRAW_CURRENCY_OPTIONS}
+          value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
           onChange={(c) => {
             setWithdrawCurrency(c);
             const first = whitelistedWallets.find((w) => w.currency === c);
@@ -483,4 +504,5 @@ const styles = StyleSheet.create({
   gasTitle: { color: palette.primary, fontWeight: '700', marginBottom: 6, fontSize: 14 },
   gasText: { color: palette.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 6 },
   gasTextModal: { color: '#fbbf24', fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  ipText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginBottom: 10 },
 });

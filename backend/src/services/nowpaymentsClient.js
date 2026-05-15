@@ -149,6 +149,20 @@ function toPublicPayoutError(error) {
   if (msg.includes('insufficient') || msg.includes('balance')) {
     return error.message;
   }
+  if (
+    msg.includes('payout') ||
+    msg.includes('withdrawal') ||
+    msg.includes('invalid') ||
+    msg.includes('validation')
+  ) {
+    if (error?.message && error.message.length < 160 && !msg.includes('nowpayment')) {
+      return error.message;
+    }
+  }
+  const npMsg = error?.nowpayments?.message || error?.nowpayments?.error;
+  if (typeof npMsg === 'string' && npMsg.length < 160 && !npMsg.toLowerCase().includes('nowpayment')) {
+    return npMsg;
+  }
   if (error?.message && error.message.length < 120 && !msg.includes('nowpayment')) {
     return error.message;
   }
