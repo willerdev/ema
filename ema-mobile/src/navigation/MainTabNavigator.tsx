@@ -1,3 +1,4 @@
+import { Pressable } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -52,7 +53,22 @@ export function MainTabNavigator() {
         ),
       })}
     >
-      <Tab.Screen name='Home' component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen
+        name='Home'
+        component={HomeScreen}
+        options={({ navigation }) => ({
+          tabBarLabel: 'Home',
+          headerRight: () => (
+            <Pressable
+              onPress={() => navigation.getParent()?.navigate('Notifications')}
+              style={{ marginRight: 14, padding: 4 }}
+              hitSlop={12}
+            >
+              <Ionicons name='notifications-outline' size={24} color={palette.primary} />
+            </Pressable>
+          ),
+        })}
+      />
       <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
       <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
       <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />

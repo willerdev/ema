@@ -1,5 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { Card } from '../components/Card';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
@@ -7,6 +9,8 @@ import { nowpaymentsService } from '../services/nowpaymentsService';
 import { useTradingStore } from '../store/useTradingStore';
 import type { NowpaymentsLedgerRow, NowpaymentsSummary } from '../types';
 import { palette } from '../theme/colors';
+
+const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v1';
 
 function formatLedgerTime(createdAt: string) {
   const ms = Date.parse(createdAt);
@@ -25,6 +29,18 @@ export function HomeScreen() {
   const [npSummary, setNpSummary] = useState<NowpaymentsSummary | null>(null);
   const [cryptoError, setCryptoError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [noticeVisible, setNoticeVisible] = useState(true);
+
+  useEffect(() => {
+    void AsyncStorage.getItem(HOME_NOTICE_DISMISS_KEY).then((v) => {
+      setNoticeVisible(v !== '1');
+    });
+  }, []);
+
+  const dismissNotice = () => {
+    setNoticeVisible(false);
+    void AsyncStorage.setItem(HOME_NOTICE_DISMISS_KEY, '1');
+  };
 
   const refreshCrypto = useCallback(async () => {
     setCryptoError(null);
@@ -68,21 +84,28 @@ export function HomeScreen() {
       <Text style={styles.greeting}>Hello, {user?.email?.split('@')[0]}</Text>
       <Text style={styles.sub}>Wallet overview</Text>
 
-      <Card style={styles.disclaimerCard}>
-        <Text style={styles.disclaimerTitle}>Important notice</Text>
-        <Text style={styles.disclaimerText}>
-          Withdrawals may be denied if anti-money laundering (AML) concerns are detected, if the withdrawal address is not
-          on your whitelist, or if your account is flagged by a government or other authority with the legal power to do so.
-        </Text>
-        <Text style={styles.disclaimerText}>
-          Deposits below $100 may not be credited and those funds can be lost. Always verify minimum amounts before sending.
-        </Text>
-        <Text style={[styles.disclaimerText, { marginBottom: 0 }]}>
-          We will never hold your assets unless you violate these terms. Ema will never call or text you asking you to move
-          funds, share passwords, or approve actions outside this app. Do not follow instructions from phone calls or SMS —
-          they are scams.
-        </Text>
-      </Card>
+      {noticeVisible ? (
+        <Card style={styles.disclaimerCard}>
+          <View style={styles.disclaimerHeader}>
+            <Text style={styles.disclaimerTitle}>Important notice</Text>
+            <Pressable onPress={dismissNotice} hitSlop={12} accessibilityLabel='Dismiss notice'>
+              <Ionicons name='close-circle' size={22} color={palette.textSecondary} />
+            </Pressable>
+          </View>
+          <Text style={styles.disclaimerText}>
+            Withdrawals may be denied if anti-money laundering (AML) concerns are detected, if the withdrawal address is not
+            on your whitelist, or if your account is flagged by a government or other authority with the legal power to do so.
+          </Text>
+          <Text style={styles.disclaimerText}>
+            Deposits below $100 may not be credited and those funds can be lost. Always verify minimum amounts before sending.
+          </Text>
+          <Text style={[styles.disclaimerText, { marginBottom: 0 }]}>
+            We will never hold your assets unless you violate these terms. Ema will never call or text you asking you to move
+            funds, share passwords, or approve actions outside this app. Do not follow instructions from phone calls or SMS —
+            they are scams.
+          </Text>
+        </Card>
+      ) : null}
 
       <Card style={styles.cryptoHero}>
         <Text style={styles.cryptoHeroLabel}>Crypto wallet</Text>
@@ -157,7 +180,8 @@ const styles = StyleSheet.create({
   greeting: { color: palette.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 4 },
   sub: { color: palette.textSecondary, marginBottom: 14 },
   disclaimerCard: { borderColor: '#b45309', backgroundColor: '#1c1917' },
-  disclaimerTitle: { color: '#fbbf24', fontSize: 15, fontWeight: '700', marginBottom: 10 },
+  disclaimerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  disclaimerTitle: { color: '#fbbf24', fontSize: 15, fontWeight: '700', flex: 1 },
   disclaimerText: { color: palette.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 10 },
   cryptoHero: { marginBottom: 12 },
   cryptoHeroLabel: { color: palette.textSecondary, fontSize: 14, fontWeight: '700', marginBottom: 12 },

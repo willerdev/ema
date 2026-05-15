@@ -14,6 +14,16 @@ export type RootStackParamList = {
   AirfarmingTrade: undefined;
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
+  Notifications: undefined;
+};
+
+export type AppNotification = {
+  id: string;
+  userId: string | null;
+  audience: 'broadcast' | 'user';
+  title: string;
+  body: string;
+  createdAt: string;
 };
 
 export type ActivityFeedItem = {

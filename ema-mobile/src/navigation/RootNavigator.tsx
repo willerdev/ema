@@ -5,6 +5,7 @@ import { AlpacaTradeScreen } from '../screens/AlpacaTradeScreen';
 import { AirfarmingTradeScreen } from '../screens/AirfarmingTradeScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
+import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { useAuth } from '../context/AuthContext';
 import { palette } from '../theme/colors';
@@ -39,6 +40,7 @@ export function RootNavigator() {
       <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarming' }} />
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
+      <Stack.Screen name='Notifications' component={NotificationsScreen} options={{ title: 'Notifications' }} />
     </Stack.Navigator>
   );
 }

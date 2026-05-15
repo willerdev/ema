@@ -52,6 +52,7 @@ const { registerContractRoutes } = require('./contractRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
 const { registerComplianceRoutes } = require('./complianceRoutes');
 const { registerWhitelistWalletRoutes } = require('./whitelistWalletRoutes');
+const { registerNotificationRoutes } = require('./notificationRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
 
@@ -605,6 +606,7 @@ registerCryptoRoutes(app, { authMiddleware });
 registerNowpaymentsRoutes(app, { authMiddleware });
 registerComplianceRoutes(app, { authMiddleware });
 registerWhitelistWalletRoutes(app, { authMiddleware });
+registerNotificationRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 

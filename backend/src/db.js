@@ -836,6 +836,48 @@ async function isAddressWhitelistedForUser(userId, currency, address) {
   );
 }
 
+async function listNotificationsForUser(userId, limit = 100) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 100));
+  const { data: broadcast, error: bErr } = await supabase
+    .from('app_notifications')
+    .select('*')
+    .is('user_id', null)
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  if (bErr) throw bErr;
+
+  const { data: personal, error: pErr } = await supabase
+    .from('app_notifications')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  if (pErr) throw pErr;
+
+  const merged = [...(personal || []), ...(broadcast || [])];
+  merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  const seen = new Set();
+  const out = [];
+  for (const row of merged) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
+    out.push(row);
+    if (out.length >= lim) break;
+  }
+  return out;
+}
+
+async function createAppNotification({ userId, title, body }) {
+  const row = {
+    user_id: userId || null,
+    title: String(title).trim(),
+    body: String(body).trim(),
+  };
+  const { data, error } = await supabase.from('app_notifications').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   getUserByEmail,
   getUserById,
@@ -911,4 +953,6 @@ module.exports = {
   deleteWhitelistedWalletForUser,
   isAddressWhitelistedForUser,
   MAX_WHITELISTED_WALLETS_PER_USER,
+  listNotificationsForUser,
+  createAppNotification,
 };

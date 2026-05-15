@@ -1,5 +1,7 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { Card } from '../components/Card';
@@ -15,9 +17,11 @@ import { useToast } from '../hooks/useToast';
 import {
   ComplianceProfile,
   PlannedInvestmentDuration,
+  RootStackParamList,
   SourceOfFunds,
   WhitelistedWallet,
 } from '../types';
+import { ABOUT_EMA, AboutSectionKey } from '../content/aboutEma';
 import { palette } from '../theme/colors';
 
 const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
@@ -59,8 +63,10 @@ function SettingsRow({
 }
 
 export function SettingsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { user, logout } = useAuth();
   const { showToast } = useToast();
+  const [aboutModal, setAboutModal] = useState<AboutSectionKey | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [darkMode, setDarkMode] = useState(true);
@@ -397,6 +403,30 @@ export function SettingsScreen() {
         </Card>
 
         <Card style={styles.menuCard}>
+          <Text style={styles.label}>About Ema</Text>
+          <SettingsRow
+            title='Who we are'
+            subtitle='DAO, token holders, and community capital'
+            onPress={() => setAboutModal('who')}
+          />
+          <SettingsRow
+            title='What we do'
+            subtitle='Wallet, trading, and risk tools'
+            onPress={() => setAboutModal('what')}
+          />
+          <SettingsRow
+            title='How we profit'
+            subtitle='10% revenue share and disclosed fees'
+            onPress={() => setAboutModal('profit')}
+          />
+          <SettingsRow
+            title='Notifications'
+            subtitle='Saved messages for you and everyone'
+            onPress={() => navigation.navigate('Notifications')}
+          />
+        </Card>
+
+        <Card style={styles.menuCard}>
           <Text style={styles.label}>Account</Text>
           <SettingsRow
             title='Withdrawal requirements'
@@ -423,6 +453,22 @@ export function SettingsScreen() {
 
         <PrimaryButton label='Logout' onPress={logout} variant='danger' />
       </ScrollView>
+
+      {aboutModal ? (
+        <FormModal
+          visible={Boolean(aboutModal)}
+          title={ABOUT_EMA[aboutModal].title}
+          onClose={() => setAboutModal(null)}
+          footer={<PrimaryButton label='Close' onPress={() => setAboutModal(null)} style={{ marginTop: 12 }} />}
+        >
+          <Text style={styles.modalHint}>{ABOUT_EMA[aboutModal].subtitle}</Text>
+          {ABOUT_EMA[aboutModal].paragraphs.map((p) => (
+            <Text key={p.slice(0, 40)} style={styles.aboutParagraph}>
+              {p}
+            </Text>
+          ))}
+        </FormModal>
+      ) : null}
 
       <FormModal
         visible={complianceModalOpen}
@@ -825,4 +871,5 @@ const styles = StyleSheet.create({
     borderBottomColor: palette.border,
   },
   wlAddress: { color: palette.textSecondary, fontSize: 12, fontFamily: 'Menlo' },
+  aboutParagraph: { color: palette.textPrimary, lineHeight: 22, fontSize: 14, marginBottom: 12 },
 });
