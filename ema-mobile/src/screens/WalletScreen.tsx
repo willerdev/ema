@@ -59,7 +59,10 @@ export function WalletScreen() {
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [clientIp, setClientIp] = useState<string | null>(null);
+  const [withdrawModalMax, setWithdrawModalMax] = useState(0);
+  const [withdrawModalCurrencyLabel, setWithdrawModalCurrencyLabel] = useState('USDT (TRC20)');
   const [complianceComplete, setComplianceComplete] = useState(false);
+  const clientIpLoaded = useRef(false);
 
   const alertComplianceRequired = () => {
     Alert.alert(
@@ -114,7 +117,16 @@ export function WalletScreen() {
     await Promise.all([loadCompliance(), loadWhitelistedWallets(), refreshNowpayments()]);
   }, [loadCompliance, loadWhitelistedWallets, refreshNowpayments]);
 
-  usePolling(refresh, 60000, true);
+  usePolling(refresh, 60000, !withdrawModalOpen && !depositModalOpen);
+
+  useEffect(() => {
+    if (clientIpLoaded.current) return;
+    clientIpLoaded.current = true;
+    void nowpaymentsService
+      .getClientIp()
+      .then((r) => setClientIp(r.ip && r.ip !== 'unknown' ? r.ip : null))
+      .catch(() => setClientIp(null));
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -227,14 +239,15 @@ export function WalletScreen() {
       Alert.alert('No whitelisted wallet', `Add a ${formatNetworkLabel(withdrawCurrency)} wallet in Settings first.`);
       return;
     }
-    if (!selectedWhitelistId || !forCurrency.some((w) => w.id === selectedWhitelistId)) {
-      setSelectedWhitelistId(forCurrency[0].id);
-    }
+    const nextId =
+      selectedWhitelistId && forCurrency.some((w) => w.id === selectedWhitelistId)
+        ? selectedWhitelistId
+        : forCurrency[0].id;
+    const snapMax = maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, withdrawCurrency));
+    setSelectedWhitelistId(nextId ?? null);
+    setWithdrawModalMax(snapMax);
+    setWithdrawModalCurrencyLabel(formatNetworkLabel(withdrawCurrency));
     setWithdrawModalOpen(true);
-    void nowpaymentsService
-      .getClientIp()
-      .then((r) => setClientIp(r.ip || null))
-      .catch(() => setClientIp(null));
   };
 
   const onCopyAddress = async (addr: string) => {
@@ -253,7 +266,8 @@ export function WalletScreen() {
   const walletsForWithdrawCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
   const withdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
   const withdrawNum = Number(withdrawAmount);
-  const withinGasReserve = maxWithdraw <= 0 || !Number.isFinite(withdrawNum) || withdrawNum <= maxWithdraw;
+  const gasMax = withdrawModalOpen ? withdrawModalMax : maxWithdraw;
+  const withinGasReserve = gasMax <= 0 || !Number.isFinite(withdrawNum) || withdrawNum <= gasMax;
   const withdrawReady =
     withdrawAmount.trim().length > 0 &&
     Number.isFinite(withdrawNum) &&
@@ -411,22 +425,20 @@ export function WalletScreen() {
       <FormModal
         visible={withdrawModalOpen}
         title='Withdraw'
-        onClose={() => {
-          setWithdrawModalOpen(false);
-          setClientIp(null);
-        }}
+        avoidKeyboard={false}
+        onClose={() => setWithdrawModalOpen(false)}
       >
         <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
-        {clientIp ? (
+        <View style={styles.ipSlot}>
           <Text style={styles.ipText}>
-            Your IP: {clientIp}
-            {'\n'}
-            If withdrawals fail, ask support to whitelist this IP for payouts.
+            {clientIp
+              ? `Your IP: ${clientIp}\nIf withdrawals fail, ask support to whitelist this IP for payouts.`
+              : 'Loading your IP…'}
           </Text>
-        ) : null}
+        </View>
         <Text style={styles.gasTextModal}>
-          Keep 5% in your wallet for gas. Max withdrawable: {maxWithdraw > 0 ? maxWithdraw.toFixed(6) : '—'}{' '}
-          {formatNetworkLabel(withdrawCurrency)}. Emptying the wallet can block future deposits.
+          Keep 5% in your wallet for gas. Max withdrawable: {withdrawModalMax > 0 ? withdrawModalMax.toFixed(6) : '—'}{' '}
+          {withdrawModalCurrencyLabel}. Emptying the wallet can block future deposits.
         </Text>
         <TextInput
           style={inputStyle}
@@ -442,6 +454,8 @@ export function WalletScreen() {
           value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
           onChange={(c) => {
             setWithdrawCurrency(c);
+            setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
+            setWithdrawModalMax(maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, c)));
             const first = whitelistedWallets.find((w) => w.currency === c);
             setSelectedWhitelistId(first?.id ?? null);
           }}
@@ -504,5 +518,6 @@ const styles = StyleSheet.create({
   gasTitle: { color: palette.primary, fontWeight: '700', marginBottom: 6, fontSize: 14 },
   gasText: { color: palette.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 6 },
   gasTextModal: { color: '#fbbf24', fontSize: 12, lineHeight: 17, marginBottom: 10 },
-  ipText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginBottom: 10 },
+  ipSlot: { minHeight: 52, marginBottom: 10, justifyContent: 'center' },
+  ipText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16 },
 });

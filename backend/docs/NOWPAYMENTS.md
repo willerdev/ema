@@ -10,6 +10,10 @@ Crypto deposits and withdrawals use [NOWPayments](https://nowpayments.io/) (sepa
 | `NOWPAYMENTS_IPN_SECRET` | Yes (production) | Dashboard → Payment Settings → IPN secret |
 | `NOWPAYMENTS_API_BASE` | No | Default `https://api.nowpayments.io/v1`; use sandbox URL for testing |
 | `APP_BASE_URL` | Yes (for IPN) | Public backend URL, e.g. `https://ema-0gp3.onrender.com` |
+| `NOWPAYMENTS_EMAIL` | Yes (withdrawals) | NOWPayments account login for payout JWT (`POST /auth`) |
+| `NOWPAYMENTS_PASSWORD` | Yes (withdrawals) | Same account password |
+| `NOWPAYMENTS_2FA_SECRET` | Yes (auto-verify) | Base32 secret from NOWPayments Account Settings → 2FA (same as Google Authenticator setup) |
+| `NOWPAYMENTS_PAYOUT_VERIFY_CODE` | No | One-off 6-digit code instead of generating from `NOWPAYMENTS_2FA_SECRET` (testing only) |
 
 IPN callbacks (production Render service `ema-0gp3`):
 
@@ -20,9 +24,10 @@ Set `APP_BASE_URL=https://ema-0gp3.onrender.com` on Render so create-payment / c
 
 ## Database
 
-Run in Supabase SQL editor:
+Run in Supabase SQL editor (in order):
 
-`backend/sql/migrations/20260515_nowpayments_wallet.sql`
+1. `backend/sql/migrations/20260515_nowpayments_wallet.sql`
+2. `backend/sql/migrations/20260520_nowpayments_payout_verify.sql`
 
 ## Deposits
 
@@ -33,16 +38,25 @@ Run in Supabase SQL editor:
 ## Withdrawals
 
 1. User must have sufficient **available** balance (ledger in − out − pending payouts).
-2. App calls `POST /nowpayments/withdrawals` with `currency`, `address`, `amount`.
-3. Server calls NOWPayments `POST /payout`.
+2. App calls `POST /nowpayments/withdrawals` with `currency`, `address`, `amount`, and optional **`totpCode`** (your app’s 2FA in Settings — not NOWPayments).
+3. Server calls NOWPayments `POST /payout`, then **`POST /payout/{withdrawal-id}/verify`** with a custody 2FA code when `NOWPAYMENTS_2FA_SECRET` (or `NOWPAYMENTS_PAYOUT_VERIFY_CODE`) is set.
 
-**Custody required:** Enable Custody in the NOWPayments dashboard, fund the custody balance, and configure 2FA/whitelisting as required. Payouts fail if custody is empty.
+**IDs stored:**
+
+- `payout_id` — per-withdrawal id from `withdrawals[0].id` (used for verify).
+- `batch_payout_id` — batch id from the create response (used for IPN lookup).
+
+**Custody required:** Enable Custody in the NOWPayments dashboard, fund the custody balance, whitelist your server egress IP for payouts, and enable 2FA on the NOWPayments account.
+
+There is no API to *fetch* the custody verification code. The backend generates it with `NOWPAYMENTS_2FA_SECRET` (TOTP, same as Google Authenticator) or you pass a one-time code via `NOWPAYMENTS_PAYOUT_VERIFY_CODE`.
+
+If verify fails after create, the row is set to `awaiting_verify` and the API returns `PAYOUT_VERIFY_FAILED` so you can retry manually in the NOWPayments dashboard (max 10 attempts per payout).
 
 ## Security
 
 - Verify `x-nowpayments-sig` (HMAC-SHA512 of sorted JSON body) when `NOWPAYMENTS_IPN_SECRET` is set.
 - Whitelist NOWPayments IPs on your firewall/host.
-- Never commit API keys (see `.env.example`).
+- Never commit API keys or `NOWPAYMENTS_2FA_SECRET`.
 
 ## API reference
 

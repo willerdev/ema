@@ -1,3 +1,5 @@
+const { generateSync } = require('otplib');
+
 const DEFAULT_BASE = 'https://api.nowpayments.io/v1';
 
 /** Short-lived payout JWT (NOWPayments /auth, ~5 min). */
@@ -188,6 +190,61 @@ function getPayout(payoutId) {
   return npFetch(`/payout/${payoutId}`, { usePayoutJwt: true });
 }
 
+/** Per-withdrawal id (for POST /payout/:id/verify) and optional batch id from create response. */
+function extractPayoutIds(npResult) {
+  if (!npResult || typeof npResult !== 'object') {
+    return { withdrawalId: null, batchId: null };
+  }
+  const batchId =
+    npResult.payout_id != null
+      ? String(npResult.payout_id)
+      : npResult.id != null
+        ? String(npResult.id)
+        : null;
+  const withdrawals = Array.isArray(npResult.withdrawals) ? npResult.withdrawals : [];
+  let withdrawalId = null;
+  for (const w of withdrawals) {
+    if (w?.id != null) {
+      withdrawalId = String(w.id);
+      break;
+    }
+  }
+  if (!withdrawalId && withdrawals[0]?.batch_withdrawal_id != null) {
+    withdrawalId = String(withdrawals[0].batch_withdrawal_id);
+  }
+  return { withdrawalId: withdrawalId || batchId, batchId };
+}
+
+function payoutVerifyConfigured() {
+  return Boolean(
+    process.env.NOWPAYMENTS_2FA_SECRET?.trim() || process.env.NOWPAYMENTS_PAYOUT_VERIFY_CODE?.trim()
+  );
+}
+
+function generatePayoutVerificationCode() {
+  const override = process.env.NOWPAYMENTS_PAYOUT_VERIFY_CODE?.trim();
+  if (override) return override.replace(/\s/g, '');
+  const secret = process.env.NOWPAYMENTS_2FA_SECRET?.trim();
+  if (!secret) {
+    const err = new Error('NOWPAYMENTS_2FA_SECRET is not configured');
+    err.code = 'PAYOUT_VERIFY_NOT_CONFIGURED';
+    throw err;
+  }
+  return generateSync({ secret });
+}
+
+function verifyPayout(withdrawalId, verificationCode) {
+  const id = String(withdrawalId || '').trim();
+  const code = String(verificationCode || '').replace(/\s/g, '');
+  if (!id) throw new Error('Payout withdrawal id is required');
+  if (!code) throw new Error('verification_code is required');
+  return npFetch(`/payout/${encodeURIComponent(id)}/verify`, {
+    method: 'POST',
+    body: { verification_code: code },
+    usePayoutJwt: true,
+  });
+}
+
 /** User-safe message for mobile (no JWT / provider internals). */
 function toPublicPayoutError(error) {
   const code = error?.code;
@@ -201,8 +258,14 @@ function toPublicPayoutError(error) {
   if (msg.includes('authorization header') || msg.includes('bearer') || msg.includes('jwt')) {
     return 'Withdrawals are temporarily unavailable. Please try again later.';
   }
+  if (code === 'PAYOUT_VERIFY_NOT_CONFIGURED' || code === 'PAYOUT_VERIFY_FAILED') {
+    return 'Withdrawal was created but could not be confirmed with the payment provider. Contact support if funds do not arrive.';
+  }
   if (msg.includes('payout_description') || msg.includes('is not allowed')) {
     return 'Withdrawal was rejected by the payment provider. Please try again in a few minutes.';
+  }
+  if (msg.includes('verif')) {
+    return error.message && error.message.length < 160 ? error.message : 'Payout verification failed. Try again or contact support.';
   }
   if (msg.includes('insufficient') || msg.includes('balance')) {
     return error.message;
@@ -234,5 +297,9 @@ module.exports = {
   createPayout,
   buildCreatePayoutBody,
   getPayout,
+  extractPayoutIds,
+  payoutVerifyConfigured,
+  generatePayoutVerificationCode,
+  verifyPayout,
   toPublicPayoutError,
 };

@@ -286,6 +286,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         payouts: payouts.map((p) => ({
           id: p.id,
           payoutId: p.payout_id,
+          batchPayoutId: p.batch_payout_id,
           status: p.status,
           currency: p.currency,
           address: p.address,
@@ -488,26 +489,61 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         throw e;
       }
 
-      const payoutId =
-        npResult.payout_id != null
-          ? String(npResult.payout_id)
-          : npResult.id != null
-            ? String(npResult.id)
-            : null;
+      const { withdrawalId, batchId } = np.extractPayoutIds(npResult);
+      if (!withdrawalId) {
+        await updateNowpaymentsPayout(payoutRow.id, {
+          status: 'failed',
+          reserve_released: true,
+          raw_last_ipn: { error: 'No withdrawal id in payout response', npResult },
+        });
+        return res.status(502).json({
+          message: 'Withdrawal was created at the provider but could not be tracked. Contact support.',
+          code: 'PAYOUT_ID_MISSING',
+        });
+      }
+
+      let status = String(npResult.status || 'processing').toLowerCase();
+      let verifyRaw = null;
+
+      if (np.payoutVerifyConfigured()) {
+        try {
+          const verificationCode = np.generatePayoutVerificationCode();
+          verifyRaw = await np.verifyPayout(withdrawalId, verificationCode);
+          if (verifyRaw?.status) status = String(verifyRaw.status).toLowerCase();
+        } catch (verifyErr) {
+          verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
+          await updateNowpaymentsPayout(payoutRow.id, {
+            payout_id: withdrawalId,
+            batch_payout_id: batchId,
+            status: 'awaiting_verify',
+            raw_last_ipn: { create: npResult, verifyError: verifyErr.message, verify: verifyErr.nowpayments },
+          });
+          return res.status(verifyErr.status || 502).json({
+            message: np.toPublicPayoutError(verifyErr),
+            code: 'PAYOUT_VERIFY_FAILED',
+            id: payoutRow.id,
+            payoutId: withdrawalId,
+            status: 'awaiting_verify',
+          });
+        }
+      }
 
       const updated = await updateNowpaymentsPayout(payoutRow.id, {
-        payout_id: payoutId,
-        status: npResult.status || 'processing',
-        raw_last_ipn: npResult,
+        payout_id: withdrawalId,
+        batch_payout_id: batchId,
+        status,
+        raw_last_ipn: verifyRaw ? { create: npResult, verify: verifyRaw } : npResult,
       });
 
       return res.json({
         id: updated.id,
         payoutId: updated.payout_id,
+        batchPayoutId: updated.batch_payout_id,
         status: updated.status,
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
+        verified: Boolean(verifyRaw),
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });

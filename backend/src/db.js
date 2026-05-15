@@ -580,13 +580,21 @@ async function getNowpaymentsPayoutByUniqueId(uniqueExternalId) {
 }
 
 async function getNowpaymentsPayoutByNpId(payoutId) {
+  const id = String(payoutId);
   const { data, error } = await supabase
     .from('nowpayments_payouts')
     .select('*')
-    .eq('payout_id', String(payoutId))
+    .eq('payout_id', id)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  if (data) return data;
+  const { data: byBatch, error: batchErr } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('batch_payout_id', id)
+    .maybeSingle();
+  if (batchErr) throw batchErr;
+  return byBatch;
 }
 
 async function getNowpaymentsPayoutForUser(userId, id) {

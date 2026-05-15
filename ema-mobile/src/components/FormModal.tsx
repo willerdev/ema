@@ -20,17 +20,28 @@ type FormModalProps = {
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
+  /** Disable on Android to avoid height jumps when the modal opens. */
+  avoidKeyboard?: boolean;
 };
 
-export function FormModal({ visible, title, onClose, children, footer }: FormModalProps) {
+export function FormModal({
+  visible,
+  title,
+  onClose,
+  children,
+  footer,
+  avoidKeyboard = true,
+}: FormModalProps) {
   const insets = useSafeAreaInsets();
+  const useKav = avoidKeyboard && Platform.OS === 'ios';
 
   return (
-    <Modal visible={visible} transparent animationType='fade' onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType='slide' onRequestClose={onClose}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 8 : 0}
+        behavior={useKav ? 'padding' : undefined}
+        enabled={useKav}
+        keyboardVerticalOffset={useKav ? insets.top + 8 : 0}
       >
         <Pressable
           style={styles.backdrop}
