@@ -224,10 +224,13 @@ export interface NowpaymentsDepositStatus {
 export interface NowpaymentsWithdrawalResponse {
   id: string;
   payoutId: string | null;
+  batchPayoutId?: string | null;
   status: string;
   currency: string;
   address: string;
   amount: number;
+  requiresVerification?: boolean;
+  verified?: boolean;
 }
 
 export type SourceOfFunds =

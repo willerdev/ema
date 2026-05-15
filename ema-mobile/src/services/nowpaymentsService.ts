@@ -24,4 +24,8 @@ export const nowpaymentsService = {
       amount,
       ...(totpCode ? { totpCode } : {}),
     }),
+  verifyWithdrawal: (withdrawalId: string, verificationCode: string) =>
+    api.post<NowpaymentsWithdrawalResponse>(`/nowpayments/withdrawals/${withdrawalId}/verify`, {
+      verificationCode: verificationCode.replace(/\s/g, ''),
+    }),
 };

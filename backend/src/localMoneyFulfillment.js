@@ -6,6 +6,7 @@ const {
 } = require('./db');
 const { getRegion, maskPhone } = require('./localMoneyRegions');
 const { sendSms } = require('./services/twilioSms');
+const { notifyDepositCredited, formatAmount } = require('./depositNotifications');
 
 const COMPLETED_STATUSES = new Set(['completed', 'successful', 'success', 'succeeded']);
 
@@ -56,13 +57,18 @@ async function fulfillLocalMoneyOrder(order, nextStatus, providerPayload) {
   let updated = await updateLocalMoneyOrder(order.id, patch);
 
   if (order.type === 'deposit' && COMPLETED_STATUSES.has(status)) {
+    const beforePosted = updated.ledger_posted;
     updated = await creditDepositLedger(updated);
-    const region = getRegion(updated.country_code);
-    const label = region?.fiatLabel || updated.fiat_currency;
-    await notifyOrderSms(
-      updated,
-      `Ema: Your deposit of ${updated.fiat_amount} ${label} is complete.`
-    );
+    if (!beforePosted && updated.ledger_posted) {
+      const region = getRegion(updated.country_code);
+      const label = region?.fiatLabel || updated.fiat_currency;
+      void notifyDepositCredited({
+        userId: updated.user_id,
+        amount: updated.crypto_amount,
+        asset: updated.crypto_asset || 'usdt',
+        body: `Your deposit of ${updated.fiat_amount} ${label} is complete. ${formatAmount(updated.crypto_amount)} USDT added to your wallet.`,
+      });
+    }
   }
 
   if (order.type === 'withdraw' && COMPLETED_STATUSES.has(status)) {

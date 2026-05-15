@@ -63,7 +63,9 @@ Pull to refresh on Wallet or reopen the deposit — the server polls NOWPayments
 
 There is no API to *fetch* the custody verification code. The backend generates it with `NOWPAYMENTS_2FA_SECRET` (TOTP, same as Google Authenticator) or you pass a one-time code via `NOWPAYMENTS_PAYOUT_VERIFY_CODE`.
 
-If verify fails after create, the row is set to `awaiting_verify` and the API returns `PAYOUT_VERIFY_FAILED` so you can retry manually in the NOWPayments dashboard (max 10 attempts per payout).
+The mobile app asks the user for the email verification code, then calls `POST /nowpayments/withdrawals/:id/verify` with `{ "verificationCode": "123456" }`. Optional server auto-verify: set `NOWPAYMENTS_AUTO_VERIFY_PAYOUT=1` and `NOWPAYMENTS_2FA_SECRET` (not used when the user enters the code in the app).
+
+If verify fails, the payout stays `awaiting_verify` (max 10 attempts per payout at NOWPayments).
 
 ## Security
 

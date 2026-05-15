@@ -7,6 +7,7 @@ const {
   updateNowpaymentsPayment,
   listNowpaymentsPaymentsByUserId,
   insertNowpaymentsPayout,
+  getNowpaymentsPayoutForUser,
   getNowpaymentsPayoutByUniqueId,
   getNowpaymentsPayoutByNpId,
   updateNowpaymentsPayout,
@@ -23,6 +24,7 @@ const np = require('./services/nowpaymentsClient');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { verifyUserTotp } = require('./totpVerify');
 const { buildWalletActivity, mapPublicActivity } = require('./walletActivity');
+const { notifyDepositCredited } = require('./depositNotifications');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -144,7 +146,13 @@ async function creditPaymentLedger(paymentRow) {
     source: 'payment',
     source_id: paymentRow.id,
   });
-  return updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
+  const updated = await updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
+  void notifyDepositCredited({
+    userId: paymentRow.user_id,
+    amount,
+    asset,
+  });
+  return updated;
 }
 
 async function syncPaymentFromProvider(row) {
@@ -573,14 +581,42 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      let status = String(npResult.status || 'processing').toLowerCase();
+      const userVerifyCode = String(req.body.verificationCode || req.body.payoutVerificationCode || '')
+        .replace(/\s/g, '');
+      const autoVerify =
+        !userVerifyCode &&
+        process.env.NOWPAYMENTS_AUTO_VERIFY_PAYOUT === '1' &&
+        np.payoutVerifyConfigured();
+
+      let status = 'awaiting_verify';
       let verifyRaw = null;
 
-      if (np.payoutVerifyConfigured()) {
+      if (userVerifyCode) {
+        try {
+          verifyRaw = await np.verifyPayout(withdrawalId, userVerifyCode);
+          status = String(verifyRaw?.status || 'processing').toLowerCase();
+        } catch (verifyErr) {
+          verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
+          await updateNowpaymentsPayout(payoutRow.id, {
+            payout_id: withdrawalId,
+            batch_payout_id: batchId,
+            status: 'awaiting_verify',
+            raw_last_ipn: { create: npResult, verifyError: verifyErr.message, verify: verifyErr.nowpayments },
+          });
+          return res.status(verifyErr.status || 400).json({
+            message: np.toPublicPayoutError(verifyErr),
+            code: 'PAYOUT_VERIFY_FAILED',
+            id: payoutRow.id,
+            payoutId: withdrawalId,
+            status: 'awaiting_verify',
+            requiresVerification: true,
+          });
+        }
+      } else if (autoVerify) {
         try {
           const verificationCode = np.generatePayoutVerificationCode();
           verifyRaw = await np.verifyPayout(withdrawalId, verificationCode);
-          if (verifyRaw?.status) status = String(verifyRaw.status).toLowerCase();
+          status = String(verifyRaw?.status || 'processing').toLowerCase();
         } catch (verifyErr) {
           verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
           await updateNowpaymentsPayout(payoutRow.id, {
@@ -595,6 +631,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
             id: payoutRow.id,
             payoutId: withdrawalId,
             status: 'awaiting_verify',
+            requiresVerification: true,
           });
         }
       }
@@ -614,7 +651,69 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
+        requiresVerification: !verifyRaw,
         verified: Boolean(verifyRaw),
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });
+      return res.status(e.status || 500).json({
+        message: np.toPublicPayoutError(e),
+        code: e.code || undefined,
+      });
+    }
+  });
+
+  app.post('/nowpayments/withdrawals/:id/verify', authMiddleware, async (req, res) => {
+    try {
+      if (!np.configured()) return res.status(503).json({ message: notConfiguredMessage });
+      if (!np.payoutAuthConfigured()) {
+        return res.status(503).json({
+          message: 'Withdrawals are not fully enabled on the server yet. Please try again later.',
+          code: 'PAYOUT_NOT_CONFIGURED',
+        });
+      }
+
+      const row = await getNowpaymentsPayoutForUser(req.userId, req.params.id);
+      if (!row) return res.status(404).json({ message: 'Withdrawal not found' });
+      if (!row.payout_id) {
+        return res.status(400).json({ message: 'Withdrawal is not ready to verify yet. Try again shortly.' });
+      }
+
+      const verificationCode = String(req.body.verificationCode || req.body.payoutVerificationCode || '')
+        .replace(/\s/g, '');
+      if (!verificationCode || verificationCode.length < 4) {
+        return res.status(400).json({ message: 'Enter the verification code from your email.' });
+      }
+
+      let verifyRaw;
+      try {
+        verifyRaw = await np.verifyPayout(row.payout_id, verificationCode);
+      } catch (verifyErr) {
+        verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
+        return res.status(verifyErr.status || 400).json({
+          message: np.toPublicPayoutError(verifyErr),
+          code: 'PAYOUT_VERIFY_FAILED',
+          id: row.id,
+          payoutId: row.payout_id,
+          status: row.status,
+        });
+      }
+
+      const status = String(verifyRaw?.status || 'processing').toLowerCase();
+      const updated = await updateNowpaymentsPayout(row.id, {
+        status,
+        raw_last_ipn: { ...(row.raw_last_ipn || {}), verify: verifyRaw },
+      });
+
+      return res.json({
+        id: updated.id,
+        payoutId: updated.payout_id,
+        status: updated.status,
+        currency: updated.currency,
+        address: updated.address,
+        amount: updated.amount,
+        verified: true,
+        requiresVerification: false,
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });
