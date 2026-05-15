@@ -325,7 +325,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         price_currency: priceCurrency,
         pay_currency: payCurrency,
         order_id: orderId,
-        order_description: `Ema deposit ${orderId}`,
+        order_description: 'Wallet deposit',
       };
       if (ipnUrl) npBody.ipn_callback_url = ipnUrl;
 
@@ -450,7 +450,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         return res.status(400).json({ message: 'Insufficient crypto balance', available, requested: amount });
       }
 
-      const uniqueExternalId = `ema-payout-${newId()}`;
+      const uniqueExternalId = newId().replace(/-/g, '').slice(0, 24);
       const payoutRow = await insertNowpaymentsPayout({
         id: newId(),
         user_id: req.userId,
@@ -465,21 +465,20 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
       });
 
       const ipnUrl = payoutIpnUrl();
-      const npBody = {
-        withdrawals: [
-          {
-            unique_external_id: uniqueExternalId,
-            address,
-            currency,
-            amount,
-          },
-        ],
-      };
-      if (ipnUrl) npBody.ipn_callback_url = ipnUrl;
 
       let npResult;
       try {
-        npResult = await np.createPayout(npBody);
+        npResult = await np.createPayout({
+          ipnCallbackUrl: ipnUrl || undefined,
+          withdrawals: [
+            {
+              uniqueExternalId,
+              address,
+              currency,
+              amount,
+            },
+          ],
+        });
       } catch (e) {
         await updateNowpaymentsPayout(payoutRow.id, {
           status: 'failed',

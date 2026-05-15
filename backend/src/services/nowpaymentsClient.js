@@ -100,7 +100,8 @@ async function npFetch(path, { method = 'GET', body, usePayoutJwt = false } = {}
     }
   }
   if (!res.ok) {
-    const msg = data?.message || data?.error || res.statusText || 'Payment provider request failed';
+    const extracted = extractNpErrorMessage(data);
+    const msg = extracted || res.statusText || 'Payment provider request failed';
     const err = new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
     err.status = res.status;
     err.nowpayments = data;
@@ -125,8 +126,62 @@ function getPayment(paymentId) {
   return npFetch(`/payment/${paymentId}`);
 }
 
-function createPayout(params) {
-  return npFetch('/payout', { method: 'POST', body: params, usePayoutJwt: true });
+/** NOWPayments allows max 6 decimal places on payout amounts. */
+function roundPayoutAmount(amount) {
+  const n = Number(amount);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n * 1e6) / 1e6;
+}
+
+/** Short alphanumeric external id (no payout_description or other extra fields). */
+function shortExternalId(seed) {
+  const compact = String(seed || '')
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 32);
+  return compact || String(Date.now()).slice(-12);
+}
+
+/**
+ * Minimal payout body per NOWPayments docs — never send payout_description.
+ * Root keys allowed: ipn_callback_url, withdrawals[] with address, currency, amount, unique_external_id.
+ */
+function buildCreatePayoutBody({ withdrawals, ipnCallbackUrl }) {
+  const rows = (withdrawals || []).map((w) => {
+    const amount = roundPayoutAmount(w.amount);
+    if (!amount) throw new Error('Invalid payout amount');
+    const item = {
+      address: String(w.address || '').trim(),
+      currency: String(w.currency || '')
+        .trim()
+        .toLowerCase(),
+      amount,
+    };
+    if (w.uniqueExternalId) {
+      item.unique_external_id = shortExternalId(w.uniqueExternalId);
+    }
+    return item;
+  });
+  if (!rows.length) throw new Error('At least one withdrawal is required');
+  const body = { withdrawals: rows };
+  if (ipnCallbackUrl) body.ipn_callback_url = String(ipnCallbackUrl).trim();
+  return body;
+}
+
+function extractNpErrorMessage(data) {
+  if (!data) return null;
+  if (typeof data.message === 'string') return data.message;
+  if (Array.isArray(data.message)) return data.message.map(String).join('; ');
+  if (typeof data.error === 'string') return data.error;
+  if (data.error && typeof data.error.message === 'string') return data.error.message;
+  if (Array.isArray(data.validation_errors) && data.validation_errors.length) {
+    return data.validation_errors.map((e) => e.message || e.field || String(e)).join('; ');
+  }
+  return null;
+}
+
+function createPayout({ withdrawals, ipnCallbackUrl }) {
+  const body = buildCreatePayoutBody({ withdrawals, ipnCallbackUrl });
+  return npFetch('/payout', { method: 'POST', body, usePayoutJwt: true });
 }
 
 function getPayout(payoutId) {
@@ -146,16 +201,14 @@ function toPublicPayoutError(error) {
   if (msg.includes('authorization header') || msg.includes('bearer') || msg.includes('jwt')) {
     return 'Withdrawals are temporarily unavailable. Please try again later.';
   }
+  if (msg.includes('payout_description') || msg.includes('is not allowed')) {
+    return 'Withdrawal was rejected by the payment provider. Please try again in a few minutes.';
+  }
   if (msg.includes('insufficient') || msg.includes('balance')) {
     return error.message;
   }
-  if (
-    msg.includes('payout') ||
-    msg.includes('withdrawal') ||
-    msg.includes('invalid') ||
-    msg.includes('validation')
-  ) {
-    if (error?.message && error.message.length < 160 && !msg.includes('nowpayment')) {
+  if (msg.includes('invalid') || msg.includes('validation')) {
+    if (error?.message && error.message.length < 120 && !msg.includes('nowpayment')) {
       return error.message;
     }
   }
@@ -179,6 +232,7 @@ module.exports = {
   createPayment,
   getPayment,
   createPayout,
+  buildCreatePayoutBody,
   getPayout,
   toPublicPayoutError,
 };

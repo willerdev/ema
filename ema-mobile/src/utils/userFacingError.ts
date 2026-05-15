@@ -17,6 +17,8 @@ const INTERNAL_PATTERNS = [
   'bearer',
   'jwt',
   'jwttoken',
+  'payout_description',
+  'is not allowed',
 ];
 
 export function sanitizeUserFacingError(raw: string, fallback = 'Something went wrong. Please try again.'): string {
