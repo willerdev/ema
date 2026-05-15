@@ -770,6 +770,72 @@ async function upsertComplianceProfile(userId, normalized) {
   return data;
 }
 
+const MAX_WHITELISTED_WALLETS_PER_USER = 3;
+
+async function listWhitelistedWalletsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('user_whitelisted_wallets')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function countWhitelistedWalletsByUserId(userId) {
+  const { count, error } = await supabase
+    .from('user_whitelisted_wallets')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', userId);
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function getWhitelistedWalletForUser(userId, id) {
+  const { data, error } = await supabase
+    .from('user_whitelisted_wallets')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function insertWhitelistedWallet(row) {
+  const count = await countWhitelistedWalletsByUserId(row.user_id);
+  if (count >= MAX_WHITELISTED_WALLETS_PER_USER) {
+    const err = new Error('Maximum of 3 whitelisted wallets allowed');
+    err.code = 'WHITELIST_WALLET_LIMIT';
+    throw err;
+  }
+  const { data, error } = await supabase.from('user_whitelisted_wallets').insert(row).select('*').single();
+  if (error) {
+    if (error.code === '23505') {
+      const dup = new Error('This address is already whitelisted for this currency');
+      dup.code = 'WHITELIST_WALLET_DUPLICATE';
+      throw dup;
+    }
+    throw error;
+  }
+  return data;
+}
+
+async function deleteWhitelistedWalletForUser(userId, id) {
+  const { error } = await supabase.from('user_whitelisted_wallets').delete().eq('user_id', userId).eq('id', id);
+  if (error) throw error;
+}
+
+async function isAddressWhitelistedForUser(userId, currency, address) {
+  const cur = String(currency || '').trim().toLowerCase();
+  const addr = String(address || '').trim().toLowerCase();
+  if (!cur || !addr) return false;
+  const rows = await listWhitelistedWalletsByUserId(userId);
+  return rows.some(
+    (r) => String(r.currency || '').toLowerCase() === cur && String(r.address || '').trim().toLowerCase() === addr
+  );
+}
+
 module.exports = {
   getUserByEmail,
   getUserById,
@@ -838,4 +904,11 @@ module.exports = {
   getCryptoBalancesByUserId,
   getComplianceProfileByUserId,
   upsertComplianceProfile,
+  listWhitelistedWalletsByUserId,
+  countWhitelistedWalletsByUserId,
+  getWhitelistedWalletForUser,
+  insertWhitelistedWallet,
+  deleteWhitelistedWalletForUser,
+  isAddressWhitelistedForUser,
+  MAX_WHITELISTED_WALLETS_PER_USER,
 };

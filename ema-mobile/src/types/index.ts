@@ -254,6 +254,19 @@ export interface ComplianceProfileResponse {
   };
 }
 
+export interface WhitelistedWallet {
+  id: string;
+  label: string;
+  currency: string;
+  address: string;
+  createdAt: string;
+}
+
+export interface WhitelistedWalletsResponse {
+  wallets: WhitelistedWallet[];
+  maxWallets: number;
+}
+
 export interface Mt5AccountConfig {
   id?: string;
   login: string;
@@ -287,4 +300,20 @@ export interface Mt5Position {
   openPrice?: number;
   currentPrice?: number;
   profit?: number;
+  swap?: number;
+  commission?: number;
+  time?: string | null;
+}
+
+export interface Mt5HistoryDeal {
+  id: string;
+  symbol: string;
+  type: string;
+  volume: number;
+  price: number;
+  profit: number;
+  commission: number;
+  swap: number;
+  time: string | null;
+  positionId: string | null;
 }

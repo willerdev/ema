@@ -1,5 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   KeyboardAvoidingView,
@@ -18,92 +20,175 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
+import { useToast } from '../hooks/useToast';
 import { mt5Service } from '../services/mt5Service';
-import { Mt5AccountConfig, Mt5Balance, Mt5Position } from '../types';
+import { Mt5AccountConfig, Mt5Balance, Mt5HistoryDeal, Mt5Position } from '../types';
 import { palette } from '../theme/colors';
+
+type Mt5Panel = 'balance' | 'positions' | 'history';
+
+function formatTime(iso: string | null | undefined) {
+  if (!iso) return '—';
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return String(iso);
+  return new Date(ms).toLocaleString();
+}
+
+function sideLabel(type: string | undefined) {
+  const t = String(type || '').toLowerCase();
+  if (t.includes('buy') || t === '0') return 'Buy';
+  if (t.includes('sell') || t === '1') return 'Sell';
+  return type || '—';
+}
 
 export function MT5Screen() {
   const insets = useSafeAreaInsets();
+  const { showToast } = useToast();
+
   const [accounts, setAccounts] = useState<Mt5AccountConfig[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState<string>('');
+  const [selectedAccountId, setSelectedAccountId] = useState('');
+  const [panel, setPanel] = useState<Mt5Panel>('balance');
+  const [fabOpen, setFabOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+
   const [login, setLogin] = useState('');
   const [password, setPassword] = useState('');
   const [server, setServer] = useState('');
   const [accountName, setAccountName] = useState('');
+
   const [balance, setBalance] = useState<Mt5Balance | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
-  const [detailOpen, setDetailOpen] = useState(false);
   const [positions, setPositions] = useState<Mt5Position[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [status, setStatus] = useState('Connect your MT5 account to fetch balance automatically.');
+  const [history, setHistory] = useState<Mt5HistoryDeal[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const [status, setStatus] = useState('Connect an MT5 account to view live data.');
 
-  const refresh = useCallback(async () => {
-    if (addOpen) return;
-    try {
-      const list = await mt5Service.listAccounts();
-      const rows = list.accounts || [];
-      setAccounts(rows);
-      if (!rows.length) {
-        setSelectedAccountId('');
-        setBalance(null);
-        setStatus('No MT5 accounts connected yet.');
-        return;
-      }
+  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
-      const nextSelected = rows.find((a) => a.id === selectedAccountId)?.id || rows[0].id || '';
-      setSelectedAccountId(nextSelected);
-      const selected = rows.find((a) => a.id === nextSelected);
-      if (selected) {
-        setBalance({
-          isLive: false,
-          balance: Number(selected.cachedBalance ?? 0),
-          equity: Number(selected.cachedEquity ?? selected.cachedBalance ?? 0),
-          currency: selected.cachedCurrency || 'USD',
-          login: selected.login,
-          server: selected.server,
-          accountName: selected.accountName,
-          updatedAt: selected.balanceLastUpdatedAt || undefined,
-        });
-        setStatus(selected.balanceLastUpdatedAt ? `Last updated ${new Date(selected.balanceLastUpdatedAt).toLocaleString()}` : 'Balance not fetched yet');
-      }
-    } catch (error: any) {
-      const message = String(error?.message || 'Unable to fetch MT5 data');
-      if (message.includes('Server returned HTML (404)')) {
-        setStatus('MT5 backend routes are not deployed yet. Deploy latest backend to Render.');
-        return;
-      }
-      setStatus(message);
+  const loadAccounts = useCallback(async () => {
+    const list = await mt5Service.listAccounts();
+    const rows = list.accounts || [];
+    setAccounts(rows);
+    if (!rows.length) {
+      setSelectedAccountId('');
+      return;
     }
-  }, [selectedAccountId, addOpen]);
+    setSelectedAccountId((prev) => (rows.some((a) => a.id === prev) ? prev : rows[0].id || ''));
+  }, []);
+
+  const loadLiveBalance = useCallback(async (accountId: string) => {
+    const live = await mt5Service.refreshBalance(accountId);
+    setBalance(live);
+    setStatus(`Live · ${new Date().toLocaleTimeString()}`);
+    return live;
+  }, []);
+
+  const loadPositions = useCallback(async (accountId: string) => {
+    const res = await mt5Service.getPositions(accountId);
+    setPositions(res.positions || []);
+  }, []);
+
+  const loadHistory = useCallback(async (accountId: string) => {
+    const res = await mt5Service.getHistory(accountId, 30);
+    setHistory(res.deals || []);
+  }, []);
+
+  const refreshPanel = useCallback(
+    async (accountId: string, target: Mt5Panel) => {
+      if (!accountId) return;
+      if (target === 'balance') await loadLiveBalance(accountId);
+      else if (target === 'positions') await loadPositions(accountId);
+      else await loadHistory(accountId);
+    },
+    [loadLiveBalance, loadPositions, loadHistory]
+  );
+
+  const refreshAll = useCallback(async () => {
+    if (addOpen || fabOpen) return;
+    try {
+      await loadAccounts();
+    } catch (error: any) {
+      setStatus(String(error?.message || 'Unable to load MT5 accounts'));
+    }
+  }, [addOpen, fabOpen, loadAccounts]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void (async () => {
+        await refreshAll();
+      })();
+    }, [refreshAll])
+  );
+
+  useEffect(() => {
+    if (!selectedAccountId) return;
+    setLoading(true);
+    void refreshPanel(selectedAccountId, panel)
+      .catch((error: any) => setStatus(String(error?.message || 'Failed to load MT5 data')))
+      .finally(() => setLoading(false));
+  }, [selectedAccountId]);
+
+  const onPullRefresh = useCallback(async () => {
+    if (!selectedAccountId) {
+      setRefreshing(true);
+      await refreshAll();
+      setRefreshing(false);
+      return;
+    }
+    setRefreshing(true);
+    try {
+      await refreshPanel(selectedAccountId, panel);
+    } catch (error: any) {
+      Alert.alert('MT5', String(error?.message || 'Refresh failed'));
+    } finally {
+      setRefreshing(false);
+    }
+  }, [selectedAccountId, panel, refreshPanel, refreshAll]);
+
+  const selectPanel = async (next: Mt5Panel) => {
+    setPanel(next);
+    setFabOpen(false);
+    if (!selectedAccountId) {
+      Alert.alert('MT5', 'Connect an account first.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await refreshPanel(selectedAccountId, next);
+    } catch (error: any) {
+      Alert.alert('MT5', String(error?.message || 'Failed to load data'));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   usePolling(() => {
-    if (addOpen || detailOpen) return;
-    refresh();
+    if (!selectedAccountId || addOpen || fabOpen) return;
+    void refreshPanel(selectedAccountId, panel).catch(() => {});
   }, 15000, true);
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await refresh();
-    setRefreshing(false);
-  }, [refresh]);
-
-  const onSave = async () => {
+  const onSaveAccount = async () => {
     if (!login || !password || !server) {
       Alert.alert('Validation', 'MT5 login, password and server are required.');
       return;
     }
     try {
       setLoading(true);
-      await mt5Service.saveAccount({ login, password, server, accountName });
+      const saved = await mt5Service.saveAccount({ login, password, server, accountName });
       setAddOpen(false);
+      setFabOpen(false);
       setLogin('');
       setPassword('');
       setServer('');
       setAccountName('');
-      await refresh();
-      Alert.alert('Saved', 'MT5 account linked and balance sync started.');
+      await loadAccounts();
+      const id = saved.account?.id || '';
+      if (id) {
+        setSelectedAccountId(id);
+        await refreshPanel(id, 'balance');
+      }
+      showToast('MT5 account connected');
     } catch (error: any) {
       Alert.alert('MT5 Error', error?.message || 'Failed to save MT5 account');
     } finally {
@@ -111,161 +196,236 @@ export function MT5Screen() {
     }
   };
 
-  const openAccountDetails = async (id: string) => {
-    setSelectedAccountId(id);
-    setDetailOpen(true);
-    setDetailLoading(true);
-    try {
-      const balanceData = await mt5Service.getBalance(id);
-      setBalance(balanceData);
-      setStatus(balanceData.updatedAt ? `Last updated ${new Date(balanceData.updatedAt).toLocaleString()}` : 'Balance not fetched yet');
-      try {
-        const openPositions = await mt5Service.getPositions(id);
-        setPositions(openPositions.positions || []);
-      } catch {
-        // No positions or temporary issue should not block account details.
-        setPositions([]);
-      }
-    } catch (error: any) {
-      setStatus(String(error?.message || 'Unable to load MT5 account details'));
-    } finally {
-      setDetailLoading(false);
-    }
+  const onClosePosition = (position: Mt5Position) => {
+    if (!selectedAccountId || !position.id) return;
+    Alert.alert('Close position', `Close ${position.symbol} ${sideLabel(position.type)}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Close',
+        style: 'destructive',
+        onPress: async () => {
+          setClosingId(position.id!);
+          try {
+            await mt5Service.closePosition(selectedAccountId, position.id!);
+            showToast('Close request sent');
+            await loadPositions(selectedAccountId);
+            await loadLiveBalance(selectedAccountId);
+          } catch (error: any) {
+            Alert.alert('Close failed', String(error?.message || 'Could not close position'));
+          } finally {
+            setClosingId(null);
+          }
+        },
+      },
+    ]);
   };
 
-  const onRefreshLive = async () => {
-    if (!selectedAccountId) return;
-    try {
-      setDetailLoading(true);
-      const liveBalance = await mt5Service.refreshBalance(selectedAccountId);
-      setBalance(liveBalance);
-      setStatus(`Live now • ${new Date().toLocaleTimeString()}`);
-      try {
-        const openPositions = await mt5Service.getPositions(selectedAccountId);
-        setPositions(openPositions.positions || []);
-      } catch {
-        setPositions([]);
-      }
-      await refresh();
-    } catch (error: any) {
-      Alert.alert('MT5 Error', String(error?.message || 'Failed to refresh live balance'));
-    } finally {
-      setDetailLoading(false);
-    }
-  };
+  const renderBalance = () => (
+    <Card>
+      <Text style={styles.cardTitle}>Live balance</Text>
+      {loading && !balance ? <ActivityIndicator color={palette.primary} style={{ marginVertical: 12 }} /> : null}
+      <Text style={styles.balanceMain}>
+        {balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '—'}
+      </Text>
+      <Text style={styles.meta}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '—'}</Text>
+      <Text style={styles.meta}>Login: {balance?.login || selectedAccount?.login || '—'}</Text>
+      <Text style={styles.meta}>Server: {balance?.server || selectedAccount?.server || '—'}</Text>
+      <Text style={styles.meta}>{status}</Text>
+    </Card>
+  );
+
+  const renderPositions = () => (
+    <Card>
+      <Text style={styles.cardTitle}>Open positions</Text>
+      {loading && !positions.length ? <ActivityIndicator color={palette.primary} style={{ marginVertical: 12 }} /> : null}
+      {!positions.length && !loading ? <Text style={styles.meta}>No open positions</Text> : null}
+      {positions.map((p, idx) => (
+        <View key={p.id || `${p.symbol}-${idx}`} style={styles.positionRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.positionSymbol}>{p.symbol || '—'}</Text>
+            <Text style={styles.meta}>
+              {sideLabel(p.type)} · Vol {Number(p.volume || 0).toFixed(2)} · Open {Number(p.openPrice || 0).toFixed(5)}
+            </Text>
+            <Text style={styles.meta}>Price {Number(p.currentPrice || 0).toFixed(5)}</Text>
+          </View>
+          <View style={styles.positionActions}>
+            <Text style={{ color: Number(p.profit || 0) >= 0 ? palette.success : palette.danger, fontWeight: '700' }}>
+              {Number(p.profit || 0).toFixed(2)}
+            </Text>
+            <PrimaryButton
+              compact
+              label={closingId === p.id ? '…' : 'Close'}
+              variant='danger'
+              onPress={() => onClosePosition(p)}
+              disabled={!p.id || closingId === p.id}
+            />
+          </View>
+        </View>
+      ))}
+    </Card>
+  );
+
+  const renderHistory = () => (
+    <Card>
+      <Text style={styles.cardTitle}>Trade history (30 days)</Text>
+      {loading && !history.length ? <ActivityIndicator color={palette.primary} style={{ marginVertical: 12 }} /> : null}
+      {!history.length && !loading ? <Text style={styles.meta}>No closed deals in this period</Text> : null}
+      {history.map((d) => (
+        <View key={d.id} style={styles.historyRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.positionSymbol}>{d.symbol || '—'}</Text>
+            <Text style={styles.meta}>
+              {sideLabel(d.type)} · Vol {Number(d.volume || 0).toFixed(2)} @ {Number(d.price || 0).toFixed(5)}
+            </Text>
+            <Text style={styles.meta}>{formatTime(d.time)}</Text>
+          </View>
+          <Text style={{ color: Number(d.profit || 0) >= 0 ? palette.success : palette.danger, fontWeight: '700' }}>
+            {Number(d.profit || 0).toFixed(2)}
+          </Text>
+        </View>
+      ))}
+    </Card>
+  );
 
   return (
     <View style={styles.container}>
       <ScrollView
-        style={styles.container}
-        contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+        contentContainerStyle={{ padding: 16, paddingBottom: 120 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPullRefresh} tintColor={palette.primary} />}
       >
+        <Text style={styles.title}>MT5</Text>
+        <Text style={styles.sub}>Live account data from your connected broker</Text>
+
         <Card>
-          <Text style={styles.label}>Connected MT5 Accounts</Text>
-          {!accounts.length && <Text style={styles.item}>No MT5 accounts connected yet.</Text>}
+          <Text style={styles.cardTitle}>Accounts</Text>
+          {!accounts.length ? <Text style={styles.meta}>No MT5 account linked yet. Use + to connect.</Text> : null}
           {accounts.map((account) => {
             const selected = account.id === selectedAccountId;
             return (
-              <Pressable key={account.id} style={[styles.accountRow, selected && styles.accountRowActive]} onPress={() => openAccountDetails(account.id || '')}>
+              <Pressable
+                key={account.id}
+                style={[styles.accountRow, selected && styles.accountRowActive]}
+                onPress={() => {
+                  if (!account.id) return;
+                  setSelectedAccountId(account.id);
+                  void refreshPanel(account.id, panel);
+                }}
+              >
                 <Text style={styles.accountTitle}>{account.accountName || account.login}</Text>
-                <Text style={styles.item}>{account.server}</Text>
+                <Text style={styles.meta}>{account.server}</Text>
               </Pressable>
             );
           })}
         </Card>
 
-        {accounts.length > 0 && (
+        {selectedAccountId ? (
+          <>
+            <View style={styles.panelTabs}>
+              {(['balance', 'positions', 'history'] as Mt5Panel[]).map((key) => (
+                <Pressable
+                  key={key}
+                  style={[styles.panelTab, panel === key && styles.panelTabActive]}
+                  onPress={() => void selectPanel(key)}
+                >
+                  <Text style={[styles.panelTabText, panel === key && styles.panelTabTextActive]}>
+                    {key === 'balance' ? 'Balance' : key === 'positions' ? 'Positions' : 'History'}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+            {panel === 'balance' ? renderBalance() : null}
+            {panel === 'positions' ? renderPositions() : null}
+            {panel === 'history' ? renderHistory() : null}
+          </>
+        ) : (
           <Card>
-            <Text style={styles.label}>Auto Balance Sync</Text>
-            <Text style={styles.item}>Status: Connected</Text>
-            <Text style={styles.item}>{status}</Text>
-            <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
-            <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
-            <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
+            <Text style={styles.meta}>{status}</Text>
           </Card>
         )}
       </ScrollView>
 
-      <Pressable style={styles.fab} onPress={() => setAddOpen(true)}>
-        <Ionicons name='add' size={28} color={palette.background} />
+      {fabOpen ? (
+        <Pressable style={styles.fabBackdrop} onPress={() => setFabOpen(false)} />
+      ) : null}
+
+      {fabOpen ? (
+        <View style={[styles.fabMenu, { bottom: 88 + insets.bottom }]}>
+          <Pressable style={styles.fabMenuItem} onPress={() => void selectPanel('balance')}>
+            <Ionicons name='wallet-outline' size={20} color={palette.textPrimary} />
+            <Text style={styles.fabMenuText}>Live balance</Text>
+          </Pressable>
+          <Pressable style={styles.fabMenuItem} onPress={() => void selectPanel('positions')}>
+            <Ionicons name='stats-chart-outline' size={20} color={palette.textPrimary} />
+            <Text style={styles.fabMenuText}>Open positions</Text>
+          </Pressable>
+          <Pressable style={styles.fabMenuItem} onPress={() => void selectPanel('history')}>
+            <Ionicons name='time-outline' size={20} color={palette.textPrimary} />
+            <Text style={styles.fabMenuText}>History</Text>
+          </Pressable>
+          <Pressable
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              if (!selectedAccountId) {
+                Alert.alert('MT5', 'Select an account first.');
+                return;
+              }
+              setLoading(true);
+              void refreshPanel(selectedAccountId, panel)
+                .then(() => showToast('Refreshed'))
+                .catch((e: any) => Alert.alert('MT5', e?.message || 'Refresh failed'))
+                .finally(() => setLoading(false));
+            }}
+          >
+            <Ionicons name='refresh-outline' size={20} color={palette.textPrimary} />
+            <Text style={styles.fabMenuText}>Refresh live</Text>
+          </Pressable>
+          <Pressable
+            style={styles.fabMenuItem}
+            onPress={() => {
+              setFabOpen(false);
+              setAddOpen(true);
+            }}
+          >
+            <Ionicons name='add-circle-outline' size={20} color={palette.primary} />
+            <Text style={[styles.fabMenuText, { color: palette.primary }]}>Add MT5 account</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
+      <Pressable
+        style={[styles.fab, { bottom: 22 + insets.bottom }]}
+        onPress={() => setFabOpen((v) => !v)}
+      >
+        <Ionicons name={fabOpen ? 'close' : 'menu'} size={26} color={palette.background} />
       </Pressable>
 
       <Modal visible={addOpen} transparent animationType='slide' onRequestClose={() => setAddOpen(false)}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? Math.max(insets.top, 12) + 48 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 48 : 0}
           style={{ flex: 1 }}
         >
-          <View style={{ flex: 1 }}>
-            <Pressable
-              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.55)' }]}
-              onPress={() => {
-                Keyboard.dismiss();
-                setAddOpen(false);
-              }}
-            />
-            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'flex-end' }]}>
-          <View style={[styles.modalContent, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
-            <Text style={styles.label}>Add MT5 Account</Text>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => {
+              Keyboard.dismiss();
+              setAddOpen(false);
+            }}
+          />
+          <View style={[styles.modalSheet, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
+            <Text style={styles.cardTitle}>Add MT5 account</Text>
             <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
             <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
-            <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker Server (e.g. Broker-Demo)' placeholderTextColor={palette.textSecondary} />
-            <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Account Name (optional)' placeholderTextColor={palette.textSecondary} />
+            <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker server' placeholderTextColor={palette.textSecondary} />
+            <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Label (optional)' placeholderTextColor={palette.textSecondary} />
             <View style={styles.modalRow}>
-              <PrimaryButton label={loading ? 'Saving...' : 'Save MT5 Account'} onPress={onSave} disabled={loading} style={{ flex: 1 }} />
+              <PrimaryButton label={loading ? 'Saving…' : 'Save'} onPress={() => void onSaveAccount()} disabled={loading} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
               <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
             </View>
           </View>
-            </View>
-          </View>
         </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={detailOpen} animationType='slide'>
-        <View style={styles.detailContainer}>
-          <View style={[styles.detailHeader, { paddingTop: Math.max(16, insets.top + 8) }]}>
-            <Pressable onPress={() => setDetailOpen(false)} hitSlop={12}>
-              <Ionicons name='arrow-back' size={24} color={palette.textPrimary} />
-            </Pressable>
-            <Text style={styles.detailTitle}>MT5 Account Details</Text>
-            <View style={{ width: 24 }} />
-          </View>
-          <ScrollView contentContainerStyle={{ padding: 16 }}>
-            <Card>
-              <Text style={styles.label}>Balance Snapshot</Text>
-              <Text style={styles.balance}>{balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '--'}</Text>
-              <Text style={styles.item}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '--'}</Text>
-              <Text style={styles.item}>Server: {balance?.server || '--'}</Text>
-              <Text style={styles.item}>
-                {balance?.isLive
-                  ? 'Status: live'
-                  : `Status: cached${balance?.updatedAt ? ` • ${new Date(balance.updatedAt).toLocaleString()}` : ''}`}
-              </Text>
-              <PrimaryButton
-                label={detailLoading ? 'Refreshing...' : 'Refresh Live Balance'}
-                onPress={onRefreshLive}
-                disabled={detailLoading}
-              />
-            </Card>
-            <Card>
-              <Text style={styles.label}>Running Trades</Text>
-              {!positions.length && <Text style={styles.item}>No open positions</Text>}
-              {positions.map((p, idx) => (
-                <View key={p.id || `${p.symbol}-${idx}`} style={styles.positionRow}>
-                  <View>
-                    <Text style={styles.accountTitle}>{p.symbol || 'Unknown'}</Text>
-                    <Text style={styles.item}>{String(p.type || '')} • Vol {Number(p.volume || 0).toFixed(2)}</Text>
-                  </View>
-                  <Text style={{ color: Number(p.profit || 0) >= 0 ? palette.success : palette.danger }}>
-                    {Number(p.profit || 0).toFixed(2)}
-                  </Text>
-                </View>
-              ))}
-            </Card>
-          </ScrollView>
-        </View>
       </Modal>
     </View>
   );
@@ -273,7 +433,11 @@ export function MT5Screen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
-  label: { color: palette.textSecondary, marginBottom: 8 },
+  title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 4 },
+  sub: { color: palette.textSecondary, marginBottom: 14 },
+  cardTitle: { color: palette.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8 },
+  meta: { color: palette.textSecondary, marginBottom: 4, fontSize: 13 },
+  balanceMain: { color: palette.textPrimary, fontSize: 34, fontWeight: '800', marginVertical: 8 },
   input: {
     backgroundColor: palette.surfaceElevated,
     borderWidth: 1,
@@ -283,40 +447,76 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 8,
   },
-  item: { color: palette.textPrimary, marginBottom: 6 },
-  balance: { color: palette.textPrimary, fontSize: 32, fontWeight: '800', marginVertical: 8 },
-  accountRow: { borderWidth: 1, borderColor: palette.border, borderRadius: 12, padding: 10, marginBottom: 8, backgroundColor: palette.surfaceElevated },
+  accountRow: {
+    borderWidth: 1,
+    borderColor: palette.border,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+    backgroundColor: palette.surfaceElevated,
+  },
   accountRowActive: { borderColor: palette.primary },
-  accountTitle: { color: palette.textPrimary, fontWeight: '700', marginBottom: 3 },
+  accountTitle: { color: palette.textPrimary, fontWeight: '700', marginBottom: 2 },
+  panelTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  panelTab: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: palette.border,
+    alignItems: 'center',
+  },
+  panelTabActive: { borderColor: palette.primary, backgroundColor: palette.surfaceElevated },
+  panelTabText: { color: palette.textSecondary, fontSize: 12, fontWeight: '600' },
+  panelTabTextActive: { color: palette.primary },
+  positionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 14,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
+  positionSymbol: { color: palette.textPrimary, fontWeight: '700', fontSize: 16, marginBottom: 2 },
+  positionActions: { alignItems: 'flex-end', gap: 8, marginLeft: 8 },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
   fab: {
     position: 'absolute',
     right: 18,
-    bottom: 22,
     width: 56,
     height: 56,
     borderRadius: 28,
     backgroundColor: palette.primary,
     alignItems: 'center',
     justifyContent: 'center',
+    elevation: 8,
     shadowColor: palette.shadow,
     shadowOpacity: 0.35,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 8,
   },
-  modalContent: { backgroundColor: palette.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
-  modalRow: { flexDirection: 'row' },
-  detailContainer: { flex: 1, backgroundColor: palette.background },
-  detailHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    borderBottomColor: palette.border,
+  fabBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.35)' },
+  fabMenu: {
+    position: 'absolute',
+    right: 18,
+    backgroundColor: palette.surface,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: palette.border,
+    paddingVertical: 6,
+    minWidth: 200,
+    elevation: 10,
   },
-  detailTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700' },
-  positionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  fabMenuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, paddingHorizontal: 16 },
+  fabMenuText: { color: palette.textPrimary, fontSize: 15, fontWeight: '600' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)' },
+  modalSheet: { backgroundColor: palette.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16 },
+  modalRow: { flexDirection: 'row', marginTop: 8 },
 });

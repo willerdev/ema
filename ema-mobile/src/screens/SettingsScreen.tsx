@@ -1,20 +1,26 @@
 import { useCallback, useState } from 'react';
-import { Alert, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { Card } from '../components/Card';
+import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { authService, TotpStatus } from '../services/authService';
 import { alpacaService } from '../services/alpacaService';
 import { complianceService } from '../services/complianceService';
+import { whitelistWalletService } from '../services/whitelistWalletService';
+import { useToast } from '../hooks/useToast';
 import {
   ComplianceProfile,
   PlannedInvestmentDuration,
   SourceOfFunds,
+  WhitelistedWallet,
 } from '../types';
 import { palette } from '../theme/colors';
+
+const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
 const SOURCE_LABELS: Record<string, string> = {
   employment: 'Employment income',
@@ -32,14 +38,40 @@ const DURATION_LABELS: Record<string, string> = {
   over_5y: 'Over 5 years',
 };
 
+function SettingsRow({
+  title,
+  subtitle,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.settingsRow} onPress={onPress}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowTitle}>{title}</Text>
+        <Text style={styles.rowSubtitle}>{subtitle}</Text>
+      </View>
+      <Text style={styles.chevron}>›</Text>
+    </Pressable>
+  );
+}
+
 export function SettingsScreen() {
   const { user, logout } = useAuth();
+  const { showToast } = useToast();
   const [apiKey, setApiKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [darkMode, setDarkMode] = useState(true);
   const [biometric, setBiometric] = useState(false);
   const [profile, setProfile] = useState<{ username: string; accountStatus: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  const [complianceModalOpen, setComplianceModalOpen] = useState(false);
+  const [whitelistModalOpen, setWhitelistModalOpen] = useState(false);
+  const [alpacaModalOpen, setAlpacaModalOpen] = useState(false);
+  const [securityModalOpen, setSecurityModalOpen] = useState(false);
 
   const [totpStatus, setTotpStatus] = useState<TotpStatus | null>(null);
   const [totpBusy, setTotpBusy] = useState(false);
@@ -67,6 +99,13 @@ export function SettingsScreen() {
   const [addressLine, setAddressLine] = useState('');
   const [city, setCity] = useState('');
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const [whitelistedWallets, setWhitelistedWallets] = useState<WhitelistedWallet[]>([]);
+  const [maxWhitelistedWallets, setMaxWhitelistedWallets] = useState(3);
+  const [wlBusy, setWlBusy] = useState(false);
+  const [wlLabel, setWlLabel] = useState('');
+  const [wlCurrency, setWlCurrency] = useState('usdttrc20');
+  const [wlAddress, setWlAddress] = useState('');
 
   const applyComplianceProfile = (p: ComplianceProfile | null) => {
     if (!p) return;
@@ -99,6 +138,16 @@ export function SettingsScreen() {
     }
   }, []);
 
+  const loadWhitelistedWallets = useCallback(async () => {
+    try {
+      const data = await whitelistWalletService.list();
+      setWhitelistedWallets(data.wallets || []);
+      setMaxWhitelistedWallets(data.maxWallets ?? 3);
+    } catch {
+      setWhitelistedWallets([]);
+    }
+  }, []);
+
   const loadProfile = useCallback(async () => {
     try {
       const data = await authService.profile();
@@ -123,8 +172,48 @@ export function SettingsScreen() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadProfile(), loadTotpStatus(), loadCompliance()]);
-  }, [loadProfile, loadTotpStatus, loadCompliance]);
+    await Promise.all([loadProfile(), loadTotpStatus(), loadCompliance(), loadWhitelistedWallets()]);
+  }, [loadProfile, loadTotpStatus, loadCompliance, loadWhitelistedWallets]);
+
+  const addWhitelistedWallet = async () => {
+    if (!wlAddress.trim()) {
+      Alert.alert('Validation', 'Enter a wallet address.');
+      return;
+    }
+    if (whitelistedWallets.length >= maxWhitelistedWallets) {
+      Alert.alert('Limit reached', `You can register up to ${maxWhitelistedWallets} wallets.`);
+      return;
+    }
+    setWlBusy(true);
+    try {
+      const data = await whitelistWalletService.add({
+        label: wlLabel.trim() || undefined,
+        currency: wlCurrency,
+        address: wlAddress.trim(),
+      });
+      setWhitelistedWallets(data.wallets);
+      setWlLabel('');
+      setWlAddress('');
+      showToast('Wallet added to whitelist');
+    } catch (error: any) {
+      Alert.alert('Add failed', String(error?.message || 'Could not add wallet'));
+    } finally {
+      setWlBusy(false);
+    }
+  };
+
+  const removeWhitelistedWallet = async (id: string) => {
+    setWlBusy(true);
+    try {
+      const data = await whitelistWalletService.remove(id);
+      setWhitelistedWallets(data.wallets);
+      showToast('Wallet removed');
+    } catch (error: any) {
+      Alert.alert('Remove failed', String(error?.message || 'Could not remove wallet'));
+    } finally {
+      setWlBusy(false);
+    }
+  };
 
   const saveCompliance = async () => {
     const amount = Number(plannedInvestmentAmount);
@@ -164,12 +253,8 @@ export function SettingsScreen() {
       });
       setComplianceComplete(Boolean(data.complete));
       applyComplianceProfile(data.profile);
-      Alert.alert(
-        data.complete ? 'Profile complete' : 'Saved',
-        data.complete
-          ? 'You can withdraw funds once other requirements are met.'
-          : 'Some required fields are still missing.'
-      );
+      showToast(data.complete ? 'Compliance profile complete' : 'Compliance profile saved');
+      if (data.complete) setComplianceModalOpen(false);
     } catch (error: any) {
       Alert.alert('Save failed', String(error?.message || 'Could not save profile'));
     } finally {
@@ -190,8 +275,10 @@ export function SettingsScreen() {
       try {
         await alpacaService.getAccount();
         Alert.alert('Saved', 'Alpaca keys saved and account access verified.');
+        setAlpacaModalOpen(false);
       } catch {
         Alert.alert('Saved', 'Keys saved. Verify account access from Home/Trades.');
+        setAlpacaModalOpen(false);
       }
     } catch (error: any) {
       Alert.alert('API Key Error', String(error?.message || 'Failed to save keys'));
@@ -226,7 +313,7 @@ export function SettingsScreen() {
       setSetupSecret(null);
       setTotpConfirmCode('');
       await loadTotpStatus();
-      Alert.alert('Done', 'Two-factor authentication is enabled.');
+      showToast('Two-factor authentication enabled');
     } catch (error: any) {
       Alert.alert('Confirm failed', String(error?.message || 'Invalid code'));
     } finally {
@@ -261,7 +348,7 @@ export function SettingsScreen() {
       setDisableCode('');
       setShowDisableForm(false);
       await loadTotpStatus();
-      Alert.alert('Done', 'Two-factor authentication has been turned off.');
+      showToast('Two-factor authentication turned off');
     } catch (error: any) {
       Alert.alert('Disable failed', String(error?.message || 'Check password and code'));
     } finally {
@@ -272,7 +359,7 @@ export function SettingsScreen() {
   const copySecret = async () => {
     if (setupSecret) {
       await Clipboard.setStringAsync(setupSecret);
-      Alert.alert('Copied', 'Secret key copied to clipboard.');
+      showToast('Secret key copied');
     }
   };
 
@@ -280,23 +367,80 @@ export function SettingsScreen() {
   const totpSetupPending = totpStatus?.setupPending ?? false;
   const showQr = Boolean(setupOtpauthUrl && setupSecret);
 
-  return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ padding: 16 }}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
-    >
-      <Card>
-        <Text style={styles.label}>Profile</Text>
-        <Text style={styles.value}>Email: {user?.email}</Text>
-        <Text style={styles.value}>Username: {profile?.username || user?.email.split('@')[0]}</Text>
-        <Text style={styles.value}>Status: {profile?.accountStatus || 'active'}</Text>
-      </Card>
+  const complianceSummary = complianceComplete
+    ? `${legalFirstName} ${legalLastName} · ${country}`
+    : 'Required before withdrawals';
 
-      <Card>
-        <Text style={styles.label}>Withdrawal requirements</Text>
-        <Text style={styles.value}>
-          Status: {complianceComplete ? 'Complete' : 'Incomplete'} — required before cash or crypto withdrawals.
+  const whitelistSummary =
+    whitelistedWallets.length > 0
+      ? `${whitelistedWallets.length}/${maxWhitelistedWallets} wallets registered`
+      : 'Add up to 3 withdrawal addresses';
+
+  const securitySummary = totpEnabled
+    ? '2FA on · biometrics ' + (biometric ? 'on' : 'off')
+    : totpSetupPending
+      ? '2FA setup in progress'
+      : '2FA off';
+
+  return (
+    <>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ padding: 16 }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+      >
+        <Card>
+          <Text style={styles.label}>Profile</Text>
+          <Text style={styles.value}>Email: {user?.email}</Text>
+          <Text style={styles.value}>Username: {profile?.username || user?.email.split('@')[0]}</Text>
+          <Text style={styles.value}>Status: {profile?.accountStatus || 'active'}</Text>
+        </Card>
+
+        <Card style={styles.menuCard}>
+          <Text style={styles.label}>Account</Text>
+          <SettingsRow
+            title='Withdrawal requirements'
+            subtitle={complianceSummary}
+            onPress={() => setComplianceModalOpen(true)}
+          />
+          <SettingsRow
+            title='Whitelisted wallets'
+            subtitle={whitelistSummary}
+            onPress={() => setWhitelistModalOpen(true)}
+          />
+          <SettingsRow title='Alpaca API keys' subtitle='Connect trading account' onPress={() => setAlpacaModalOpen(true)} />
+          <SettingsRow title='Security' subtitle={securitySummary} onPress={() => setSecurityModalOpen(true)} />
+        </Card>
+
+        <Card>
+          <Text style={styles.label}>Theme</Text>
+          <View style={styles.rowBetween}>
+            <Text style={styles.value}>Dark mode</Text>
+            <Switch value={darkMode} onValueChange={setDarkMode} thumbColor={darkMode ? palette.primary : '#ccc'} />
+          </View>
+          <Text style={styles.value}>Accent color: Gold</Text>
+        </Card>
+
+        <PrimaryButton label='Logout' onPress={logout} variant='danger' />
+      </ScrollView>
+
+      <FormModal
+        visible={complianceModalOpen}
+        title='Withdrawal requirements'
+        onClose={() => setComplianceModalOpen(false)}
+        footer={
+          <View style={{ gap: 8, marginTop: 12 }}>
+            <PrimaryButton
+              label={complianceBusy ? 'Saving…' : 'Save profile'}
+              onPress={() => void saveCompliance()}
+              disabled={complianceBusy}
+            />
+            <PrimaryButton label='Close' onPress={() => setComplianceModalOpen(false)} />
+          </View>
+        }
+      >
+        <Text style={styles.modalHint}>
+          Status: {complianceComplete ? 'Complete' : 'Incomplete'} — required before wallet withdrawals.
         </Text>
         <TextInput
           style={styles.input}
@@ -400,41 +544,141 @@ export function SettingsScreen() {
           <Text style={[styles.value, { flex: 1, marginRight: 8 }]}>I confirm this information is accurate</Text>
           <Switch value={acceptedTerms} onValueChange={setAcceptedTerms} thumbColor={acceptedTerms ? palette.primary : '#ccc'} />
         </View>
-        <PrimaryButton
-          label={complianceBusy ? 'Saving…' : 'Save compliance profile'}
-          onPress={saveCompliance}
-          disabled={complianceBusy}
+      </FormModal>
+
+      <FormModal
+        visible={whitelistModalOpen}
+        title='Whitelisted wallets'
+        onClose={() => setWhitelistModalOpen(false)}
+        footer={<PrimaryButton label='Done' onPress={() => setWhitelistModalOpen(false)} style={{ marginTop: 12 }} />}
+      >
+        <Text style={styles.modalHint}>
+          Required for withdrawals. {whitelistedWallets.length}/{maxWhitelistedWallets} registered.
+        </Text>
+        {whitelistedWallets.map((w) => (
+          <View key={w.id} style={styles.wlRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.value}>
+                {w.label || w.currency.toUpperCase()} · {w.currency}
+              </Text>
+              <Text style={styles.wlAddress}>
+                {w.address.length > 20 ? `${w.address.slice(0, 10)}…${w.address.slice(-8)}` : w.address}
+              </Text>
+            </View>
+            <PrimaryButton
+              compact
+              label='Remove'
+              variant='danger'
+              onPress={() => void removeWhitelistedWallet(w.id)}
+              disabled={wlBusy}
+            />
+          </View>
+        ))}
+        {whitelistedWallets.length < maxWhitelistedWallets ? (
+          <>
+            <TextInput
+              style={styles.input}
+              placeholder='Label (optional)'
+              placeholderTextColor={palette.textSecondary}
+              value={wlLabel}
+              onChangeText={setWlLabel}
+            />
+            <Text style={styles.subLabel}>Currency</Text>
+            <View style={styles.chipRow}>
+              {WL_CURRENCY_OPTIONS.map((c) => (
+                <Text
+                  key={c}
+                  style={[styles.chip, wlCurrency === c && styles.chipActive]}
+                  onPress={() => setWlCurrency(c)}
+                >
+                  {c}
+                </Text>
+              ))}
+            </View>
+            <TextInput
+              style={styles.input}
+              placeholder='Wallet address'
+              placeholderTextColor={palette.textSecondary}
+              value={wlAddress}
+              onChangeText={setWlAddress}
+              autoCapitalize='none'
+            />
+            <PrimaryButton
+              label={wlBusy ? 'Adding…' : 'Add wallet'}
+              onPress={() => void addWhitelistedWallet()}
+              disabled={wlBusy}
+            />
+          </>
+        ) : (
+          <Text style={styles.value}>Maximum wallets registered. Remove one to add another.</Text>
+        )}
+      </FormModal>
+
+      <FormModal
+        visible={alpacaModalOpen}
+        title='Alpaca API keys'
+        onClose={() => setAlpacaModalOpen(false)}
+        footer={
+          <View style={{ gap: 8, marginTop: 12 }}>
+            <PrimaryButton label='Validate & save' onPress={() => void saveKeys()} />
+            <PrimaryButton label='Close' onPress={() => setAlpacaModalOpen(false)} />
+          </View>
+        }
+      >
+        <Text style={styles.modalHint}>Keys are stored securely and used for trading features.</Text>
+        <TextInput
+          style={styles.input}
+          placeholder='Alpaca API key'
+          placeholderTextColor={palette.textSecondary}
+          value={apiKey}
+          onChangeText={setApiKey}
+          autoCapitalize='none'
         />
-      </Card>
+        <TextInput
+          style={styles.input}
+          placeholder='Alpaca secret key'
+          placeholderTextColor={palette.textSecondary}
+          value={secretKey}
+          onChangeText={setSecretKey}
+          secureTextEntry
+          autoCapitalize='none'
+        />
+      </FormModal>
 
-      <Card>
-        <Text style={styles.label}>Alpaca API Management</Text>
-        <TextInput style={styles.input} placeholder='Alpaca API key' placeholderTextColor={palette.textSecondary} value={apiKey} onChangeText={setApiKey} />
-        <TextInput style={styles.input} placeholder='Alpaca Secret key' placeholderTextColor={palette.textSecondary} value={secretKey} onChangeText={setSecretKey} secureTextEntry />
-        <PrimaryButton label='Validate & Save Keys' onPress={saveKeys} />
-      </Card>
-
-      <Card>
-        <Text style={styles.label}>Security</Text>
+      <FormModal
+        visible={securityModalOpen}
+        title='Security'
+        onClose={() => {
+          setSecurityModalOpen(false);
+          setShowDisableForm(false);
+          setDisablePassword('');
+          setDisableCode('');
+        }}
+        footer={
+          <PrimaryButton
+            label='Done'
+            onPress={() => {
+              setSecurityModalOpen(false);
+              setShowDisableForm(false);
+              setDisablePassword('');
+              setDisableCode('');
+            }}
+            style={{ marginTop: 12 }}
+          />
+        }
+      >
         <View style={styles.rowBetween}>
           <Text style={styles.value}>Enable biometrics</Text>
           <Switch value={biometric} onValueChange={setBiometric} thumbColor={biometric ? palette.primary : '#ccc'} />
         </View>
-        <Text style={styles.value}>Face ID / Fingerprint login ready</Text>
+        <Text style={styles.modalHint}>Face ID / fingerprint login (when supported).</Text>
 
-        <Text style={[styles.label, { marginTop: 16 }]}>Authenticator app (Google Authenticator)</Text>
+        <Text style={[styles.label, { marginTop: 16 }]}>Authenticator app</Text>
         {totpEnabled ? (
           <>
             <Text style={styles.value}>Two-factor authentication is on.</Text>
             {!showDisableForm ? (
-              <View style={styles.buttonRowCentered}>
-                <PrimaryButton
-                  compact
-                  label='Turn off 2FA'
-                  onPress={() => setShowDisableForm(true)}
-                  variant='danger'
-                />
-              </View>
+              <PrimaryButton compact label='Turn off 2FA' onPress={() => setShowDisableForm(true)} variant='danger' />
             ) : (
               <View style={{ gap: 8, marginTop: 8 }}>
                 <TextInput
@@ -457,7 +701,7 @@ export function SettingsScreen() {
                   <PrimaryButton
                     compact
                     label={totpBusy ? '…' : 'Disable'}
-                    onPress={submitDisableTotp}
+                    onPress={() => void submitDisableTotp()}
                     disabled={totpBusy}
                     variant='danger'
                     style={{ flex: 1 }}
@@ -478,12 +722,10 @@ export function SettingsScreen() {
           </>
         ) : totpSetupPending ? (
           <>
-            <Text style={styles.value}>
-              Setup started. Open your authenticator app and enter the code shown there, or cancel to start over.
-            </Text>
+            <Text style={styles.value}>Scan the QR code or enter the secret in your authenticator app.</Text>
             {showQr ? (
               <View style={styles.qrWrap}>
-                <QRCode value={setupOtpauthUrl!} size={180} backgroundColor={palette.surface} color={palette.textPrimary} />
+                <QRCode value={setupOtpauthUrl!} size={160} backgroundColor={palette.surface} color={palette.textPrimary} />
               </View>
             ) : null}
             {setupSecret ? (
@@ -500,58 +742,35 @@ export function SettingsScreen() {
               keyboardType='number-pad'
             />
             <View style={styles.buttonRow}>
-              {setupSecret ? (
-                <PrimaryButton compact label='Copy' onPress={copySecret} style={{ flex: 1 }} />
-              ) : null}
+              {setupSecret ? <PrimaryButton compact label='Copy secret' onPress={() => void copySecret()} style={{ flex: 1 }} /> : null}
               <PrimaryButton
                 compact
                 label={totpBusy ? '…' : 'Enable'}
-                onPress={confirmTotpSetup}
+                onPress={() => void confirmTotpSetup()}
                 disabled={totpBusy}
                 style={{ flex: 1 }}
               />
               <PrimaryButton
                 compact
                 label='Cancel'
-                onPress={cancelTotpSetup}
+                onPress={() => void cancelTotpSetup()}
                 disabled={totpBusy}
                 variant='danger'
                 style={{ flex: 1 }}
               />
             </View>
             {!showQr && !setupSecret ? (
-              <View style={[styles.buttonRow, styles.buttonRowCentered]}>
-                <PrimaryButton compact label='New QR' onPress={startTotpSetup} disabled={totpBusy} style={{ minWidth: 120 }} />
-              </View>
+              <PrimaryButton compact label='New QR' onPress={() => void startTotpSetup()} disabled={totpBusy} />
             ) : null}
           </>
         ) : (
           <>
             <Text style={styles.value}>Add a second step at sign-in with any TOTP app.</Text>
-            <View style={styles.buttonRowCentered}>
-              <PrimaryButton
-                compact
-                label={totpBusy ? '…' : 'Set up'}
-                onPress={startTotpSetup}
-                disabled={totpBusy}
-                style={{ minWidth: 140 }}
-              />
-            </View>
+            <PrimaryButton compact label={totpBusy ? '…' : 'Set up 2FA'} onPress={() => void startTotpSetup()} disabled={totpBusy} />
           </>
         )}
-      </Card>
-
-      <Card>
-        <Text style={styles.label}>Theme Settings</Text>
-        <View style={styles.rowBetween}>
-          <Text style={styles.value}>Dark mode</Text>
-          <Switch value={darkMode} onValueChange={setDarkMode} thumbColor={darkMode ? palette.primary : '#ccc'} />
-        </View>
-        <Text style={styles.value}>Accent color: Gold</Text>
-      </Card>
-
-      <PrimaryButton label='Logout' onPress={logout} variant='danger' />
-    </ScrollView>
+      </FormModal>
+    </>
   );
 }
 
@@ -559,16 +778,31 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   label: { color: palette.textSecondary, marginBottom: 8 },
   value: { color: palette.textPrimary, marginBottom: 6 },
+  modalHint: { color: palette.textSecondary, fontSize: 13, marginBottom: 12, lineHeight: 18 },
   mono: { color: palette.textPrimary, fontFamily: 'monospace', fontSize: 12, marginBottom: 8 },
-  input: { backgroundColor: palette.surfaceElevated, borderColor: palette.border, borderWidth: 1, borderRadius: 10, color: palette.textPrimary, padding: 10, marginBottom: 8 },
-  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  qrWrap: { alignSelf: 'center', marginVertical: 12, padding: 12, backgroundColor: palette.surfaceElevated, borderRadius: 12 },
-  buttonRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    gap: 8,
-    marginTop: 8,
+  input: {
+    backgroundColor: palette.surfaceElevated,
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: palette.textPrimary,
+    padding: 10,
+    marginBottom: 8,
   },
+  rowBetween: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  menuCard: { paddingVertical: 4 },
+  settingsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+  },
+  rowTitle: { color: palette.textPrimary, fontSize: 16, fontWeight: '600' },
+  rowSubtitle: { color: palette.textSecondary, fontSize: 13, marginTop: 2 },
+  chevron: { color: palette.textSecondary, fontSize: 22, marginLeft: 8 },
+  qrWrap: { alignSelf: 'center', marginVertical: 12, padding: 12, backgroundColor: palette.surfaceElevated, borderRadius: 12 },
+  buttonRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8, marginTop: 8 },
   subLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 6, marginTop: 4 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   chip: {
@@ -581,11 +815,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   chipActive: { borderColor: palette.primary, color: palette.primary },
-  buttonRowCentered: {
+  wlRow: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
     gap: 8,
-    marginTop: 8,
+    marginBottom: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
   },
+  wlAddress: { color: palette.textSecondary, fontSize: 12, fontFamily: 'Menlo' },
 });

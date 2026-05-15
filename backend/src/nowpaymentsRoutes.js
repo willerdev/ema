@@ -17,6 +17,7 @@ const {
   getCryptoBalancesByUserId,
   getUserById,
   isMissingTableError,
+  isAddressWhitelistedForUser,
 } = require('./db');
 const np = require('./services/nowpaymentsClient');
 const { decryptTotpSecret } = require('./totpCrypto');
@@ -26,31 +27,10 @@ const { requireComplianceProfile } = require('./middleware/requireComplianceProf
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
 
-const CURRENCY_ALIASES = {
-  btc: 'btc',
-  eth: 'eth',
-  ethereum: 'eth',
-  usdt: 'usdttrc20',
-  usdttrc20: 'usdttrc20',
-  'usdt-trc20': 'usdttrc20',
-  tron: 'usdttrc20',
-  usdterc20: 'usdterc20',
-  'usdt-erc20': 'usdterc20',
-  usdtmatic: 'usdtmatic',
-  ltc: 'ltc',
-  trx: 'trx',
-};
+const { normalizeCurrency } = require('./currencyNormalize');
 
 function newId() {
   return crypto.randomUUID();
-}
-
-function normalizeCurrency(code) {
-  const key = String(code || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '');
-  return CURRENCY_ALIASES[key] || key;
 }
 
 function webhookBaseUrl() {
@@ -450,6 +430,14 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
       if (!address) return res.status(400).json({ message: 'address is required' });
       if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
+      const whitelisted = await isAddressWhitelistedForUser(req.userId, currency, address);
+      if (!whitelisted) {
+        return res.status(400).json({
+          message: 'Withdrawal address must be one of your whitelisted wallets in Settings.',
+          code: 'WALLET_NOT_WHITELISTED',
+        });
+      }
+
       const available = await getAvailableForAsset(req.userId, currency);
       if (available < amount) {
         return res.status(400).json({ message: 'Insufficient crypto balance', available, requested: amount });
@@ -527,4 +515,5 @@ module.exports = {
   registerNowpaymentsRoutes,
   handlePaymentWebhook,
   handlePayoutWebhook,
+  normalizeCurrency,
 };

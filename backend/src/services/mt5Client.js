@@ -197,4 +197,110 @@ async function placeMetaApiTrade({ accountId, symbol, volume, side, stopLoss, ta
   throw lastError || new Error('Unable to place trade via MetaApi regional endpoints');
 }
 
-module.exports = { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, placeMetaApiTrade, extractErrorMessage };
+async function metaApiRequestAcrossRegions({ method, path, data, timeout = 45000 }) {
+  const token = getMetaApiToken();
+  const candidates = getClientApiCandidates();
+  let lastError = null;
+  for (const baseUrl of candidates) {
+    try {
+      const url = `${baseUrl.replace(/\/+$/, '')}${path}`;
+      const config = {
+        method,
+        url,
+        timeout,
+        headers: {
+          Accept: 'application/json',
+          'auth-token': token,
+          ...(method !== 'get' ? { 'Content-Type': 'application/json', 'transaction-id': txId() } : {}),
+        },
+        ...(data !== undefined ? { data } : {}),
+      };
+      const response = await axios(config);
+      return response.data;
+    } catch (error) {
+      lastError = error;
+      const message = extractErrorMessage(error, '').toLowerCase();
+      const status = error?.response?.status;
+      const accountNotFound = status === 404 || (message.includes('account id') && message.includes('not found'));
+      if (accountNotFound) continue;
+      throw error;
+    }
+  }
+  throw lastError || new Error('MetaApi request failed on all regional endpoints');
+}
+
+/**
+ * Close an open position by id (MetaApi POSITION_CLOSE_ID).
+ */
+async function closeMt5Position({ accountId, positionId }) {
+  return metaApiRequestAcrossRegions({
+    method: 'post',
+    path: `/users/current/accounts/${accountId}/trade`,
+    data: {
+      actionType: 'POSITION_CLOSE_ID',
+      positionId: String(positionId),
+    },
+  });
+}
+
+/**
+ * Closed deals / history for the last N days (default 30).
+ */
+async function fetchMt5HistoryDeals({ accountId, days = 30, limit = 200, offset = 0 }) {
+  const end = new Date();
+  const start = new Date(end.getTime() - Math.max(1, Number(days) || 30) * 24 * 60 * 60 * 1000);
+  const startIso = encodeURIComponent(start.toISOString());
+  const endIso = encodeURIComponent(end.toISOString());
+  const lim = Math.min(1000, Math.max(1, Number(limit) || 200));
+  const off = Math.max(0, Number(offset) || 0);
+  const path = `/users/current/accounts/${accountId}/history-deals/time/${startIso}/${endIso}?limit=${lim}&offset=${off}`;
+  const data = await metaApiRequestAcrossRegions({ method: 'get', path, timeout: 30000 });
+  return Array.isArray(data) ? data : [];
+}
+
+function normalizeMt5Position(p) {
+  const raw = p || {};
+  const type = String(raw.type || '');
+  const side =
+    type.includes('BUY') || type === 'buy' || type === '0' ? 'buy' : type.includes('SELL') || type === 'sell' || type === '1' ? 'sell' : type;
+  return {
+    id: String(raw.id ?? raw.positionId ?? ''),
+    symbol: String(raw.symbol || ''),
+    type: side || type,
+    volume: Number(raw.volume ?? 0),
+    openPrice: Number(raw.openPrice ?? 0),
+    currentPrice: Number(raw.currentPrice ?? 0),
+    profit: Number(raw.profit ?? raw.unrealizedProfit ?? 0),
+    swap: Number(raw.swap ?? 0),
+    commission: Number(raw.commission ?? 0),
+    time: raw.time || raw.brokerTime || raw.updateTime || null,
+  };
+}
+
+function normalizeMt5Deal(d) {
+  const raw = d || {};
+  return {
+    id: String(raw.id ?? raw.ticket ?? ''),
+    symbol: String(raw.symbol || ''),
+    type: String(raw.type || raw.entryType || ''),
+    volume: Number(raw.volume ?? 0),
+    price: Number(raw.price ?? 0),
+    profit: Number(raw.profit ?? 0),
+    commission: Number(raw.commission ?? 0),
+    swap: Number(raw.swap ?? 0),
+    time: raw.time || raw.brokerTime || null,
+    positionId: raw.positionId != null ? String(raw.positionId) : null,
+  };
+}
+
+module.exports = {
+  ensureMetaApiAccount,
+  fetchMt5Balance,
+  fetchMt5OpenPositions,
+  placeMetaApiTrade,
+  closeMt5Position,
+  fetchMt5HistoryDeals,
+  normalizeMt5Position,
+  normalizeMt5Deal,
+  extractErrorMessage,
+};

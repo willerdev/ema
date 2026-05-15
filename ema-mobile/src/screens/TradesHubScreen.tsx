@@ -36,9 +36,9 @@ export function TradesHubScreen() {
 
       <Pressable onPress={() => (navigation as any).navigate('ExpertAutoTrading')}>
         <Card style={styles.hubCard}>
-          <Text style={styles.cardTitle}>Expert auto trading</Text>
-          <Text style={styles.cardMeta}>EA-style automation on derived markets and/or forex — requires MT5</Text>
-          <Text style={styles.roi}>Link MT5, then choose markets and activate</Text>
+          <Text style={styles.cardTitle}>Expert Account Manager</Text>
+          <Text style={styles.cardMeta}>Managed MT5 trading — set risk limits and enable the expert</Text>
+          <Text style={styles.roi}>Connect MT5, configure risk, then activate</Text>
         </Card>
       </Pressable>
     </ScrollView>

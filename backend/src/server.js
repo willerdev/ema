@@ -33,7 +33,17 @@ const { encryptTotpSecret, decryptTotpSecret } = require('./totpCrypto');
 const { mapTotpConfigurationError } = require('./totpErrors');
 const { generateSecret, generateURI, verifySync } = require('otplib');
 const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
-const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, placeMetaApiTrade, extractErrorMessage } = require('./services/mt5Client');
+const {
+  ensureMetaApiAccount,
+  fetchMt5Balance,
+  fetchMt5OpenPositions,
+  placeMetaApiTrade,
+  closeMt5Position,
+  fetchMt5HistoryDeals,
+  normalizeMt5Position,
+  normalizeMt5Deal,
+  extractErrorMessage,
+} = require('./services/mt5Client');
 
 const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
 const { registerNowpaymentsRoutes, handlePaymentWebhook, handlePayoutWebhook } = require('./nowpaymentsRoutes');
@@ -41,6 +51,7 @@ const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
 const { registerContractRoutes } = require('./contractRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
 const { registerComplianceRoutes } = require('./complianceRoutes');
+const { registerWhitelistWalletRoutes } = require('./whitelistWalletRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
 
@@ -593,6 +604,7 @@ app.post('/alpaca/orders', async (req, res) => {
 registerCryptoRoutes(app, { authMiddleware });
 registerNowpaymentsRoutes(app, { authMiddleware });
 registerComplianceRoutes(app, { authMiddleware });
+registerWhitelistWalletRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
@@ -825,10 +837,69 @@ app.get('/mt5/accounts/:id/positions', authMiddleware, async (req, res) => {
       await setMt5AccountMetaApiId(req.userId, account.id, accountId);
     }
 
-    const positions = await fetchMt5OpenPositions({ accountId });
+    const raw = await fetchMt5OpenPositions({ accountId });
+    const positions = (Array.isArray(raw) ? raw : []).map(normalizeMt5Position).filter((p) => p.id);
     return res.json({ positions });
   } catch (error) {
     const message = mt5SafeErrorMessage(error, 'Failed to fetch MT5 positions');
+    return res.status(500).json({ message });
+  }
+});
+
+async function resolveMt5MetaApiAccountId(account, userId) {
+  const { accountId } = await ensureMetaApiAccount({
+    metaapiAccountId: account.metaapi_account_id,
+    login: account.login,
+    password: account.password,
+    server: account.server,
+    accountName: account.account_name || '',
+  });
+  if (accountId && accountId !== account.metaapi_account_id) {
+    await setMt5AccountMetaApiId(userId, account.id, accountId);
+  }
+  return accountId;
+}
+
+app.post('/mt5/accounts/:id/positions/close', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
+    const positionId = req.body?.positionId;
+    if (!positionId) return res.status(400).json({ message: 'positionId is required' });
+
+    const accountId = await resolveMt5MetaApiAccountId(account, req.userId);
+    const result = await closeMt5Position({ accountId, positionId: String(positionId) });
+    return res.json({ ok: true, result });
+  } catch (error) {
+    const message = mt5SafeErrorMessage(error, 'Failed to close position');
+    const httpStatus = error?.response?.status;
+    if (typeof httpStatus === 'number' && httpStatus >= 400 && httpStatus < 600) {
+      return res.status(httpStatus).json({ message });
+    }
+    return res.status(500).json({ message });
+  }
+});
+
+app.get('/mt5/accounts/:id/history', authMiddleware, async (req, res) => {
+  try {
+    const account = await getMt5AccountByIdForUser(req.userId, req.params.id);
+    if (!account) return res.status(404).json({ message: 'MT5 account not found' });
+
+    const days = Number(req.query.days) || 30;
+    const limit = Number(req.query.limit) || 200;
+    const offset = Number(req.query.offset) || 0;
+
+    const accountId = await resolveMt5MetaApiAccountId(account, req.userId);
+    const raw = await fetchMt5HistoryDeals({ accountId, days, limit, offset });
+    const deals = (Array.isArray(raw) ? raw : []).map(normalizeMt5Deal).filter((d) => d.id);
+    deals.sort((a, b) => {
+      const ta = Date.parse(a.time || '') || 0;
+      const tb = Date.parse(b.time || '') || 0;
+      return tb - ta;
+    });
+    return res.json({ deals, days, limit, offset });
+  } catch (error) {
+    const message = mt5SafeErrorMessage(error, 'Failed to fetch trade history');
     return res.status(500).json({ message });
   }
 });

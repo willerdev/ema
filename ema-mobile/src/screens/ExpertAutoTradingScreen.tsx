@@ -1,18 +1,23 @@
 import { useCallback, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
+import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { useToast } from '../hooks/useToast';
 import { mt5Service } from '../services/mt5Service';
 import type { RootStackParamList } from '../types';
 import { palette } from '../theme/colors';
@@ -20,27 +25,94 @@ import { palette } from '../theme/colors';
 const STORAGE_ACTIVE = 'ema_expert_ea_active';
 const STORAGE_DERIVED = 'ema_expert_ea_derived';
 const STORAGE_FOREX = 'ema_expert_ea_forex';
+const STORAGE_RISK_PER_TRADE = 'ema_expert_risk_per_trade';
+const STORAGE_MAX_DRAWDOWN = 'ema_expert_max_drawdown';
+const STORAGE_MAX_DAILY_DRAWDOWN = 'ema_expert_max_daily_drawdown';
+const STORAGE_RISK_REWARD = 'ema_expert_risk_reward';
+const STORAGE_TRADING_NEWS = 'ema_expert_trading_news';
+const STORAGE_SWING_TRADES = 'ema_expert_swing_trades';
+const STORAGE_DISCLAIMER_ACCEPTED = 'ema_expert_disclaimer_accepted';
+const STORAGE_CONFIG_SAVED = 'ema_expert_config_saved';
+
+const DEFAULT_RISK_REWARD = '1:2';
+
+const DISCLAIMER_TEXT =
+  'Trading involves substantial risk. Market outcomes are unpredictable — funds on your account can be lost or gained.\n\n' +
+  'Ema is not responsible for any market deals, trade results, or losses incurred while expert management is active on your MT5 account. ' +
+  'By enabling Expert Account Manager you acknowledge that a third-party expert strategy may execute trades on your behalf.\n\n' +
+  'You must perform your own due diligence, understand the risks, and only allocate capital you can afford to lose. ' +
+  'Past performance does not guarantee future results.';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
+function parsePercent(value: string, label: string): number | null {
+  const n = Number(String(value).replace(/%/g, '').trim());
+  if (!Number.isFinite(n) || n <= 0 || n > 100) {
+    Alert.alert('Validation', `Enter a valid ${label} between 0 and 100.`);
+    return null;
+  }
+  return n;
+}
+
+function parseRiskReward(value: string): string | null {
+  const v = value.trim();
+  if (!/^\d+\s*:\s*\d+$/.test(v)) {
+    Alert.alert('Validation', 'Risk to reward must look like 1:2 (reward relative to risk).');
+    return null;
+  }
+  return v.replace(/\s/g, '');
+}
+
 export function ExpertAutoTradingScreen() {
   const navigation = useNavigation<Nav>();
+  const { showToast } = useToast();
   const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [configSaved, setConfigSaved] = useState(false);
+
   const [eaActive, setEaActive] = useState(false);
   const [derivedMarkets, setDerivedMarkets] = useState(false);
   const [forexMarket, setForexMarket] = useState(false);
-  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  const [riskPerTrade, setRiskPerTrade] = useState('');
+  const [maxDrawdown, setMaxDrawdown] = useState('');
+  const [maxDailyDrawdown, setMaxDailyDrawdown] = useState('');
+  const [riskReward, setRiskReward] = useState(DEFAULT_RISK_REWARD);
+  const [tradingNews, setTradingNews] = useState(false);
+  const [swingTrades, setSwingTrades] = useState(false);
+
+  const [disclaimerModalOpen, setDisclaimerModalOpen] = useState(false);
+  const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const loadPrefs = useCallback(async () => {
-    const [a, d, f] = await Promise.all([
-      AsyncStorage.getItem(STORAGE_ACTIVE),
-      AsyncStorage.getItem(STORAGE_DERIVED),
-      AsyncStorage.getItem(STORAGE_FOREX),
-    ]);
-    setEaActive(a === '1');
-    setDerivedMarkets(d === '1');
-    setForexMarket(f === '1');
+    const keys = [
+      STORAGE_ACTIVE,
+      STORAGE_DERIVED,
+      STORAGE_FOREX,
+      STORAGE_RISK_PER_TRADE,
+      STORAGE_MAX_DRAWDOWN,
+      STORAGE_MAX_DAILY_DRAWDOWN,
+      STORAGE_RISK_REWARD,
+      STORAGE_TRADING_NEWS,
+      STORAGE_SWING_TRADES,
+      STORAGE_DISCLAIMER_ACCEPTED,
+      STORAGE_CONFIG_SAVED,
+    ];
+    const values = await AsyncStorage.multiGet(keys);
+    const map = Object.fromEntries(values);
+    setEaActive(map[STORAGE_ACTIVE] === '1');
+    setDerivedMarkets(map[STORAGE_DERIVED] === '1');
+    setForexMarket(map[STORAGE_FOREX] === '1');
+    setRiskPerTrade(map[STORAGE_RISK_PER_TRADE] || '');
+    setMaxDrawdown(map[STORAGE_MAX_DRAWDOWN] || '');
+    setMaxDailyDrawdown(map[STORAGE_MAX_DAILY_DRAWDOWN] || '');
+    setRiskReward(map[STORAGE_RISK_REWARD] || DEFAULT_RISK_REWARD);
+    setTradingNews(map[STORAGE_TRADING_NEWS] === '1');
+    setSwingTrades(map[STORAGE_SWING_TRADES] === '1');
+    setDisclaimerAccepted(map[STORAGE_DISCLAIMER_ACCEPTED] === '1');
+    setConfigSaved(map[STORAGE_CONFIG_SAVED] === '1');
     setPrefsLoaded(true);
   }, []);
 
@@ -63,38 +135,114 @@ export function ExpertAutoTradingScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await checkMt5();
+    await Promise.all([checkMt5(), loadPrefs()]);
     setRefreshing(false);
-  }, [checkMt5]);
+  }, [checkMt5, loadPrefs]);
 
-  const persist = async (key: string, value: boolean) => {
+  const persistBool = async (key: string, value: boolean) => {
     await AsyncStorage.setItem(key, value ? '1' : '0');
   };
 
+  const persistConfig = async (opts: {
+    risk: number;
+    maxDd: number;
+    maxDailyDd: number;
+    rr: string;
+    news: boolean;
+    swing: boolean;
+  }) => {
+    await AsyncStorage.multiSet([
+      [STORAGE_RISK_PER_TRADE, String(opts.risk)],
+      [STORAGE_MAX_DRAWDOWN, String(opts.maxDd)],
+      [STORAGE_MAX_DAILY_DRAWDOWN, String(opts.maxDailyDd)],
+      [STORAGE_RISK_REWARD, opts.rr],
+      [STORAGE_TRADING_NEWS, opts.news ? '1' : '0'],
+      [STORAGE_SWING_TRADES, opts.swing ? '1' : '0'],
+      [STORAGE_DISCLAIMER_ACCEPTED, '1'],
+      [STORAGE_CONFIG_SAVED, '1'],
+    ]);
+    setConfigSaved(true);
+    setDisclaimerAccepted(true);
+  };
+
+  const validateForm = () => {
+    const risk = parsePercent(riskPerTrade, 'risk per trade (%)');
+    if (risk == null) return null;
+    const maxDd = parsePercent(maxDrawdown, 'max drawdown (%)');
+    if (maxDd == null) return null;
+    const maxDaily = parsePercent(maxDailyDrawdown, 'max daily drawdown (%)');
+    if (maxDaily == null) return null;
+    if (maxDaily > maxDd) {
+      Alert.alert('Validation', 'Max daily drawdown cannot exceed max drawdown.');
+      return null;
+    }
+    const rr = parseRiskReward(riskReward);
+    if (rr == null) return null;
+    return { risk, maxDd, maxDaily, rr };
+  };
+
+  const onPressSave = () => {
+    const parsed = validateForm();
+    if (!parsed) return;
+    setDisclaimerModalOpen(true);
+    setDisclaimerAccepted(false);
+  };
+
+  const confirmSaveWithDisclaimer = async () => {
+    if (!disclaimerAccepted) {
+      Alert.alert('Acknowledgement required', 'Please confirm you have read and accept the risk disclosure.');
+      return;
+    }
+    const parsed = validateForm();
+    if (!parsed) return;
+
+    setSaving(true);
+    try {
+      await persistConfig({
+        risk: parsed.risk,
+        maxDd: parsed.maxDd,
+        maxDailyDd: parsed.maxDaily,
+        rr: parsed.rr,
+        news: tradingNews,
+        swing: swingTrades,
+      });
+      setDisclaimerModalOpen(false);
+      showToast('Expert Account Manager settings saved');
+      Alert.alert('Risk disclosure', DISCLAIMER_TEXT, [{ text: 'I understand' }]);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const setEaActiveSafe = async (next: boolean) => {
+    if (!configSaved) {
+      Alert.alert('Save settings first', 'Configure risk parameters and save before enabling expert management.');
+      return;
+    }
     if (next && !derivedMarkets && !forexMarket) {
       Alert.alert('Markets', 'Choose at least one: Derived markets and/or Forex market.');
       return;
     }
     setEaActive(next);
-    await persist(STORAGE_ACTIVE, next);
+    await persistBool(STORAGE_ACTIVE, next);
+    if (next) showToast('Expert Account Manager enabled');
   };
 
   const setDerived = async (next: boolean) => {
     setDerivedMarkets(next);
-    await persist(STORAGE_DERIVED, next);
+    await persistBool(STORAGE_DERIVED, next);
     if (eaActive && !next && !forexMarket) {
       setEaActive(false);
-      await persist(STORAGE_ACTIVE, false);
+      await persistBool(STORAGE_ACTIVE, false);
     }
   };
 
   const setForex = async (next: boolean) => {
     setForexMarket(next);
-    await persist(STORAGE_FOREX, next);
+    await persistBool(STORAGE_FOREX, next);
     if (eaActive && !next && !derivedMarkets) {
       setEaActive(false);
-      await persist(STORAGE_ACTIVE, false);
+      await persistBool(STORAGE_ACTIVE, false);
     }
   };
 
@@ -102,107 +250,241 @@ export function ExpertAutoTradingScreen() {
     navigation.navigate('MainTabs', { screen: 'MT5' });
   };
 
+  const inputStyle = styles.input;
+
   return (
-    <ScrollView
-      style={styles.root}
-      contentContainerStyle={styles.content}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
-    >
-      <Text style={styles.title}>Expert auto trading</Text>
-      <Text style={styles.sub}>
-        When enabled, the expert advisor (EA) simulation targets the markets you select below. You must link an MT5 account
-        first so execution context is available.
-      </Text>
+    <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps='handled'
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+      >
+        <Text style={styles.title}>Expert Account Manager</Text>
+        <Text style={styles.sub}>
+          Connect MT5, set your risk limits, then enable expert management. The expert may place trades on your linked account
+          within the parameters you define.
+        </Text>
 
-      {mt5Connected === false ? (
-        <Card>
-          <Text style={styles.cardTitle}>Connect MT5</Text>
-          <Text style={styles.meta}>
-            Link your MetaTrader 5 account on the MT5 tab, then return here to activate expert auto trading.
-          </Text>
-          <PrimaryButton label='Go to MT5' onPress={goMt5} style={{ marginTop: 12 }} />
-        </Card>
-      ) : null}
-
-      {mt5Connected === true && prefsLoaded ? (
-        <>
+        {mt5Connected === null ? (
           <Card>
-            <Text style={styles.cardTitle}>Markets</Text>
-            <Text style={styles.meta}>Turn on one or both. EA can run on derived markets, forex, or both.</Text>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Derived markets</Text>
-              <Switch
-                value={derivedMarkets}
-                onValueChange={(v) => void setDerived(v)}
-                trackColor={{ false: palette.border, true: palette.primary }}
-                thumbColor='#f4f4f5'
-              />
-            </View>
-            <View style={styles.row}>
-              <Text style={styles.rowLabel}>Forex market</Text>
-              <Switch
-                value={forexMarket}
-                onValueChange={(v) => void setForex(v)}
-                trackColor={{ false: palette.border, true: palette.primary }}
-                thumbColor='#f4f4f5'
-              />
-            </View>
+            <Text style={styles.meta}>Checking MT5 connection…</Text>
           </Card>
+        ) : null}
 
+        {mt5Connected === false ? (
           <Card>
-            <View style={styles.row}>
-              <View style={{ flex: 1, paddingRight: 12 }}>
-                <Text style={styles.cardTitle}>EA active</Text>
-                <Text style={styles.meta}>Requires at least one market above.</Text>
+            <Text style={styles.cardTitle}>Connect MT5 first</Text>
+            <Text style={styles.meta}>
+              Link your MetaTrader 5 account on the MT5 tab, then return to Expert Account Manager to configure risk and
+              activate the expert.
+            </Text>
+            <PrimaryButton label='Connect MT5' onPress={goMt5} style={{ marginTop: 12 }} />
+          </Card>
+        ) : null}
+
+        {mt5Connected === true && !prefsLoaded ? (
+          <Card>
+            <Text style={styles.meta}>Loading…</Text>
+          </Card>
+        ) : null}
+
+        {mt5Connected === true && prefsLoaded ? (
+          <>
+            <Card>
+              <Text style={styles.cardTitle}>Risk parameters</Text>
+              <Text style={styles.meta}>All values are required before saving.</Text>
+
+              <Text style={styles.fieldLabel}>Risk per trade (%)</Text>
+              <TextInput
+                style={inputStyle}
+                value={riskPerTrade}
+                onChangeText={setRiskPerTrade}
+                placeholder='e.g. 1'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='decimal-pad'
+              />
+
+              <Text style={styles.fieldLabel}>Max drawdown (%)</Text>
+              <TextInput
+                style={inputStyle}
+                value={maxDrawdown}
+                onChangeText={setMaxDrawdown}
+                placeholder='e.g. 20'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='decimal-pad'
+              />
+
+              <Text style={styles.fieldLabel}>Max daily drawdown (%)</Text>
+              <TextInput
+                style={inputStyle}
+                value={maxDailyDrawdown}
+                onChangeText={setMaxDailyDrawdown}
+                placeholder='e.g. 5'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='decimal-pad'
+              />
+
+              <Text style={styles.fieldLabel}>Risk to reward (default 1:2)</Text>
+              <TextInput
+                style={inputStyle}
+                value={riskReward}
+                onChangeText={setRiskReward}
+                placeholder={DEFAULT_RISK_REWARD}
+                placeholderTextColor={palette.textSecondary}
+                autoCapitalize='none'
+              />
+
+              <View style={styles.row}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.rowLabel}>Trade around news events</Text>
+                  <Text style={styles.rowHint}>Allow trading during high-impact news</Text>
+                </View>
+                <Switch
+                  value={tradingNews}
+                  onValueChange={setTradingNews}
+                  trackColor={{ false: palette.border, true: palette.primary }}
+                  thumbColor='#f4f4f5'
+                />
               </View>
+
+              <View style={styles.row}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.rowLabel}>Swing trades</Text>
+                  <Text style={styles.rowHint}>Hold positions over multiple sessions</Text>
+                </View>
+                <Switch
+                  value={swingTrades}
+                  onValueChange={setSwingTrades}
+                  trackColor={{ false: palette.border, true: palette.primary }}
+                  thumbColor='#f4f4f5'
+                />
+              </View>
+
+              <PrimaryButton label='Save risk settings' onPress={onPressSave} style={{ marginTop: 8 }} />
+              {configSaved ? (
+                <Text style={[styles.meta, { marginTop: 10, color: palette.success }]}>
+                  Saved · Risk {riskPerTrade}% · Max DD {maxDrawdown}% · Daily {maxDailyDrawdown}% · R:R {riskReward}
+                  {tradingNews ? ' · News on' : ' · News off'}
+                  {swingTrades ? ' · Swing on' : ' · Swing off'}
+                </Text>
+              ) : null}
+            </Card>
+
+            <Card>
+              <Text style={styles.cardTitle}>Markets</Text>
+              <Text style={styles.meta}>Select where the expert may operate. At least one is required to enable.</Text>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Derived markets</Text>
+                <Switch
+                  value={derivedMarkets}
+                  onValueChange={(v) => void setDerived(v)}
+                  trackColor={{ false: palette.border, true: palette.primary }}
+                  thumbColor='#f4f4f5'
+                />
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Forex market</Text>
+                <Switch
+                  value={forexMarket}
+                  onValueChange={(v) => void setForex(v)}
+                  trackColor={{ false: palette.border, true: palette.primary }}
+                  thumbColor='#f4f4f5'
+                />
+              </View>
+            </Card>
+
+            <Card>
+              <View style={styles.row}>
+                <View style={{ flex: 1, paddingRight: 12 }}>
+                  <Text style={styles.cardTitle}>Expert management active</Text>
+                  <Text style={styles.meta}>
+                    {configSaved ? 'Expert may trade within your saved limits.' : 'Save risk settings first.'}
+                  </Text>
+                </View>
+                <Switch
+                  value={eaActive}
+                  onValueChange={(v) => void setEaActiveSafe(v)}
+                  disabled={!configSaved}
+                  trackColor={{ false: palette.border, true: palette.success }}
+                  thumbColor='#f4f4f5'
+                />
+              </View>
+            </Card>
+
+            {eaActive && configSaved ? (
+              <Card style={styles.statusCard}>
+                <Text style={styles.statusLine}>
+                  Active · {riskPerTrade}% / trade · Max DD {maxDrawdown}% · Daily {maxDailyDrawdown}% · R:R {riskReward}
+                </Text>
+                <Text style={styles.meta}>
+                  Markets: {[derivedMarkets && 'Derived', forexMarket && 'Forex'].filter(Boolean).join(' · ') || '—'}
+                </Text>
+              </Card>
+            ) : null}
+          </>
+        ) : null}
+      </ScrollView>
+
+      <FormModal
+        visible={disclaimerModalOpen}
+        title='Risk disclosure'
+        onClose={() => setDisclaimerModalOpen(false)}
+        footer={
+          <View style={{ gap: 8, marginTop: 12 }}>
+            <View style={styles.row}>
+              <Text style={[styles.meta, { flex: 1, marginRight: 8 }]}>
+                I accept that Ema is not responsible for losses and I will perform due diligence.
+              </Text>
               <Switch
-                value={eaActive}
-                onValueChange={(v) => void setEaActiveSafe(v)}
-                trackColor={{ false: palette.border, true: palette.success }}
+                value={disclaimerAccepted}
+                onValueChange={setDisclaimerAccepted}
+                trackColor={{ false: palette.border, true: palette.primary }}
                 thumbColor='#f4f4f5'
               />
             </View>
-          </Card>
-
-          {eaActive ? (
-            <Card style={styles.statusCard}>
-              <Text style={styles.statusLine}>
-                Running on: {[derivedMarkets && 'Derived markets', forexMarket && 'Forex'].filter(Boolean).join(' · ') || '—'}
-              </Text>
-            </Card>
-          ) : null}
-        </>
-      ) : null}
-
-      {mt5Connected === true && !prefsLoaded ? (
-        <Card>
-          <Text style={styles.meta}>Loading preferences…</Text>
-        </Card>
-      ) : null}
-
-      {mt5Connected === null ? (
-        <Card>
-          <Text style={styles.meta}>Checking MT5 connection…</Text>
-        </Card>
-      ) : null}
-    </ScrollView>
+            <PrimaryButton
+              label={saving ? 'Saving…' : 'Accept and save'}
+              onPress={() => void confirmSaveWithDisclaimer()}
+              disabled={saving || !disclaimerAccepted}
+            />
+            <PrimaryButton label='Cancel' onPress={() => setDisclaimerModalOpen(false)} />
+          </View>
+        }
+      >
+        <Text style={styles.disclaimerBody}>{DISCLAIMER_TEXT}</Text>
+      </FormModal>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   root: { flex: 1, backgroundColor: palette.background },
   content: { padding: 16, paddingBottom: 32 },
   title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 8 },
   sub: { color: palette.textSecondary, lineHeight: 20, marginBottom: 16 },
   cardTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
   meta: { color: palette.textSecondary, lineHeight: 20 },
+  fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 10, marginBottom: 4, fontWeight: '600' },
+  input: {
+    backgroundColor: palette.surfaceElevated,
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 10,
+    color: palette.textPrimary,
+    padding: 10,
+    marginBottom: 4,
+  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginTop: 14,
   },
-  rowLabel: { color: palette.textPrimary, fontSize: 16, fontWeight: '600', flex: 1 },
+  rowLabel: { color: palette.textPrimary, fontSize: 16, fontWeight: '600' },
+  rowHint: { color: palette.textSecondary, fontSize: 12, marginTop: 2 },
   statusCard: { borderLeftWidth: 3, borderLeftColor: palette.success },
-  statusLine: { color: palette.textPrimary, fontWeight: '600' },
+  statusLine: { color: palette.textPrimary, fontWeight: '600', marginBottom: 4 },
+  disclaimerBody: { color: palette.textPrimary, lineHeight: 22, fontSize: 14 },
 });

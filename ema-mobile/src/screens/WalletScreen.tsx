@@ -1,11 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  Keyboard,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -13,43 +8,40 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
+import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
+import { useToast } from '../hooks/useToast';
 import { authService } from '../services/authService';
 import { complianceService, isComplianceRequiredError } from '../services/complianceService';
 import { nowpaymentsService } from '../services/nowpaymentsService';
+import { whitelistWalletService } from '../services/whitelistWalletService';
 import { walletService } from '../services/walletService';
 import {
   NowpaymentsCreateDepositResponse,
   NowpaymentsDepositStatus,
   NowpaymentsSummary,
-  WalletTransaction,
+  WhitelistedWallet,
 } from '../types';
 import { palette } from '../theme/colors';
-
-type WalletTab = 'cash' | 'crypto';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
 export function WalletScreen() {
-  const insets = useSafeAreaInsets();
-  const [tab, setTab] = useState<WalletTab>('cash');
+  const { showToast } = useToast();
 
-  const [balance, setBalance] = useState<number | null>(null);
-  const [amount, setAmount] = useState('');
-  const [cashWithdrawTotpCode, setCashWithdrawTotpCode] = useState('');
   const [totpEnabled, setTotpEnabled] = useState(false);
-  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [tradingBalance, setTradingBalance] = useState<number | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
   const [npSummary, setNpSummary] = useState<NowpaymentsSummary | null>(null);
   const [npError, setNpError] = useState<string | null>(null);
-  const [copyToast, setCopyToast] = useState<string | null>(null);
+  const [whitelistedWallets, setWhitelistedWallets] = useState<WhitelistedWallet[]>([]);
+  const [selectedWhitelistId, setSelectedWhitelistId] = useState<string | null>(null);
+  const depositCreditedToastShown = useRef(false);
 
   const [depositUsdAmount, setDepositUsdAmount] = useState('');
   const [depositPayCurrency, setDepositPayCurrency] = useState('usdttrc20');
@@ -59,7 +51,6 @@ export function WalletScreen() {
 
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawCurrency, setWithdrawCurrency] = useState('usdttrc20');
-  const [withdrawAddress, setWithdrawAddress] = useState('');
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [complianceComplete, setComplianceComplete] = useState(false);
@@ -67,7 +58,7 @@ export function WalletScreen() {
   const alertComplianceRequired = () => {
     Alert.alert(
       'Profile required',
-      'Complete your compliance profile in Settings before withdrawing funds.',
+      'Complete your compliance profile in Settings before withdrawing.',
       [{ text: 'OK' }]
     );
   };
@@ -81,20 +72,12 @@ export function WalletScreen() {
     }
   }, []);
 
-  const refreshCash = useCallback(async () => {
+  const loadWhitelistedWallets = useCallback(async () => {
     try {
-      const data = await walletService.getWallet();
-      setBalance(data.balance);
-      setTransactions(data.transactions);
-      setLastUpdatedAt(Date.now());
+      const data = await whitelistWalletService.list();
+      setWhitelistedWallets(data.wallets || []);
     } catch {
-      // keep previous values on transient network failure
-    }
-    try {
-      const totp = await authService.getTotpStatus();
-      setTotpEnabled(Boolean(totp.enabled));
-    } catch {
-      setTotpEnabled(false);
+      setWhitelistedWallets([]);
     }
   }, []);
 
@@ -104,15 +87,26 @@ export function WalletScreen() {
       const summary = await nowpaymentsService.getSummary();
       setNpSummary(summary);
     } catch (e: any) {
-      setNpError(sanitizeError(e?.message || 'Failed to load crypto wallet'));
+      setNpError(sanitizeError(e?.message || 'Failed to load wallet'));
       setNpSummary(null);
     }
   }, []);
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshCash(), loadCompliance()]);
-    if (tab === 'crypto') await refreshNowpayments();
-  }, [refreshCash, refreshNowpayments, loadCompliance, tab]);
+    try {
+      const cash = await walletService.getWallet();
+      setTradingBalance(cash.balance);
+    } catch {
+      setTradingBalance(null);
+    }
+    try {
+      const totp = await authService.getTotpStatus();
+      setTotpEnabled(Boolean(totp.enabled));
+    } catch {
+      setTotpEnabled(false);
+    }
+    await Promise.all([loadCompliance(), loadWhitelistedWallets(), refreshNowpayments()]);
+  }, [loadCompliance, loadWhitelistedWallets, refreshNowpayments]);
 
   usePolling(refresh, 60000, true);
 
@@ -129,11 +123,15 @@ export function WalletScreen() {
       setDepositStatus(status);
       if (status.ledgerCredited || status.status === 'finished') {
         await refreshNowpayments();
+        if (status.ledgerCredited && !depositCreditedToastShown.current) {
+          depositCreditedToastShown.current = true;
+          showToast('Deposit credited to your wallet');
+        }
       }
     } catch {
       // ignore poll errors
     }
-  }, [activeDeposit?.id, refreshNowpayments]);
+  }, [activeDeposit?.id, refreshNowpayments, showToast]);
 
   useEffect(() => {
     if (!depositModalOpen || !activeDeposit?.id) return;
@@ -142,41 +140,7 @@ export function WalletScreen() {
     return () => clearInterval(t);
   }, [depositModalOpen, activeDeposit?.id, pollActiveDeposit]);
 
-  const onCashDeposit = async () => {
-    try {
-      await walletService.deposit(Number(amount), 'bank_transfer', `REF-${Date.now()}`);
-      setAmount('');
-      refreshCash();
-      Alert.alert('Done', 'Cash deposit recorded');
-    } catch (error: any) {
-      Alert.alert('Wallet Error', error.message);
-    }
-  };
-
-  const onCashWithdraw = async () => {
-    if (!complianceComplete) {
-      alertComplianceRequired();
-      return;
-    }
-    const n = Number(amount);
-    if (!Number.isFinite(n) || n <= 0) return;
-    const totpOk = !totpEnabled || cashWithdrawTotpCode.replace(/\s/g, '').length >= 6;
-    if (!totpOk) return;
-    try {
-      await walletService.withdraw(n, 'bank_transfer', {
-        ...(totpEnabled ? { totpCode: cashWithdrawTotpCode.replace(/\s/g, '') } : {}),
-      });
-      setAmount('');
-      setCashWithdrawTotpCode('');
-      refreshCash();
-      Alert.alert('Done', 'Cash withdrawal request submitted');
-    } catch (error: any) {
-      if (isComplianceRequiredError(error)) alertComplianceRequired();
-      else Alert.alert('Wallet Error', error.message);
-    }
-  };
-
-  const onCreateCryptoDeposit = async () => {
+  const onCreateDeposit = async () => {
     const priceAmount = Number(depositUsdAmount);
     if (!Number.isFinite(priceAmount) || priceAmount <= 0) {
       Alert.alert('Invalid amount', 'Enter a USD amount to deposit.');
@@ -195,36 +159,42 @@ export function WalletScreen() {
         payCurrency: created.payCurrency,
         ledgerCredited: false,
       });
-      setDepositModalOpen(true);
+      depositCreditedToastShown.current = false;
       await refreshNowpayments();
+      showToast('Payment created — send crypto to the address shown');
     } catch (e: any) {
       Alert.alert('Deposit failed', sanitizeError(e?.message || 'Could not create payment'));
     }
   };
 
-  const onCryptoWithdraw = async () => {
+  const onWithdraw = async () => {
     if (!complianceComplete) {
       alertComplianceRequired();
       return;
     }
+    const selected = whitelistedWallets.find((w) => w.id === selectedWhitelistId);
+    if (!selected) {
+      Alert.alert('Select wallet', 'Add and select a whitelisted wallet in Settings.');
+      return;
+    }
     const n = Number(withdrawAmount);
-    if (!Number.isFinite(n) || n <= 0 || !withdrawAddress.trim()) return;
+    if (!Number.isFinite(n) || n <= 0) return;
     const totpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
     if (!totpOk) return;
     try {
       setNpError(null);
       await nowpaymentsService.createWithdrawal(
-        withdrawCurrency,
-        withdrawAddress.trim(),
+        selected.currency,
+        selected.address,
         n,
         totpEnabled ? withdrawTotpCode.replace(/\s/g, '') : undefined
       );
       setWithdrawAmount('');
-      setWithdrawAddress('');
+      setSelectedWhitelistId(null);
       setWithdrawTotpCode('');
       setWithdrawModalOpen(false);
       await refreshNowpayments();
-      Alert.alert('Submitted', 'Withdrawal sent to NOWPayments. Balance updates when payout completes.');
+      showToast('Withdrawal submitted');
     } catch (e: any) {
       if (isComplianceRequiredError(e)) alertComplianceRequired();
       else Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
@@ -236,14 +206,21 @@ export function WalletScreen() {
       alertComplianceRequired();
       return;
     }
+    const forCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
+    if (forCurrency.length === 0) {
+      Alert.alert('No whitelisted wallet', `Add a ${withdrawCurrency} wallet in Settings first.`);
+      return;
+    }
+    if (!selectedWhitelistId || !forCurrency.some((w) => w.id === selectedWhitelistId)) {
+      setSelectedWhitelistId(forCurrency[0].id);
+    }
     setWithdrawModalOpen(true);
   };
 
   const onCopyAddress = async (addr: string) => {
     try {
       await Clipboard.setStringAsync(addr);
-      setCopyToast('Address copied');
-      setTimeout(() => setCopyToast(null), 1800);
+      showToast('Address copied');
     } catch {
       Alert.alert('Copy failed', 'Could not copy address.');
     }
@@ -255,20 +232,29 @@ export function WalletScreen() {
     return text;
   }
 
-  const cashWithdrawTotpOk = !totpEnabled || cashWithdrawTotpCode.replace(/\s/g, '').length >= 6;
-  const cashAmountOk = amount.trim().length > 0 && Number.isFinite(Number(amount)) && Number(amount) > 0;
-
-  const cryptoWithdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
-  const cryptoWithdrawReady =
+  const walletsForWithdrawCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
+  const withdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
+  const withdrawReady =
     withdrawAmount.trim().length > 0 &&
     Number.isFinite(Number(withdrawAmount)) &&
     Number(withdrawAmount) > 0 &&
-    withdrawAddress.trim().length > 0 &&
-    cryptoWithdrawTotpOk;
+    Boolean(selectedWhitelistId) &&
+    walletsForWithdrawCurrency.some((w) => w.id === selectedWhitelistId) &&
+    withdrawTotpOk;
 
   const payAddress = depositStatus?.payAddress || activeDeposit?.payAddress;
   const payAmount = depositStatus?.payAmount || activeDeposit?.payAmount;
   const payStatus = depositStatus?.status || activeDeposit?.status || 'waiting';
+
+  const inputStyle = {
+    backgroundColor: palette.surfaceElevated,
+    borderWidth: 1,
+    borderColor: palette.border,
+    color: palette.textPrimary,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+  } as const;
 
   return (
     <View style={styles.container}>
@@ -279,321 +265,191 @@ export function WalletScreen() {
         {!complianceComplete ? (
           <Card style={styles.complianceBanner}>
             <Text style={styles.complianceBannerText}>
-              Complete your compliance profile in Settings before you can withdraw cash or crypto.
+              Complete your compliance profile in Settings before you can withdraw.
             </Text>
           </Card>
         ) : null}
-        <View style={styles.tabRow}>
-          <Text
-            style={[styles.tab, tab === 'cash' && styles.tabActive]}
-            onPress={() => {
-              setTab('cash');
-              void refreshCash();
-            }}
-          >
-            Cash wallet
-          </Text>
-          <Text
-            style={[styles.tab, tab === 'crypto' && styles.tabActive]}
-            onPress={() => {
-              setTab('crypto');
-              void refreshNowpayments();
-            }}
-          >
-            Crypto
-          </Text>
-        </View>
 
-        {tab === 'cash' ? (
-          <>
-            <Card>
-              <Text style={styles.label}>Cash wallet balance</Text>
-              <Text style={styles.balance}>{balance === null ? '--' : `$${balance.toFixed(2)}`}</Text>
-              <Text style={styles.item}>Internal USD ledger for airfarming and contracts.</Text>
-              <Text style={styles.hint}>Crypto deposits and withdrawals are on the Crypto tab (NOWPayments).</Text>
-            </Card>
+        {npError ? (
+          <Card>
+            <Text style={styles.errorText}>{npError}</Text>
+            <PrimaryButton label='Retry' onPress={() => void refreshNowpayments()} />
+          </Card>
+        ) : null}
 
-            <Card>
-              <Text style={styles.label}>Cash deposit / withdraw</Text>
-              <TextInput
-                style={styles.input}
-                value={amount}
-                onChangeText={setAmount}
-                placeholder='Amount (USD)'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='numeric'
-              />
-              {totpEnabled ? (
-                <>
-                  <Text style={styles.withdrawSectionLabel}>Authenticator (required for withdraw)</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={cashWithdrawTotpCode}
-                    onChangeText={setCashWithdrawTotpCode}
-                    placeholder='6-digit code'
-                    placeholderTextColor={palette.textSecondary}
-                    keyboardType='number-pad'
-                    maxLength={10}
-                  />
-                </>
-              ) : null}
-              <View style={styles.actions}>
-                <PrimaryButton label='Deposit' onPress={onCashDeposit} style={{ flex: 1 }} disabled={!cashAmountOk} />
-                <View style={{ width: 8 }} />
-                <PrimaryButton
-                  label='Withdraw'
-                  onPress={onCashWithdraw}
-                  variant='danger'
-                  style={{ flex: 1 }}
-                  disabled={!complianceComplete || !cashAmountOk || !cashWithdrawTotpOk}
-                />
+        <Card style={styles.heroCard}>
+          <Text style={styles.heroCaption}>Wallet balances</Text>
+          {npSummary?.balances?.length ? (
+            npSummary.balances.map((b) => (
+              <View key={b.asset} style={styles.balanceRow}>
+                <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
+                <Text style={styles.assetValue}>{b.available}</Text>
+                {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
               </View>
-            </Card>
+            ))
+          ) : (
+            <Text style={styles.item}>No balance yet. Deposit crypto to get started.</Text>
+          )}
+          {tradingBalance != null && tradingBalance > 0 ? (
+            <Text style={styles.hint}>
+              Trading balance (airfarming / contracts): ${tradingBalance.toFixed(2)} USD — separate from crypto wallet.
+            </Text>
+          ) : null}
+          <View style={styles.quickActionsRow}>
+            <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
+            <View style={{ width: 8 }} />
+            <PrimaryButton
+              label='Withdraw'
+              onPress={openWithdrawModal}
+              style={{ flex: 1 }}
+              disabled={!complianceComplete}
+            />
+          </View>
+        </Card>
 
-            <Card>
-              <Text style={styles.label}>Transaction History</Text>
-              {transactions.map((t) => (
-                <Text key={t.id} style={styles.item}>
-                  {t.type.toUpperCase()} ${Number(t.amount).toFixed(2)} - {t.status} -{' '}
-                  {new Date(t.created_at).toLocaleDateString()}
+        <Card>
+          <Text style={styles.sectionTitle}>Recent activity</Text>
+          {npSummary?.ledger?.slice(0, 12).map((e) => (
+            <Text key={e.id} style={styles.item}>
+              {e.direction.toUpperCase()} {e.amount} {e.asset} ({e.source})
+            </Text>
+          ))}
+          {!npSummary?.ledger?.length && <Text style={styles.item}>No activity yet</Text>}
+        </Card>
+      </ScrollView>
+
+      <FormModal
+        visible={depositModalOpen}
+        title='Deposit'
+        onClose={() => setDepositModalOpen(false)}
+        footer={
+          activeDeposit ? (
+            <PrimaryButton label='Close' onPress={() => setDepositModalOpen(false)} style={{ marginTop: 12 }} />
+          ) : undefined
+        }
+      >
+        {!activeDeposit ? (
+          <>
+            <Text style={styles.hint}>Amount is priced in USD; you pay in the selected cryptocurrency.</Text>
+            <TextInput
+              style={inputStyle}
+              value={depositUsdAmount}
+              onChangeText={setDepositUsdAmount}
+              placeholder='Amount in USD'
+              placeholderTextColor={palette.textSecondary}
+              keyboardType='numeric'
+            />
+            <Text style={styles.fieldLabel}>Pay with</Text>
+            <View style={styles.chipRow}>
+              {PAY_CURRENCY_OPTIONS.map((c) => (
+                <Text
+                  key={c}
+                  style={[styles.chip, depositPayCurrency === c && styles.chipActive]}
+                  onPress={() => setDepositPayCurrency(c)}
+                >
+                  {c}
                 </Text>
               ))}
-              {!transactions.length && <Text style={styles.item}>No transactions yet</Text>}
-            </Card>
+            </View>
+            <PrimaryButton label='Create payment' onPress={() => void onCreateDeposit()} />
           </>
         ) : (
           <>
-            {npError ? (
-              <Card>
-                <Text style={styles.errorText}>{npError}</Text>
-                <PrimaryButton label='Retry' onPress={() => void refreshNowpayments()} />
-              </Card>
-            ) : null}
-
-            <Card style={styles.heroCard}>
-              <Text style={styles.heroCaption}>Crypto balances (NOWPayments)</Text>
-              {npSummary?.balances?.length ? (
-                npSummary.balances.map((b) => (
-                  <View key={b.asset} style={styles.balanceRow}>
-                    <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
-                    <Text style={styles.assetValue}>{b.available}</Text>
-                    {Number(b.reserved) > 0 ? (
-                      <Text style={styles.assetSub}>Reserved: {b.reserved}</Text>
-                    ) : null}
-                  </View>
-                ))
-              ) : (
-                <Text style={styles.item}>No crypto balance yet. Create a deposit below.</Text>
-              )}
-              <View style={styles.quickActionsRow}>
-                <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
-                <View style={{ width: 8 }} />
-                <PrimaryButton label='Withdraw' onPress={openWithdrawModal} style={{ flex: 1 }} disabled={!complianceComplete} />
+            <Text style={styles.item}>Status: {payStatus}</Text>
+            <Text style={styles.item}>
+              Send {payAmount || '—'} {activeDeposit.payCurrency} to:
+            </Text>
+            <Text style={styles.mono}>{payAddress || 'Address pending…'}</Text>
+            {payAddress ? (
+              <View style={styles.qrWrap}>
+                <QRCode value={payAddress} size={140} color='#111827' backgroundColor='white' />
               </View>
-            </Card>
-
-            <Card>
-              <Text style={styles.sectionTitle}>Recent activity</Text>
-              {npSummary?.ledger?.slice(0, 12).map((e) => (
-                <Text key={e.id} style={styles.item}>
-                  {e.direction.toUpperCase()} {e.amount} {e.asset} ({e.source})
-                </Text>
-              ))}
-              {!npSummary?.ledger?.length && <Text style={styles.item}>No ledger entries yet</Text>}
-            </Card>
-
-            <Card>
-              <Text style={styles.sectionTitle}>Pending deposits</Text>
-              {npSummary?.payments
-                ?.filter((p) => !['finished', 'failed', 'expired', 'refunded'].includes(p.status))
-                .map((p) => (
-                  <Text key={p.id} style={styles.item}>
-                    {p.payCurrency} {p.payAmount || p.priceAmount} — {p.status}
-                  </Text>
-                ))}
-              {!npSummary?.payments?.some(
-                (p) => !['finished', 'failed', 'expired', 'refunded'].includes(p.status)
-              ) && <Text style={styles.item}>None</Text>}
-            </Card>
+            ) : null}
+            <PrimaryButton label='Copy address' onPress={() => payAddress && void onCopyAddress(payAddress)} disabled={!payAddress} />
+            <PrimaryButton label='Refresh status' onPress={() => void pollActiveDeposit()} style={{ marginTop: 8 }} />
+            <PrimaryButton
+              label='New deposit'
+              onPress={() => {
+                setActiveDeposit(null);
+                setDepositStatus(null);
+                setDepositUsdAmount('');
+                depositCreditedToastShown.current = false;
+              }}
+              style={{ marginTop: 8 }}
+            />
           </>
         )}
-      </ScrollView>
+      </FormModal>
 
-      {copyToast ? (
-        <View style={styles.toastWrap}>
-          <Text style={styles.toastText}>{copyToast}</Text>
+      <FormModal visible={withdrawModalOpen} title='Withdraw' onClose={() => setWithdrawModalOpen(false)}>
+        <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
+        <TextInput
+          style={inputStyle}
+          value={withdrawAmount}
+          onChangeText={setWithdrawAmount}
+          placeholder='Amount'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='numeric'
+        />
+        <Text style={styles.fieldLabel}>Currency</Text>
+        <View style={styles.chipRow}>
+          {PAY_CURRENCY_OPTIONS.map((c) => (
+            <Text
+              key={c}
+              style={[styles.chip, withdrawCurrency === c && styles.chipActive]}
+              onPress={() => {
+                setWithdrawCurrency(c);
+                const first = whitelistedWallets.find((w) => w.currency === c);
+                setSelectedWhitelistId(first?.id ?? null);
+              }}
+            >
+              {c}
+            </Text>
+          ))}
         </View>
-      ) : null}
-
-      <Modal visible={depositModalOpen} transparent animationType='fade' onRequestClose={() => setDepositModalOpen(false)}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 24 : 0}
-        >
-          <View style={{ flex: 1 }}>
-            <Pressable
-              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
-              onPress={() => {
-                Keyboard.dismiss();
-                setDepositModalOpen(false);
-              }}
-            />
-            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
-              <ScrollView keyboardShouldPersistTaps='handled' style={{ maxHeight: '92%' }} showsVerticalScrollIndicator={false}>
-                <View style={styles.modalCard}>
-                  <Text style={styles.modalTitle}>Crypto deposit</Text>
-                  {!activeDeposit ? (
-                    <>
-                      <Text style={styles.hint}>Amount is priced in USD; you pay in the selected cryptocurrency.</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={depositUsdAmount}
-                        onChangeText={setDepositUsdAmount}
-                        placeholder='Amount in USD'
-                        placeholderTextColor={palette.textSecondary}
-                        keyboardType='numeric'
-                      />
-                      <Text style={styles.withdrawSectionLabel}>Pay with</Text>
-                      <View style={styles.row}>
-                        {PAY_CURRENCY_OPTIONS.map((c) => (
-                          <Text
-                            key={c}
-                            style={[styles.pill, depositPayCurrency === c && styles.active]}
-                            onPress={() => setDepositPayCurrency(c)}
-                          >
-                            {c}
-                          </Text>
-                        ))}
-                      </View>
-                      <PrimaryButton label='Create payment' onPress={() => void onCreateCryptoDeposit()} />
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.item}>Status: {payStatus}</Text>
-                      <Text style={styles.item}>
-                        Send {payAmount || '—'} {activeDeposit.payCurrency} to:
-                      </Text>
-                      <Text style={styles.modalMono}>{payAddress || 'Address pending…'}</Text>
-                      {payAddress ? (
-                        <View style={styles.qrWrap}>
-                          <QRCode value={payAddress} size={140} color='#111827' backgroundColor='white' />
-                        </View>
-                      ) : null}
-                      <PrimaryButton
-                        label='Copy address'
-                        onPress={() => {
-                          if (payAddress) void onCopyAddress(payAddress);
-                        }}
-                        disabled={!payAddress}
-                      />
-                      <PrimaryButton label='Refresh status' onPress={() => void pollActiveDeposit()} style={{ marginTop: 8 }} />
-                      {depositStatus?.ledgerCredited ? (
-                        <Text style={styles.hint}>Payment credited to your crypto balance.</Text>
-                      ) : null}
-                      <PrimaryButton
-                        label='New deposit'
-                        onPress={() => {
-                          setActiveDeposit(null);
-                          setDepositStatus(null);
-                          setDepositUsdAmount('');
-                        }}
-                        style={{ marginTop: 8 }}
-                      />
-                    </>
-                  )}
-                  <PrimaryButton label='Close' onPress={() => setDepositModalOpen(false)} style={{ marginTop: 12 }} />
-                </View>
-              </ScrollView>
-            </View>
+        <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
+        {walletsForWithdrawCurrency.length ? (
+          <View style={styles.chipRow}>
+            {walletsForWithdrawCurrency.map((w) => (
+              <Text
+                key={w.id}
+                style={[styles.chip, selectedWhitelistId === w.id && styles.chipActive]}
+                onPress={() => setSelectedWhitelistId(w.id)}
+              >
+                {w.label || w.currency}
+              </Text>
+            ))}
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={withdrawModalOpen} transparent animationType='fade' onRequestClose={() => setWithdrawModalOpen(false)}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 24 : 0}
-        >
-          <View style={{ flex: 1 }}>
-            <Pressable
-              style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
-              onPress={() => {
-                Keyboard.dismiss();
-                setWithdrawModalOpen(false);
-              }}
-            />
-            <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
-              <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Crypto withdraw</Text>
-                <Text style={styles.hint}>Requires NOWPayments custody balance on the merchant account.</Text>
-                <TextInput
-                  style={styles.input}
-                  value={withdrawAmount}
-                  onChangeText={setWithdrawAmount}
-                  placeholder='Amount'
-                  placeholderTextColor={palette.textSecondary}
-                  keyboardType='numeric'
-                />
-                <Text style={styles.withdrawSectionLabel}>Currency</Text>
-                <View style={styles.row}>
-                  {PAY_CURRENCY_OPTIONS.map((c) => (
-                    <Text
-                      key={c}
-                      style={[styles.pill, withdrawCurrency === c && styles.active]}
-                      onPress={() => setWithdrawCurrency(c)}
-                    >
-                      {c}
-                    </Text>
-                  ))}
-                </View>
-                <TextInput
-                  style={styles.input}
-                  value={withdrawAddress}
-                  onChangeText={setWithdrawAddress}
-                  placeholder='Destination address'
-                  placeholderTextColor={palette.textSecondary}
-                  autoCapitalize='none'
-                />
-                {totpEnabled ? (
-                  <TextInput
-                    style={styles.input}
-                    value={withdrawTotpCode}
-                    onChangeText={setWithdrawTotpCode}
-                    placeholder='Authenticator code'
-                    placeholderTextColor={palette.textSecondary}
-                    keyboardType='number-pad'
-                    maxLength={10}
-                  />
-                ) : null}
-                <PrimaryButton label='Submit withdrawal' onPress={() => void onCryptoWithdraw()} disabled={!cryptoWithdrawReady} />
-                <PrimaryButton label='Cancel' onPress={() => setWithdrawModalOpen(false)} style={{ marginTop: 8 }} />
-              </View>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        ) : (
+          <Text style={styles.hint}>Add a {withdrawCurrency} wallet in Settings.</Text>
+        )}
+        {selectedWhitelistId ? (
+          <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
+        ) : null}
+        {totpEnabled ? (
+          <TextInput
+            style={inputStyle}
+            value={withdrawTotpCode}
+            onChangeText={setWithdrawTotpCode}
+            placeholder='Authenticator code'
+            placeholderTextColor={palette.textSecondary}
+            keyboardType='number-pad'
+            maxLength={10}
+          />
+        ) : null}
+        <PrimaryButton label='Submit withdrawal' onPress={() => void onWithdraw()} disabled={!withdrawReady} />
+      </FormModal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
-  tabRow: { flexDirection: 'row', gap: 12, marginBottom: 16 },
-  tab: { flex: 1, textAlign: 'center', color: palette.textSecondary, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: palette.border },
-  tabActive: { color: palette.primary, borderColor: palette.primary },
   label: { color: palette.textSecondary, marginBottom: 8 },
-  withdrawSectionLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 4, marginBottom: 6, fontWeight: '600' },
+  fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 4, marginBottom: 6, fontWeight: '600' },
   sectionTitle: { color: palette.textSecondary, marginBottom: 10, fontSize: 16, fontWeight: '700' },
-  balance: { color: palette.textPrimary, fontSize: 34, fontWeight: '800' },
-  input: { backgroundColor: palette.surfaceElevated, borderWidth: 1, borderColor: palette.border, color: palette.textPrimary, borderRadius: 12, padding: 10, marginBottom: 8 },
-  row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  actions: { flexDirection: 'row' },
-  pill: { color: palette.textPrimary, borderColor: palette.border, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  active: { borderColor: palette.primary, color: palette.primary },
   item: { color: palette.textPrimary, marginBottom: 6 },
-  hint: { color: palette.textSecondary, marginTop: 8, fontSize: 12 },
+  hint: { color: palette.textSecondary, marginTop: 4, marginBottom: 8, fontSize: 12 },
   errorText: { color: '#f87171', marginBottom: 8 },
   heroCard: { paddingTop: 18, paddingBottom: 18 },
   heroCaption: { color: palette.textSecondary, marginBottom: 12, fontSize: 15 },
@@ -602,29 +458,19 @@ const styles = StyleSheet.create({
   assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700' },
   assetSub: { color: palette.textSecondary, fontSize: 12 },
   quickActionsRow: { flexDirection: 'row', marginTop: 12 },
-  modalCard: {
-    backgroundColor: palette.surface,
-    borderRadius: 16,
-    borderWidth: 1,
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  chip: {
+    color: palette.textPrimary,
     borderColor: palette.border,
-    padding: 16,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
   },
-  modalTitle: { color: palette.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 10 },
-  modalMono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
+  chipActive: { borderColor: palette.primary, color: palette.primary },
+  mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
   qrWrap: { alignItems: 'center', marginVertical: 12 },
-  toastWrap: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 20,
-    backgroundColor: '#0f172a',
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  toastText: { color: palette.textPrimary, textAlign: 'center', fontWeight: '600' },
   complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },
   complianceBannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
 });

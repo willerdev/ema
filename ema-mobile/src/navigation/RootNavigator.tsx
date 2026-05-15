@@ -38,7 +38,7 @@ export function RootNavigator() {
       <Stack.Screen name='AlpacaTrade' component={AlpacaTradeScreen} options={{ title: 'Forex market' }} />
       <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarming' }} />
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
-      <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert auto trading' }} />
+      <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
     </Stack.Navigator>
   );
 }
