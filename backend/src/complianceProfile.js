@@ -14,7 +14,9 @@ function validateCompliancePayload(body) {
   const sourceOfFunds = trimStr(body.sourceOfFunds ?? body.source_of_funds).toLowerCase();
   const sourceOfFundsDetail = trimStr(body.sourceOfFundsDetail ?? body.source_of_funds_detail);
   const plannedAmount = Number(body.plannedInvestmentAmount ?? body.planned_investment_amount);
-  const plannedCurrency = trimStr(body.plannedInvestmentCurrency ?? body.planned_investment_currency || 'usd').toLowerCase();
+  const plannedCurrency = trimStr(
+    body.plannedInvestmentCurrency ?? body.planned_investment_currency ?? 'usd'
+  ).toLowerCase();
   const plannedDuration = trimStr(body.plannedInvestmentDuration ?? body.planned_investment_duration).toLowerCase();
   const dateOfBirth = trimStr(body.dateOfBirth ?? body.date_of_birth) || null;
   const phone = trimStr(body.phone) || null;
