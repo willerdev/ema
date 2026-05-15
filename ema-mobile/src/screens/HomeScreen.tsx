@@ -9,8 +9,10 @@ import { nowpaymentsService } from '../services/nowpaymentsService';
 import { useTradingStore } from '../store/useTradingStore';
 import type { NowpaymentsLedgerRow, NowpaymentsSummary } from '../types';
 import { palette } from '../theme/colors';
+import { sanitizeUserFacingError } from '../utils/userFacingError';
+import { formatLedgerSource } from '../utils/walletDisplay';
 
-const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v1';
+const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v2';
 
 function formatLedgerTime(createdAt: string) {
   const ms = Date.parse(createdAt);
@@ -48,7 +50,7 @@ export function HomeScreen() {
       const summary = await nowpaymentsService.getSummary();
       setNpSummary(summary);
     } catch (e: any) {
-      setCryptoError(e?.message || 'Failed to load wallet');
+      setCryptoError(sanitizeUserFacingError(e?.message || 'Failed to load wallet'));
       setNpSummary(null);
     }
   }, []);
@@ -99,6 +101,12 @@ export function HomeScreen() {
           <Text style={styles.disclaimerText}>
             Deposits below $100 may not be credited and those funds can be lost. Always verify minimum amounts before sending.
           </Text>
+          <Text style={styles.disclaimerText}>
+            You can lose funds through market moves, failed transfers, or policy enforcement. If a sudden change in withdrawal
+            pattern is detected — for example a single withdrawal more than double your last two withdrawals — your account may
+            be flagged for possible theft and withdrawals paused while we review. Enable two-factor authentication in Settings
+            to protect your account.
+          </Text>
           <Text style={[styles.disclaimerText, { marginBottom: 0 }]}>
             We will never hold your assets unless you violate these terms. Ema will never call or text you asking you to move
             funds, share passwords, or approve actions outside this app. Do not follow instructions from phone calls or SMS —
@@ -135,7 +143,7 @@ export function HomeScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.activityTitle}>{ledgerTitle(row)}</Text>
                 <Text style={styles.meta}>
-                  {formatLedgerTime(row.createdAt)} · {row.source}
+                  {formatLedgerTime(row.createdAt)} · {formatLedgerSource(row.source)}
                 </Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
@@ -165,7 +173,7 @@ export function HomeScreen() {
           {loading && !account && !dashboardError ? <Text style={styles.alpacaFootnote}>Broker sync…</Text> : null}
           {alpacaEquity || alpacaCash ? (
             <Text style={styles.alpacaFootnote}>
-              Broker (Alpaca){alpacaEquity ? ` · equity ${alpacaEquity}` : ''}
+              Linked broker{alpacaEquity ? ` · equity ${alpacaEquity}` : ''}
               {alpacaCash ? ` · cash ${alpacaCash}` : ''}
             </Text>
           ) : null}

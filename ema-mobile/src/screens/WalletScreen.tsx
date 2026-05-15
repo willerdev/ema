@@ -29,6 +29,7 @@ import {
 } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
+import { findBalanceForNetwork, formatLedgerSource, maxWithdrawableAmount } from '../utils/walletDisplay';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -169,6 +170,9 @@ export function WalletScreen() {
     }
   };
 
+  const availableForWithdraw = findBalanceForNetwork(npSummary?.balances, withdrawCurrency);
+  const maxWithdraw = maxWithdrawableAmount(availableForWithdraw);
+
   const onWithdraw = async () => {
     if (!complianceComplete) {
       alertComplianceRequired();
@@ -181,6 +185,13 @@ export function WalletScreen() {
     }
     const n = Number(withdrawAmount);
     if (!Number.isFinite(n) || n <= 0) return;
+    if (maxWithdraw > 0 && n > maxWithdraw) {
+      Alert.alert(
+        'Gas reserve required',
+        `Keep at least 5% of your balance for network fees. Maximum withdrawable now: ${maxWithdraw.toFixed(6)}.`
+      );
+      return;
+    }
     const totpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
     if (!totpOk) return;
     try {
@@ -210,7 +221,7 @@ export function WalletScreen() {
     }
     const forCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
     if (forCurrency.length === 0) {
-      Alert.alert('No whitelisted wallet', `Add a ${withdrawCurrency} wallet in Settings first.`);
+      Alert.alert('No whitelisted wallet', `Add a ${formatNetworkLabel(withdrawCurrency)} wallet in Settings first.`);
       return;
     }
     if (!selectedWhitelistId || !forCurrency.some((w) => w.id === selectedWhitelistId)) {
@@ -234,10 +245,13 @@ export function WalletScreen() {
 
   const walletsForWithdrawCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
   const withdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
+  const withdrawNum = Number(withdrawAmount);
+  const withinGasReserve = maxWithdraw <= 0 || !Number.isFinite(withdrawNum) || withdrawNum <= maxWithdraw;
   const withdrawReady =
     withdrawAmount.trim().length > 0 &&
-    Number.isFinite(Number(withdrawAmount)) &&
-    Number(withdrawAmount) > 0 &&
+    Number.isFinite(withdrawNum) &&
+    withdrawNum > 0 &&
+    withinGasReserve &&
     Boolean(selectedWhitelistId) &&
     walletsForWithdrawCurrency.some((w) => w.id === selectedWhitelistId) &&
     withdrawTotpOk;
@@ -277,6 +291,17 @@ export function WalletScreen() {
           </Card>
         ) : null}
 
+        <Card style={styles.gasCard}>
+          <Text style={styles.gasTitle}>Network fee reserve</Text>
+          <Text style={styles.gasText}>
+            Leave at least 5% of your wallet balance for blockchain gas fees. If you withdraw everything at once, you may not be
+            able to deposit again until you add funds back to cover fees.
+          </Text>
+          {!totpEnabled ? (
+            <Text style={styles.gasText}>Enable two-factor authentication in Settings for stronger withdrawal protection.</Text>
+          ) : null}
+        </Card>
+
         <Card style={styles.heroCard}>
           <Text style={styles.heroCaption}>Wallet balances</Text>
           {npSummary?.balances?.length ? (
@@ -311,7 +336,7 @@ export function WalletScreen() {
           <Text style={styles.sectionTitle}>Recent activity</Text>
           {npSummary?.ledger?.slice(0, 12).map((e) => (
             <Text key={e.id} style={styles.item}>
-              {e.direction.toUpperCase()} {e.amount} {e.asset} ({e.source})
+              {e.direction.toUpperCase()} {e.amount} {e.asset} · {formatLedgerSource(e.source)}
             </Text>
           ))}
           {!npSummary?.ledger?.length && <Text style={styles.item}>No activity yet</Text>}
@@ -378,6 +403,10 @@ export function WalletScreen() {
 
       <FormModal visible={withdrawModalOpen} title='Withdraw' onClose={() => setWithdrawModalOpen(false)}>
         <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
+        <Text style={styles.gasTextModal}>
+          Keep 5% in your wallet for gas. Max withdrawable: {maxWithdraw > 0 ? maxWithdraw.toFixed(6) : '—'}{' '}
+          {formatNetworkLabel(withdrawCurrency)}. Emptying the wallet can block future deposits.
+        </Text>
         <TextInput
           style={inputStyle}
           value={withdrawAmount}
@@ -450,4 +479,8 @@ const styles = StyleSheet.create({
   qrWrap: { alignItems: 'center', marginVertical: 12 },
   complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },
   complianceBannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
+  gasCard: { marginBottom: 12, borderColor: palette.primary, borderLeftWidth: 3 },
+  gasTitle: { color: palette.primary, fontWeight: '700', marginBottom: 6, fontSize: 14 },
+  gasText: { color: palette.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 6 },
+  gasTextModal: { color: '#fbbf24', fontSize: 12, lineHeight: 17, marginBottom: 10 },
 });
