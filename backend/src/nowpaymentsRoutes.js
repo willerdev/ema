@@ -21,6 +21,7 @@ const {
 const np = require('./services/nowpaymentsClient');
 const { decryptTotpSecret } = require('./totpCrypto');
 const { verifySync } = require('otplib');
+const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -435,7 +436,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
     }
   });
 
-  app.post('/nowpayments/withdrawals', authMiddleware, async (req, res) => {
+  app.post('/nowpayments/withdrawals', authMiddleware, requireComplianceProfile, async (req, res) => {
     try {
       if (!np.configured()) return res.status(503).json({ message: notConfiguredMessage });
 

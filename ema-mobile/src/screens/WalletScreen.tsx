@@ -20,6 +20,7 @@ import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
 import { authService } from '../services/authService';
+import { complianceService, isComplianceRequiredError } from '../services/complianceService';
 import { nowpaymentsService } from '../services/nowpaymentsService';
 import { walletService } from '../services/walletService';
 import {
@@ -61,6 +62,24 @@ export function WalletScreen() {
   const [withdrawAddress, setWithdrawAddress] = useState('');
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
+  const [complianceComplete, setComplianceComplete] = useState(false);
+
+  const alertComplianceRequired = () => {
+    Alert.alert(
+      'Profile required',
+      'Complete your compliance profile in Settings before withdrawing funds.',
+      [{ text: 'OK' }]
+    );
+  };
+
+  const loadCompliance = useCallback(async () => {
+    try {
+      const data = await complianceService.getProfile();
+      setComplianceComplete(Boolean(data.complete));
+    } catch {
+      setComplianceComplete(false);
+    }
+  }, []);
 
   const refreshCash = useCallback(async () => {
     try {
@@ -91,9 +110,9 @@ export function WalletScreen() {
   }, []);
 
   const refresh = useCallback(async () => {
-    await refreshCash();
+    await Promise.all([refreshCash(), loadCompliance()]);
     if (tab === 'crypto') await refreshNowpayments();
-  }, [refreshCash, refreshNowpayments, tab]);
+  }, [refreshCash, refreshNowpayments, loadCompliance, tab]);
 
   usePolling(refresh, 60000, true);
 
@@ -135,6 +154,10 @@ export function WalletScreen() {
   };
 
   const onCashWithdraw = async () => {
+    if (!complianceComplete) {
+      alertComplianceRequired();
+      return;
+    }
     const n = Number(amount);
     if (!Number.isFinite(n) || n <= 0) return;
     const totpOk = !totpEnabled || cashWithdrawTotpCode.replace(/\s/g, '').length >= 6;
@@ -148,7 +171,8 @@ export function WalletScreen() {
       refreshCash();
       Alert.alert('Done', 'Cash withdrawal request submitted');
     } catch (error: any) {
-      Alert.alert('Wallet Error', error.message);
+      if (isComplianceRequiredError(error)) alertComplianceRequired();
+      else Alert.alert('Wallet Error', error.message);
     }
   };
 
@@ -179,6 +203,10 @@ export function WalletScreen() {
   };
 
   const onCryptoWithdraw = async () => {
+    if (!complianceComplete) {
+      alertComplianceRequired();
+      return;
+    }
     const n = Number(withdrawAmount);
     if (!Number.isFinite(n) || n <= 0 || !withdrawAddress.trim()) return;
     const totpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
@@ -198,8 +226,17 @@ export function WalletScreen() {
       await refreshNowpayments();
       Alert.alert('Submitted', 'Withdrawal sent to NOWPayments. Balance updates when payout completes.');
     } catch (e: any) {
-      Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
+      if (isComplianceRequiredError(e)) alertComplianceRequired();
+      else Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
     }
+  };
+
+  const openWithdrawModal = () => {
+    if (!complianceComplete) {
+      alertComplianceRequired();
+      return;
+    }
+    setWithdrawModalOpen(true);
   };
 
   const onCopyAddress = async (addr: string) => {
@@ -239,6 +276,13 @@ export function WalletScreen() {
         contentContainerStyle={{ padding: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
+        {!complianceComplete ? (
+          <Card style={styles.complianceBanner}>
+            <Text style={styles.complianceBannerText}>
+              Complete your compliance profile in Settings before you can withdraw cash or crypto.
+            </Text>
+          </Card>
+        ) : null}
         <View style={styles.tabRow}>
           <Text
             style={[styles.tab, tab === 'cash' && styles.tabActive]}
@@ -301,7 +345,7 @@ export function WalletScreen() {
                   onPress={onCashWithdraw}
                   variant='danger'
                   style={{ flex: 1 }}
-                  disabled={!cashAmountOk || !cashWithdrawTotpOk}
+                  disabled={!complianceComplete || !cashAmountOk || !cashWithdrawTotpOk}
                 />
               </View>
             </Card>
@@ -344,7 +388,7 @@ export function WalletScreen() {
               <View style={styles.quickActionsRow}>
                 <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
                 <View style={{ width: 8 }} />
-                <PrimaryButton label='Withdraw' onPress={() => setWithdrawModalOpen(true)} style={{ flex: 1 }} />
+                <PrimaryButton label='Withdraw' onPress={openWithdrawModal} style={{ flex: 1 }} disabled={!complianceComplete} />
               </View>
             </Card>
 
@@ -581,4 +625,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   toastText: { color: palette.textPrimary, textAlign: 'center', fontWeight: '600' },
+  complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },
+  complianceBannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
 });

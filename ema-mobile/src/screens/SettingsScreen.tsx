@@ -8,7 +8,29 @@ import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { authService, TotpStatus } from '../services/authService';
 import { alpacaService } from '../services/alpacaService';
+import { complianceService } from '../services/complianceService';
+import {
+  ComplianceProfile,
+  PlannedInvestmentDuration,
+  SourceOfFunds,
+} from '../types';
 import { palette } from '../theme/colors';
+
+const SOURCE_LABELS: Record<string, string> = {
+  employment: 'Employment income',
+  business: 'Business income',
+  savings: 'Personal savings',
+  investment_returns: 'Investment returns',
+  inheritance: 'Inheritance / gift',
+  other: 'Other',
+};
+
+const DURATION_LABELS: Record<string, string> = {
+  under_1y: 'Under 1 year',
+  '1_3y': '1–3 years',
+  '3_5y': '3–5 years',
+  over_5y: 'Over 5 years',
+};
 
 export function SettingsScreen() {
   const { user, logout } = useAuth();
@@ -27,6 +49,55 @@ export function SettingsScreen() {
   const [disablePassword, setDisablePassword] = useState('');
   const [disableCode, setDisableCode] = useState('');
   const [showDisableForm, setShowDisableForm] = useState(false);
+
+  const [complianceComplete, setComplianceComplete] = useState(false);
+  const [complianceBusy, setComplianceBusy] = useState(false);
+  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
+  const [durationOptions, setDurationOptions] = useState<string[]>([]);
+  const [legalFirstName, setLegalFirstName] = useState('');
+  const [legalLastName, setLegalLastName] = useState('');
+  const [country, setCountry] = useState('');
+  const [profession, setProfession] = useState('');
+  const [sourceOfFunds, setSourceOfFunds] = useState<SourceOfFunds>('employment');
+  const [sourceOfFundsDetail, setSourceOfFundsDetail] = useState('');
+  const [plannedInvestmentAmount, setPlannedInvestmentAmount] = useState('');
+  const [plannedInvestmentDuration, setPlannedInvestmentDuration] = useState<PlannedInvestmentDuration>('1_3y');
+  const [dateOfBirth, setDateOfBirth] = useState('');
+  const [phone, setPhone] = useState('');
+  const [addressLine, setAddressLine] = useState('');
+  const [city, setCity] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  const applyComplianceProfile = (p: ComplianceProfile | null) => {
+    if (!p) return;
+    setLegalFirstName(p.legalFirstName || '');
+    setLegalLastName(p.legalLastName || '');
+    setCountry(p.country || '');
+    setProfession(p.profession || '');
+    setSourceOfFunds((p.sourceOfFunds as SourceOfFunds) || 'employment');
+    setSourceOfFundsDetail(p.sourceOfFundsDetail || '');
+    setPlannedInvestmentAmount(p.plannedInvestmentAmount != null ? String(p.plannedInvestmentAmount) : '');
+    setPlannedInvestmentDuration((p.plannedInvestmentDuration as PlannedInvestmentDuration) || '1_3y');
+    setDateOfBirth(p.dateOfBirth || '');
+    setPhone(p.phone || '');
+    setAddressLine(p.addressLine || '');
+    setCity(p.city || '');
+    setAcceptedTerms(Boolean(p.acceptedTermsAt));
+  };
+
+  const loadCompliance = useCallback(async () => {
+    try {
+      const data = await complianceService.getProfile();
+      setComplianceComplete(Boolean(data.complete));
+      if (data.options?.sourceOfFunds?.length) setSourceOptions(data.options.sourceOfFunds);
+      if (data.options?.plannedInvestmentDuration?.length) {
+        setDurationOptions(data.options.plannedInvestmentDuration);
+      }
+      applyComplianceProfile(data.profile);
+    } catch {
+      setComplianceComplete(false);
+    }
+  }, []);
 
   const loadProfile = useCallback(async () => {
     try {
@@ -52,8 +123,59 @@ export function SettingsScreen() {
   }, []);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadProfile(), loadTotpStatus()]);
-  }, [loadProfile, loadTotpStatus]);
+    await Promise.all([loadProfile(), loadTotpStatus(), loadCompliance()]);
+  }, [loadProfile, loadTotpStatus, loadCompliance]);
+
+  const saveCompliance = async () => {
+    const amount = Number(plannedInvestmentAmount);
+    if (!legalFirstName.trim() || !legalLastName.trim() || !country.trim() || !profession.trim()) {
+      Alert.alert('Validation', 'Please fill in name, country, and profession.');
+      return;
+    }
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Validation', 'Enter a valid planned investment amount.');
+      return;
+    }
+    if (sourceOfFunds === 'other' && !sourceOfFundsDetail.trim()) {
+      Alert.alert('Validation', 'Describe your source of funds.');
+      return;
+    }
+    if (!acceptedTerms) {
+      Alert.alert('Validation', 'Confirm that your information is accurate.');
+      return;
+    }
+    setComplianceBusy(true);
+    try {
+      const data = await complianceService.saveProfile({
+        legalFirstName: legalFirstName.trim(),
+        legalLastName: legalLastName.trim(),
+        country: country.trim(),
+        profession: profession.trim(),
+        sourceOfFunds,
+        sourceOfFundsDetail: sourceOfFunds === 'other' ? sourceOfFundsDetail.trim() : undefined,
+        plannedInvestmentAmount: amount,
+        plannedInvestmentCurrency: 'usd',
+        plannedInvestmentDuration,
+        dateOfBirth: dateOfBirth.trim() || undefined,
+        phone: phone.trim() || undefined,
+        addressLine: addressLine.trim() || undefined,
+        city: city.trim() || undefined,
+        acceptedTerms: true,
+      });
+      setComplianceComplete(Boolean(data.complete));
+      applyComplianceProfile(data.profile);
+      Alert.alert(
+        data.complete ? 'Profile complete' : 'Saved',
+        data.complete
+          ? 'You can withdraw funds once other requirements are met.'
+          : 'Some required fields are still missing.'
+      );
+    } catch (error: any) {
+      Alert.alert('Save failed', String(error?.message || 'Could not save profile'));
+    } finally {
+      setComplianceBusy(false);
+    }
+  };
 
   usePolling(refreshAll, 30000, true);
   const onRefresh = useCallback(async () => {
@@ -169,6 +291,120 @@ export function SettingsScreen() {
         <Text style={styles.value}>Email: {user?.email}</Text>
         <Text style={styles.value}>Username: {profile?.username || user?.email.split('@')[0]}</Text>
         <Text style={styles.value}>Status: {profile?.accountStatus || 'active'}</Text>
+      </Card>
+
+      <Card>
+        <Text style={styles.label}>Withdrawal requirements</Text>
+        <Text style={styles.value}>
+          Status: {complianceComplete ? 'Complete' : 'Incomplete'} — required before cash or crypto withdrawals.
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder='Legal first name'
+          placeholderTextColor={palette.textSecondary}
+          value={legalFirstName}
+          onChangeText={setLegalFirstName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Legal last name'
+          placeholderTextColor={palette.textSecondary}
+          value={legalLastName}
+          onChangeText={setLegalLastName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Country of residence'
+          placeholderTextColor={palette.textSecondary}
+          value={country}
+          onChangeText={setCountry}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Profession / occupation'
+          placeholderTextColor={palette.textSecondary}
+          value={profession}
+          onChangeText={setProfession}
+        />
+        <Text style={styles.subLabel}>Source of funds</Text>
+        <View style={styles.chipRow}>
+          {(sourceOptions.length ? sourceOptions : Object.keys(SOURCE_LABELS)).map((key) => (
+            <Text
+              key={key}
+              style={[styles.chip, sourceOfFunds === key && styles.chipActive]}
+              onPress={() => setSourceOfFunds(key as SourceOfFunds)}
+            >
+              {SOURCE_LABELS[key] || key}
+            </Text>
+          ))}
+        </View>
+        {sourceOfFunds === 'other' ? (
+          <TextInput
+            style={styles.input}
+            placeholder='Describe source of funds'
+            placeholderTextColor={palette.textSecondary}
+            value={sourceOfFundsDetail}
+            onChangeText={setSourceOfFundsDetail}
+          />
+        ) : null}
+        <TextInput
+          style={styles.input}
+          placeholder='Planned investment amount (USD)'
+          placeholderTextColor={palette.textSecondary}
+          value={plannedInvestmentAmount}
+          onChangeText={setPlannedInvestmentAmount}
+          keyboardType='numeric'
+        />
+        <Text style={styles.subLabel}>Planned investment duration</Text>
+        <View style={styles.chipRow}>
+          {(durationOptions.length ? durationOptions : Object.keys(DURATION_LABELS)).map((key) => (
+            <Text
+              key={key}
+              style={[styles.chip, plannedInvestmentDuration === key && styles.chipActive]}
+              onPress={() => setPlannedInvestmentDuration(key as PlannedInvestmentDuration)}
+            >
+              {DURATION_LABELS[key] || key}
+            </Text>
+          ))}
+        </View>
+        <TextInput
+          style={styles.input}
+          placeholder='Date of birth (YYYY-MM-DD, optional)'
+          placeholderTextColor={palette.textSecondary}
+          value={dateOfBirth}
+          onChangeText={setDateOfBirth}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Phone (optional)'
+          placeholderTextColor={palette.textSecondary}
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType='phone-pad'
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='Address line (optional)'
+          placeholderTextColor={palette.textSecondary}
+          value={addressLine}
+          onChangeText={setAddressLine}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder='City (optional)'
+          placeholderTextColor={palette.textSecondary}
+          value={city}
+          onChangeText={setCity}
+        />
+        <View style={styles.rowBetween}>
+          <Text style={[styles.value, { flex: 1, marginRight: 8 }]}>I confirm this information is accurate</Text>
+          <Switch value={acceptedTerms} onValueChange={setAcceptedTerms} thumbColor={acceptedTerms ? palette.primary : '#ccc'} />
+        </View>
+        <PrimaryButton
+          label={complianceBusy ? 'Saving…' : 'Save compliance profile'}
+          onPress={saveCompliance}
+          disabled={complianceBusy}
+        />
       </Card>
 
       <Card>
@@ -333,6 +569,18 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 8,
   },
+  subLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 6, marginTop: 4 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  chip: {
+    color: palette.textPrimary,
+    borderColor: palette.border,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+  },
+  chipActive: { borderColor: palette.primary, color: palette.primary },
   buttonRowCentered: {
     flexDirection: 'row',
     justifyContent: 'center',

@@ -709,6 +709,67 @@ async function getCryptoBalancesByUserId(userId) {
   return balances;
 }
 
+// --- User compliance profile ---
+
+async function getComplianceProfileByUserId(userId) {
+  const { data, error } = await supabase
+    .from('user_compliance_profiles')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertComplianceProfile(userId, normalized) {
+  const { validateCompliancePayload } = require('./complianceProfile');
+  const check = validateCompliancePayload({
+    legal_first_name: normalized.legal_first_name,
+    legal_last_name: normalized.legal_last_name,
+    country: normalized.country,
+    profession: normalized.profession,
+    source_of_funds: normalized.source_of_funds,
+    source_of_funds_detail: normalized.source_of_funds_detail,
+    planned_investment_amount: normalized.planned_investment_amount,
+    planned_investment_currency: normalized.planned_investment_currency,
+    planned_investment_duration: normalized.planned_investment_duration,
+    date_of_birth: normalized.date_of_birth,
+    phone: normalized.phone,
+    address_line: normalized.address_line,
+    city: normalized.city,
+    accept_terms: Boolean(normalized.accepted_terms_at),
+  });
+
+  const now = new Date().toISOString();
+  const row = {
+    user_id: userId,
+    legal_first_name: normalized.legal_first_name,
+    legal_last_name: normalized.legal_last_name,
+    country: normalized.country,
+    profession: normalized.profession,
+    source_of_funds: normalized.source_of_funds,
+    source_of_funds_detail: normalized.source_of_funds_detail,
+    planned_investment_amount: normalized.planned_investment_amount,
+    planned_investment_currency: normalized.planned_investment_currency || 'usd',
+    planned_investment_duration: normalized.planned_investment_duration,
+    date_of_birth: normalized.date_of_birth || null,
+    phone: normalized.phone,
+    address_line: normalized.address_line,
+    city: normalized.city,
+    accepted_terms_at: normalized.accepted_terms_at,
+    completed_at: check.ok ? now : null,
+    updated_at: now,
+  };
+
+  const { data, error } = await supabase
+    .from('user_compliance_profiles')
+    .upsert(row, { onConflict: 'user_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   getUserByEmail,
   getUserById,
@@ -775,4 +836,6 @@ module.exports = {
   getCryptoLedgerEntryBySource,
   listCryptoLedgerEntriesByUserId,
   getCryptoBalancesByUserId,
+  getComplianceProfileByUserId,
+  upsertComplianceProfile,
 };

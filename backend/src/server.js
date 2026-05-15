@@ -26,6 +26,7 @@ const {
   setMt5EaWebhookToken,
   checkDatabaseHealth,
   isMissingTableError,
+  getComplianceProfileByUserId,
 } = require('./db');
 const { authMiddleware, totpPendingMiddleware, TOTP_PENDING_PURPOSE } = require('./middleware/auth');
 const { encryptTotpSecret, decryptTotpSecret } = require('./totpCrypto');
@@ -39,6 +40,9 @@ const { registerNowpaymentsRoutes, handlePaymentWebhook, handlePayoutWebhook } =
 const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
 const { registerContractRoutes } = require('./contractRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
+const { registerComplianceRoutes } = require('./complianceRoutes');
+const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
+const { isComplianceProfileComplete } = require('./complianceProfile');
 
 const app = express();
 app.use(cors());
@@ -389,11 +393,20 @@ app.get('/profile', authMiddleware, async (req, res) => {
   const user = await currentUser(req);
   if (!user) return res.status(404).json({ message: 'User not found' });
 
+  let complianceComplete = false;
+  try {
+    const compliance = await getComplianceProfileByUserId(req.userId);
+    complianceComplete = isComplianceProfileComplete(compliance);
+  } catch {
+    complianceComplete = false;
+  }
+
   return res.json({
     profile: {
       email: user.email,
       username: user.email.split('@')[0],
       accountStatus: 'active',
+      complianceComplete,
     },
   });
 });
@@ -579,6 +592,7 @@ app.post('/alpaca/orders', async (req, res) => {
 
 registerCryptoRoutes(app, { authMiddleware });
 registerNowpaymentsRoutes(app, { authMiddleware });
+registerComplianceRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
@@ -617,7 +631,7 @@ app.post('/wallet/deposit', authMiddleware, async (req, res) => {
   }
 });
 
-app.post('/wallet/withdraw', authMiddleware, async (req, res) => {
+app.post('/wallet/withdraw', authMiddleware, requireComplianceProfile, async (req, res) => {
   try {
     const amount = Number(req.body.amount);
     const method = req.body.method || 'bank_transfer';

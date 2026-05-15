@@ -100,7 +100,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       data?.message ||
       (typeof data === 'string' ? data : '') ||
       fallback;
-    throw new Error(message);
+    const err = new Error(message) as Error & { status?: number; code?: string };
+    err.status = response.status;
+    if (data?.code) err.code = String(data.code);
+    throw err;
   }
 
   return (data ?? {}) as T;
@@ -110,4 +113,6 @@ export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
     request<T>(path, { method: 'POST', body: JSON.stringify(body), headers }),
+  put: <T>(path: string, body: unknown, headers?: Record<string, string>) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body), headers }),
 };

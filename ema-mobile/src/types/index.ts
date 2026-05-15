@@ -199,6 +199,61 @@ export interface NowpaymentsWithdrawalResponse {
   amount: number;
 }
 
+export type SourceOfFunds =
+  | 'employment'
+  | 'business'
+  | 'savings'
+  | 'investment_returns'
+  | 'inheritance'
+  | 'other';
+
+export type PlannedInvestmentDuration = 'under_1y' | '1_3y' | '3_5y' | 'over_5y';
+
+export interface ComplianceProfile {
+  legalFirstName: string;
+  legalLastName: string;
+  country: string;
+  profession: string;
+  sourceOfFunds: SourceOfFunds | string;
+  sourceOfFundsDetail: string | null;
+  plannedInvestmentAmount: number | null;
+  plannedInvestmentCurrency: string;
+  plannedInvestmentDuration: PlannedInvestmentDuration | string;
+  dateOfBirth: string | null;
+  phone: string | null;
+  addressLine: string | null;
+  city: string | null;
+  acceptedTermsAt: string | null;
+  completedAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface ComplianceProfilePayload {
+  legalFirstName: string;
+  legalLastName: string;
+  country: string;
+  profession: string;
+  sourceOfFunds: string;
+  sourceOfFundsDetail?: string;
+  plannedInvestmentAmount: number;
+  plannedInvestmentCurrency?: string;
+  plannedInvestmentDuration: string;
+  dateOfBirth?: string;
+  phone?: string;
+  addressLine?: string;
+  city?: string;
+  acceptedTerms: boolean;
+}
+
+export interface ComplianceProfileResponse {
+  profile: ComplianceProfile | null;
+  complete: boolean;
+  options?: {
+    sourceOfFunds: string[];
+    plannedInvestmentDuration: string[];
+  };
+}
+
 export interface Mt5AccountConfig {
   id?: string;
   login: string;
