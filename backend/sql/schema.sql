@@ -1,3 +1,5 @@
+create extension if not exists citext;
+
 create table if not exists public.users (
   id uuid primary key,
   email text unique not null,
@@ -6,7 +8,8 @@ create table if not exists public.users (
   alpaca_secret_key text default '' not null,
   totp_enabled boolean default false not null,
   totp_secret_enc text,
-  created_at timestamptz default now() not null
+  created_at timestamptz default now() not null,
+  transfer_code citext unique
 );
 
 create table if not exists public.wallets (
@@ -19,7 +22,7 @@ create table if not exists public.wallets (
 create table if not exists public.transactions (
   id uuid primary key,
   user_id uuid not null references public.users(id) on delete cascade,
-  type text not null check (type in ('deposit','withdraw')),
+  type text not null check (type in ('deposit','withdraw','peer_send','peer_receive')),
   amount numeric(18,2) not null check (amount > 0),
   status text not null,
   created_at timestamptz default now() not null

@@ -14,6 +14,8 @@ const {
   clearTotp,
   ensureWalletForUser,
   setWalletBalance,
+  ensureUserTransferCode,
+  rpcWalletPeerTransfer,
   createTransaction,
   getTransactionsByUserId,
   clearTransactionsByUserId,
@@ -615,6 +617,29 @@ registerNotificationRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
+function mapRpcPeerTransferError(error) {
+  const raw = `${String(error?.message || '')} ${String(error?.details || '')} ${String(error?.hint || '')}`;
+  if (raw.includes('recipient_not_found')) {
+    return { status: 404, message: 'No user found with this transfer ID' };
+  }
+  if (raw.includes('cannot_send_to_self')) {
+    return { status: 400, message: 'Cannot send money to yourself' };
+  }
+  if (raw.includes('insufficient_funds')) {
+    return { status: 400, message: 'Insufficient wallet balance' };
+  }
+  if (raw.includes('invalid_amount')) {
+    return { status: 400, message: 'Invalid amount' };
+  }
+  if (raw.includes('invalid_recipient_code')) {
+    return { status: 400, message: 'Recipient transfer ID is required' };
+  }
+  if (raw.includes('idempotency_mismatch')) {
+    return { status: 409, message: 'Idempotency conflict' };
+  }
+  return null;
+}
+
 app.get('/wallet', authMiddleware, async (req, res) => {
   try {
     const wallet = await ensureWalletForUser(req.userId);
@@ -623,6 +648,76 @@ app.get('/wallet', authMiddleware, async (req, res) => {
     return res.json({ balance, transactions });
   } catch {
     return res.status(500).json({ message: 'Failed to fetch wallet' });
+  }
+});
+
+app.get('/wallet/transfer-code', authMiddleware, async (req, res) => {
+  try {
+    const transferCode = await ensureUserTransferCode(req.userId);
+    if (!transferCode) return res.status(404).json({ message: 'User not found' });
+    return res.json({ transferCode });
+  } catch {
+    return res.status(500).json({ message: 'Failed to resolve transfer ID' });
+  }
+});
+
+app.post('/wallet/transfer', authMiddleware, requireComplianceProfile, async (req, res) => {
+  try {
+    const toTransferCode =
+      req.body?.toTransferCode != null ? String(req.body.toTransferCode).trim() : '';
+    const amount = Number(req.body?.amount);
+    const rawIdem = req.body?.idempotencyKey != null ? String(req.body.idempotencyKey).trim() : '';
+
+    if (!toTransferCode) return res.status(400).json({ message: 'Recipient transfer ID is required' });
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ message: 'Invalid amount' });
+    }
+
+    const roundedAmount = Math.round(amount * 100) / 100;
+
+    const user = await getUserById(req.userId);
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (user.totp_enabled) {
+      const code = req.body?.totpCode != null ? String(req.body.totpCode).replace(/\s/g, '') : '';
+      if (!code || code.length < 6) {
+        return res.status(400).json({ message: 'Authenticator code is required for transfers' });
+      }
+      if (!user.totp_secret_enc) {
+        return res.status(500).json({ message: 'Server configuration error' });
+      }
+      let secret;
+      try {
+        secret = decryptTotpSecret(user.totp_secret_enc);
+      } catch {
+        return res.status(500).json({ message: 'Server configuration error' });
+      }
+      const totpResult = verifySync({
+        secret,
+        token: code,
+        epochTolerance: 1,
+      });
+      if (!totpResult.valid) {
+        return res.status(401).json({ message: 'Invalid authenticator code' });
+      }
+    }
+
+    const result = await rpcWalletPeerTransfer({
+      fromUserId: req.userId,
+      toTransferCode,
+      amount: roundedAmount,
+      idempotencyKey: rawIdem || null,
+    });
+
+    const fromBalance = Number.parseFloat(String(result?.from_balance ?? 0)) || 0;
+    return res.json({
+      transferId: result?.transfer_id,
+      balance: fromBalance,
+      idempotent: Boolean(result?.idempotent),
+    });
+  } catch (error) {
+    const mapped = mapRpcPeerTransferError(error);
+    if (mapped) return res.status(mapped.status).json({ message: mapped.message });
+    return res.status(500).json({ message: 'Transfer failed' });
   }
 });
 

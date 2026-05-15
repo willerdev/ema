@@ -73,9 +73,6 @@ export function ContractsTradeScreen() {
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
     >
       <Text style={styles.title}>Contracts</Text>
-      <Text style={styles.disclaimer}>
-        Contract balance is internal to the app. Daily 2% accrual is applied server-side when the daily job runs (configure INTERNAL_CRON_SECRET + cron).
-      </Text>
 
       {error ? (
         <Card>
@@ -98,9 +95,9 @@ export function ContractsTradeScreen() {
             <Text style={styles.label}>Move funds</Text>
             <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} keyboardType='numeric' />
             <View style={styles.row}>
-              <PrimaryButton label='Deposit from cash' onPress={() => void onDeposit()} style={{ flex: 1 }} />
+              <PrimaryButton label='Deposit' onPress={() => void onDeposit()} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
-              <PrimaryButton label='Withdraw to cash' onPress={() => void onWithdraw()} variant='danger' style={{ flex: 1 }} />
+              <PrimaryButton label='Withdraw' onPress={() => void onWithdraw()} variant='danger' style={{ flex: 1 }} />
             </View>
           </Card>
         </>
@@ -116,7 +113,6 @@ export function ContractsTradeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 8 },
-  disclaimer: { color: palette.textSecondary, marginBottom: 14, lineHeight: 20 },
   label: { color: palette.textSecondary, marginBottom: 8 },
   big: { color: palette.primary, fontSize: 30, fontWeight: '800' },
   meta: { color: palette.textSecondary, marginBottom: 4 },

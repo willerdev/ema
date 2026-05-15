@@ -6,7 +6,7 @@ const {
 } = require('./db');
 const { getRegion, maskPhone } = require('./localMoneyRegions');
 const { sendSms } = require('./services/twilioSms');
-const { notifyDepositCredited, formatAmount } = require('./depositNotifications');
+const { notifyDepositCredited, notifyWithdrawalOutcome, formatAmount } = require('./depositNotifications');
 
 const COMPLETED_STATUSES = new Set(['completed', 'successful', 'success', 'succeeded']);
 
@@ -74,10 +74,25 @@ async function fulfillLocalMoneyOrder(order, nextStatus, providerPayload) {
   if (order.type === 'withdraw' && COMPLETED_STATUSES.has(status)) {
     const region = getRegion(updated.country_code);
     const label = region?.fiatLabel || updated.fiat_currency;
+    void notifyWithdrawalOutcome({
+      userId: updated.user_id,
+      amount: updated.crypto_amount,
+      asset: updated.crypto_asset || 'usdt',
+      status: 'finished',
+    });
     await notifyOrderSms(
       updated,
-      `Ema: Your withdrawal of ${updated.crypto_amount} USDT (~${updated.fiat_amount} ${label}) to ${maskPhone(updated.phone)} is complete.`
+      `Your withdrawal of ${formatAmount(updated.crypto_amount)} USDT (~${updated.fiat_amount} ${label}) to ${maskPhone(updated.phone)} is complete.`
     );
+  }
+
+  if (order.type === 'withdraw' && (status === 'failed' || status === 'cancelled')) {
+    void notifyWithdrawalOutcome({
+      userId: updated.user_id,
+      amount: updated.crypto_amount,
+      asset: updated.crypto_asset || 'usdt',
+      status: 'failed',
+    });
   }
 
   return updated;

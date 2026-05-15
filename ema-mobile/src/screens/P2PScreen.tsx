@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
@@ -38,6 +38,7 @@ export function P2PScreen() {
     loading,
     locationStatus,
     locationReady,
+    bootstrapComplete,
     detectLocation,
     error,
   } = useLocalMoneyRegion();
@@ -72,6 +73,17 @@ export function P2PScreen() {
       return true;
     });
   }, [offers, sideFilter, assetFilter]);
+
+  if (!bootstrapComplete) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 32 }}>
+        <Card>
+          <ActivityIndicator color={palette.primary} style={{ marginVertical: 16 }} />
+          <Text style={styles.meta}>Loading region…</Text>
+        </Card>
+      </ScrollView>
+    );
+  }
 
   if (!locationReady) {
     return (

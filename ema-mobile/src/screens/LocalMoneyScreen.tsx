@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -39,6 +40,7 @@ export function LocalMoneyScreen() {
     loading: regionLoading,
     locationStatus,
     locationReady,
+    bootstrapComplete,
     detectLocation,
     usdtPairLabel,
     error,
@@ -155,6 +157,17 @@ export function LocalMoneyScreen() {
     region && cryptoAmount.trim()
       ? Math.round(Number(cryptoAmount) * region.usdtToFiatRate)
       : null;
+
+  if (!bootstrapComplete) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+        <Card>
+          <ActivityIndicator color={palette.primary} style={{ marginVertical: 16 }} />
+          <Text style={styles.meta}>Loading region…</Text>
+        </Card>
+      </ScrollView>
+    );
+  }
 
   if (!locationReady) {
     return (

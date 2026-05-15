@@ -24,7 +24,11 @@ const np = require('./services/nowpaymentsClient');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { verifyUserTotp } = require('./totpVerify');
 const { buildWalletActivity, mapPublicActivity } = require('./walletActivity');
-const { notifyDepositCredited } = require('./depositNotifications');
+const {
+  notifyDepositCredited,
+  notifyWithdrawalOutcome,
+  payoutOutcomeAlreadyNotified,
+} = require('./depositNotifications');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -190,6 +194,30 @@ async function syncUncreditedPaymentsForUser(userId, limit = 15) {
   }
 }
 
+const TERMINAL_PAYOUT_STATUSES = ['finished', ...FAILED_PAYOUT_STATUSES];
+
+async function syncPayoutFromProvider(row) {
+  if (!np.configured() || !row?.payout_id) return row;
+  try {
+    const remote = await np.getPayout(row.payout_id);
+    const status = remote.status || remote.payment_status || row.status;
+    await applyPayoutStatusToRow(row, status, remote);
+    return (await getNowpaymentsPayoutForUser(row.user_id, row.id)) || row;
+  } catch (e) {
+    console.warn('NOWPayments getPayout failed', row.payout_id, e.message);
+    return row;
+  }
+}
+
+async function syncPendingPayoutsForUser(userId, limit = 20) {
+  const payouts = await listNowpaymentsPayoutsByUserId(userId, limit);
+  for (const p of payouts) {
+    const st = String(p.status || '').toLowerCase();
+    if (TERMINAL_PAYOUT_STATUSES.includes(st) || !p.payout_id) continue;
+    await syncPayoutFromProvider(p);
+  }
+}
+
 async function finalizePayoutLedger(payoutRow) {
   const existing = await getCryptoLedgerEntryBySource('payout', payoutRow.id, 'out');
   if (existing) return;
@@ -336,6 +364,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
     try {
       if (np.configured()) {
         await syncUncreditedPaymentsForUser(req.userId);
+        await syncPendingPayoutsForUser(req.userId);
       }
       const balances = await getCryptoBalancesByUserId(req.userId);
       const payments = await listNowpaymentsPaymentsByUserId(req.userId, 20);
@@ -581,58 +610,17 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      const userVerifyCode = String(req.body.verificationCode || req.body.payoutVerificationCode || '')
-        .replace(/\s/g, '');
-      const autoVerify =
-        !userVerifyCode &&
-        process.env.NOWPAYMENTS_AUTO_VERIFY_PAYOUT === '1' &&
-        np.payoutVerifyConfigured();
-
-      let status = 'awaiting_verify';
+      let status = String(npResult.status || 'processing').toLowerCase();
       let verifyRaw = null;
 
-      if (userVerifyCode) {
-        try {
-          verifyRaw = await np.verifyPayout(withdrawalId, userVerifyCode);
-          status = String(verifyRaw?.status || 'processing').toLowerCase();
-        } catch (verifyErr) {
-          verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
-          await updateNowpaymentsPayout(payoutRow.id, {
-            payout_id: withdrawalId,
-            batch_payout_id: batchId,
-            status: 'awaiting_verify',
-            raw_last_ipn: { create: npResult, verifyError: verifyErr.message, verify: verifyErr.nowpayments },
-          });
-          return res.status(verifyErr.status || 400).json({
-            message: np.toPublicPayoutError(verifyErr),
-            code: 'PAYOUT_VERIFY_FAILED',
-            id: payoutRow.id,
-            payoutId: withdrawalId,
-            status: 'awaiting_verify',
-            requiresVerification: true,
-          });
-        }
-      } else if (autoVerify) {
+      if (np.payoutVerifyConfigured()) {
         try {
           const verificationCode = np.generatePayoutVerificationCode();
           verifyRaw = await np.verifyPayout(withdrawalId, verificationCode);
           status = String(verifyRaw?.status || 'processing').toLowerCase();
         } catch (verifyErr) {
-          verifyErr.code = verifyErr.code || 'PAYOUT_VERIFY_FAILED';
-          await updateNowpaymentsPayout(payoutRow.id, {
-            payout_id: withdrawalId,
-            batch_payout_id: batchId,
-            status: 'awaiting_verify',
-            raw_last_ipn: { create: npResult, verifyError: verifyErr.message, verify: verifyErr.nowpayments },
-          });
-          return res.status(verifyErr.status || 502).json({
-            message: np.toPublicPayoutError(verifyErr),
-            code: 'PAYOUT_VERIFY_FAILED',
-            id: payoutRow.id,
-            payoutId: withdrawalId,
-            status: 'awaiting_verify',
-            requiresVerification: true,
-          });
+          console.warn('Payout auto-verify failed; payout may stay awaiting_verify', verifyErr.message);
+          status = 'awaiting_verify';
         }
       }
 
@@ -651,7 +639,6 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
-        requiresVerification: !verifyRaw,
         verified: Boolean(verifyRaw),
       });
     } catch (e) {

@@ -2,6 +2,24 @@
  * Unified wallet timeline: ledger entries + in-flight deposits/withdrawals.
  */
 
+function attachRunningBalances(items) {
+  const asc = [...items].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const running = {};
+  for (const row of asc) {
+    const asset = String(row.asset || '').toLowerCase();
+    if (!asset) continue;
+    if (!running[asset]) running[asset] = 0;
+    const n = Number(row.amount);
+    if (!Number.isFinite(n)) continue;
+    if (row.direction === 'in') running[asset] += n;
+    else running[asset] = Math.max(0, running[asset] - n);
+    if (row.status === 'completed' || row.status === 'finished') {
+      row.availableBalance = running[asset];
+    }
+  }
+  return asc.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
 function buildWalletActivity({ ledger = [], payments = [], payouts = [] }) {
   const items = [];
   const payoutIdsSettledInLedger = new Set(
@@ -58,8 +76,7 @@ function buildWalletActivity({ ledger = [], payments = [], payouts = [] }) {
     });
   }
 
-  items.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  return items;
+  return attachRunningBalances(items);
 }
 
 function mapPublicActivity(row) {
@@ -72,6 +89,7 @@ function mapPublicActivity(row) {
     status: row.status,
     source: row.source,
     createdAt: row.createdAt,
+    ...(row.availableBalance != null ? { availableBalance: row.availableBalance } : {}),
   };
 }
 

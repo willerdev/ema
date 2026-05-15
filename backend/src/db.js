@@ -20,6 +20,17 @@ function id() {
   return crypto.randomUUID();
 }
 
+const CROCKFORD_CHARS = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/** @returns {string} Format `EMA-` + 8 Crockford-ish chars (no I,L,O,U). */
+function randomTransferCode() {
+  let suffix = '';
+  for (let i = 0; i < 8; i++) {
+    suffix += CROCKFORD_CHARS[crypto.randomInt(0, CROCKFORD_CHARS.length)];
+  }
+  return `EMA-${suffix}`;
+}
+
 async function getUserByEmail(email) {
   const { data, error } = await supabase.from('users').select('*').eq('email', email).maybeSingle();
   if (error) throw error;
@@ -52,7 +63,11 @@ async function createUser({ email, passwordHash }) {
   const { error: walletError } = await supabase.from('wallets').insert({ id: walletId, user_id: userId, balance: 0 });
   if (walletError) throw walletError;
 
-  return user;
+  await ensureUserTransferCode(userId);
+
+  const { data: fresh, error: freshErr } = await supabase.from('users').select('*').eq('id', userId).maybeSingle();
+  if (freshErr) throw freshErr;
+  return fresh || user;
 }
 
 async function updateAlpacaKeys(userId, apiKey, secretKey) {
@@ -109,6 +124,41 @@ async function ensureWalletForUser(userId) {
 async function setWalletBalance(userId, nextBalance) {
   const { error } = await supabase.from('wallets').update({ balance: nextBalance }).eq('user_id', userId);
   if (error) throw error;
+}
+
+/** Assigns `users.transfer_code` if missing (immutable once set). */
+async function ensureUserTransferCode(userId) {
+  const row = await getUserById(userId);
+  if (!row) return null;
+  if (row.transfer_code) return String(row.transfer_code);
+
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const code = randomTransferCode();
+    const { data, error } = await supabase
+      .from('users')
+      .update({ transfer_code: code })
+      .eq('id', userId)
+      .is('transfer_code', null)
+      .select('transfer_code')
+      .maybeSingle();
+    if (error?.code === '23505') continue;
+    if (error) throw error;
+    if (data?.transfer_code) return String(data.transfer_code);
+    const again = await getUserById(userId);
+    if (again?.transfer_code) return String(again.transfer_code);
+  }
+  throw new Error('Failed to assign transfer code');
+}
+
+async function rpcWalletPeerTransfer({ fromUserId, toTransferCode, amount, idempotencyKey }) {
+  const { data, error } = await supabase.rpc('wallet_peer_transfer', {
+    p_from_user_id: fromUserId,
+    p_to_code: toTransferCode,
+    p_amount: amount,
+    p_idempotency_key: idempotencyKey ?? null,
+  });
+  if (error) throw error;
+  return data;
 }
 
 async function createTransaction({ userId, type, amount, status }) {
@@ -995,6 +1045,8 @@ module.exports = {
   getWalletByUserId,
   ensureWalletForUser,
   setWalletBalance,
+  ensureUserTransferCode,
+  rpcWalletPeerTransfer,
   createTransaction,
   getTransactionsByUserId,
   clearTransactionsByUserId,

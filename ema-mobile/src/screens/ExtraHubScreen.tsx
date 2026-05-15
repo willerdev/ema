@@ -1,6 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '../components/Card';
 import { ExtraStackParamList } from '../types';
@@ -37,36 +38,46 @@ export function ExtraHubScreen() {
   const navigation = useNavigation<Nav>();
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
-      <Text style={styles.title}>Extra</Text>
-      <Text style={styles.sub}>Peer trading and account settings</Text>
+    <SafeAreaView style={styles.safe} edges={['top']}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        <Text style={styles.title}>Extra</Text>
+        <Text style={styles.sub}>Peer trading and account settings</Text>
 
-      <Card style={styles.menuCard}>
-        <ExtraMenuRow
-          title='P2P'
-          subtitle='USDT rates in your local currency'
-          icon='swap-horizontal-outline'
-          onPress={() => navigation.navigate('P2P')}
-        />
-        <ExtraMenuRow
-          title='Mobile money'
-          subtitle='Deposit or withdraw with your phone number'
-          icon='phone-portrait-outline'
-          onPress={() => navigation.navigate('LocalMoney')}
-        />
-        <ExtraMenuRow
-          title='Settings'
-          subtitle='Profile, security, compliance, and more'
-          icon='settings-outline'
-          onPress={() => navigation.navigate('Settings')}
-        />
-      </Card>
-    </ScrollView>
+        <Card style={styles.menuCard}>
+          <ExtraMenuRow
+            title='Send by ID'
+            subtitle='Transfer trading USD to another member'
+            icon='arrow-forward-circle-outline'
+            onPress={() => navigation.navigate('SendById')}
+          />
+          <ExtraMenuRow
+            title='P2P'
+            subtitle='USDT rates in your local currency'
+            icon='swap-horizontal-outline'
+            onPress={() => navigation.navigate('P2P')}
+          />
+          <ExtraMenuRow
+            title='Mobile money'
+            subtitle='Deposit or withdraw with your phone number'
+            icon='phone-portrait-outline'
+            onPress={() => navigation.navigate('LocalMoney')}
+          />
+          <ExtraMenuRow
+            title='Settings'
+            subtitle='Profile, security, compliance, and more'
+            icon='settings-outline'
+            onPress={() => navigation.navigate('Settings')}
+          />
+        </Card>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: palette.background },
+  safe: { flex: 1, backgroundColor: palette.background },
+  scroll: { flex: 1, backgroundColor: palette.background },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 24 },
   title: { color: palette.textPrimary, fontSize: 26, fontWeight: '800', marginBottom: 6 },
   sub: { color: palette.textSecondary, marginBottom: 16, lineHeight: 20 },
   menuCard: { paddingVertical: 4 },

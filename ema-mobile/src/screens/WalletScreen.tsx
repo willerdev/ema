@@ -30,8 +30,9 @@ import {
 } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
+import { WalletActivityList } from '../components/WalletActivityList';
 import { findBalanceForNetwork, maxWithdrawableAmount } from '../utils/walletDisplay';
-import { activitySubtitle, activityTitle, mergeWalletActivity } from '../utils/walletActivity';
+import { mergeWalletActivity } from '../utils/walletActivity';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
@@ -59,9 +60,6 @@ export function WalletScreen() {
   const [withdrawCurrency, setWithdrawCurrency] = useState('usdttrc20');
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
-  const [withdrawStep, setWithdrawStep] = useState<'form' | 'verify'>('form');
-  const [pendingWithdrawalId, setPendingWithdrawalId] = useState<string | null>(null);
-  const [payoutVerifyCode, setPayoutVerifyCode] = useState('');
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
   const [clientIp, setClientIp] = useState<string | null>(null);
   const [withdrawModalMax, setWithdrawModalMax] = useState(0);
@@ -194,18 +192,6 @@ export function WalletScreen() {
   const availableForWithdraw = findBalanceForNetwork(npSummary?.balances, withdrawCurrency);
   const maxWithdraw = maxWithdrawableAmount(availableForWithdraw);
 
-  const resetWithdrawModal = () => {
-    setWithdrawStep('form');
-    setPendingWithdrawalId(null);
-    setPayoutVerifyCode('');
-    setWithdrawSubmitting(false);
-  };
-
-  const closeWithdrawModal = () => {
-    setWithdrawModalOpen(false);
-    resetWithdrawModal();
-  };
-
   const onWithdraw = async () => {
     if (!complianceComplete) {
       alertComplianceRequired();
@@ -230,53 +216,21 @@ export function WalletScreen() {
     try {
       setWithdrawSubmitting(true);
       setNpError(null);
-      const res = await nowpaymentsService.createWithdrawal(
+      await nowpaymentsService.createWithdrawal(
         selected.currency,
         selected.address,
         n,
         totpEnabled ? withdrawTotpCode.replace(/\s/g, '') : undefined
       );
-      const needsVerify =
-        res.requiresVerification === true ||
-        (!res.verified && String(res.status || '').toLowerCase() === 'awaiting_verify');
-      if (needsVerify) {
-        setPendingWithdrawalId(res.id);
-        setWithdrawStep('verify');
-        setPayoutVerifyCode('');
-        showToast('Check your email for the verification code');
-        return;
-      }
       setWithdrawAmount('');
       setSelectedWhitelistId(null);
       setWithdrawTotpCode('');
-      closeWithdrawModal();
+      setWithdrawModalOpen(false);
       await refreshNowpayments();
       showToast('Withdrawal submitted');
     } catch (e: any) {
       if (isComplianceRequiredError(e)) alertComplianceRequired();
       else Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
-    } finally {
-      setWithdrawSubmitting(false);
-    }
-  };
-
-  const onConfirmPayoutVerify = async () => {
-    const code = payoutVerifyCode.replace(/\s/g, '');
-    if (!pendingWithdrawalId || code.length < 4) {
-      Alert.alert('Verification code', 'Enter the code sent to your email.');
-      return;
-    }
-    try {
-      setWithdrawSubmitting(true);
-      await nowpaymentsService.verifyWithdrawal(pendingWithdrawalId, code);
-      setWithdrawAmount('');
-      setSelectedWhitelistId(null);
-      setWithdrawTotpCode('');
-      closeWithdrawModal();
-      await refreshNowpayments();
-      showToast('Withdrawal confirmed');
-    } catch (e: any) {
-      Alert.alert('Verification failed', sanitizeError(e?.message || 'Invalid or expired code'));
     } finally {
       setWithdrawSubmitting(false);
     }
@@ -300,7 +254,7 @@ export function WalletScreen() {
     setSelectedWhitelistId(nextId ?? null);
     setWithdrawModalMax(snapMax);
     setWithdrawModalCurrencyLabel(formatNetworkLabel(withdrawCurrency));
-    resetWithdrawModal();
+    setWithdrawSubmitting(false);
     setWithdrawModalOpen(true);
   };
 
@@ -330,8 +284,6 @@ export function WalletScreen() {
     Boolean(selectedWhitelistId) &&
     walletsForWithdrawCurrency.some((w) => w.id === selectedWhitelistId) &&
     withdrawTotpOk;
-
-  const payoutVerifyReady = payoutVerifyCode.replace(/\s/g, '').length >= 4;
 
   const payAddress = depositStatus?.payAddress || activeDeposit?.payAddress;
   const payAmount = depositStatus?.payAmount || activeDeposit?.payAmount;
@@ -410,15 +362,9 @@ export function WalletScreen() {
           </View>
         </Card>
 
-        <Card>
+        <Card style={styles.activityCard}>
           <Text style={styles.sectionTitle}>Recent activity</Text>
-          {recentActivity.map((row) => (
-            <Text key={row.id} style={styles.item}>
-              {activityTitle(row)} — {row.direction === 'in' ? '+' : '−'}
-              {row.amount} · {activitySubtitle(row)}
-            </Text>
-          ))}
-          {!recentActivity.length && <Text style={styles.item}>No activity yet</Text>}
+          <WalletActivityList rows={recentActivity} />
         </Card>
       </ScrollView>
 
@@ -482,111 +428,77 @@ export function WalletScreen() {
 
       <FormModal
         visible={withdrawModalOpen}
-        title={withdrawStep === 'verify' ? 'Confirm withdrawal' : 'Withdraw'}
+        title='Withdraw'
         avoidKeyboard={false}
-        onClose={closeWithdrawModal}
+        onClose={() => setWithdrawModalOpen(false)}
       >
-        {withdrawStep === 'verify' ? (
-          <>
-            <Text style={styles.hint}>
-              Your withdrawal request was created. Enter the verification code sent to your registered email (usually
-              6 digits, valid about 1 hour).
-            </Text>
-            <TextInput
-              style={inputStyle}
-              value={payoutVerifyCode}
-              onChangeText={setPayoutVerifyCode}
-              placeholder='Email verification code'
-              placeholderTextColor={palette.textSecondary}
-              keyboardType='number-pad'
-              maxLength={10}
-              autoFocus
-            />
-            <PrimaryButton
-              label={withdrawSubmitting ? 'Confirming…' : 'Confirm withdrawal'}
-              onPress={() => void onConfirmPayoutVerify()}
-              disabled={!payoutVerifyReady || withdrawSubmitting}
-            />
-            <PrimaryButton
-              label='Back'
-              onPress={() => {
-                setWithdrawStep('form');
-                setPayoutVerifyCode('');
-              }}
-              style={{ marginTop: 8, opacity: 0.85 }}
-            />
-          </>
+        <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
+        <View style={styles.ipSlot}>
+          <Text style={styles.ipText}>
+            {clientIp
+              ? `Your IP: ${clientIp}\nIf withdrawals fail, ask support to whitelist this IP for payouts.`
+              : 'Loading your IP…'}
+          </Text>
+        </View>
+        <Text style={styles.gasTextModal}>
+          Keep 5% in your wallet for gas. Max withdrawable:{' '}
+          {withdrawModalMax > 0 ? withdrawModalMax.toFixed(6) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
+          can block future deposits.
+        </Text>
+        <TextInput
+          style={inputStyle}
+          value={withdrawAmount}
+          onChangeText={setWithdrawAmount}
+          placeholder='Amount'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='numeric'
+        />
+        <Text style={styles.fieldLabel}>Network</Text>
+        <OptionGrid
+          options={WITHDRAW_CURRENCY_OPTIONS}
+          value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
+          onChange={(c) => {
+            setWithdrawCurrency(c);
+            setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
+            setWithdrawModalMax(maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, c)));
+            const first = whitelistedWallets.find((w) => w.currency === c);
+            setSelectedWhitelistId(first?.id ?? null);
+          }}
+          formatLabel={formatNetworkLabel}
+        />
+        <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
+        {walletsForWithdrawCurrency.length ? (
+          <OptionHighlightList
+            options={walletsForWithdrawCurrency.map((w) => w.id!)}
+            value={selectedWhitelistId || walletsForWithdrawCurrency[0].id!}
+            onChange={setSelectedWhitelistId}
+            formatLabel={(id) => {
+              const w = whitelistedWallets.find((x) => x.id === id);
+              return w?.label || formatNetworkLabel(w?.currency || withdrawCurrency);
+            }}
+          />
         ) : (
-          <>
-            <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
-            <View style={styles.ipSlot}>
-              <Text style={styles.ipText}>
-                {clientIp
-                  ? `Your IP: ${clientIp}\nIf withdrawals fail, ask support to whitelist this IP for payouts.`
-                  : 'Loading your IP…'}
-              </Text>
-            </View>
-            <Text style={styles.gasTextModal}>
-              Keep 5% in your wallet for gas. Max withdrawable:{' '}
-              {withdrawModalMax > 0 ? withdrawModalMax.toFixed(6) : '—'} {withdrawModalCurrencyLabel}. Emptying the
-              wallet can block future deposits.
-            </Text>
-            <TextInput
-              style={inputStyle}
-              value={withdrawAmount}
-              onChangeText={setWithdrawAmount}
-              placeholder='Amount'
-              placeholderTextColor={palette.textSecondary}
-              keyboardType='numeric'
-            />
-            <Text style={styles.fieldLabel}>Network</Text>
-            <OptionGrid
-              options={WITHDRAW_CURRENCY_OPTIONS}
-              value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
-              onChange={(c) => {
-                setWithdrawCurrency(c);
-                setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
-                setWithdrawModalMax(maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, c)));
-                const first = whitelistedWallets.find((w) => w.currency === c);
-                setSelectedWhitelistId(first?.id ?? null);
-              }}
-              formatLabel={formatNetworkLabel}
-            />
-            <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
-            {walletsForWithdrawCurrency.length ? (
-              <OptionHighlightList
-                options={walletsForWithdrawCurrency.map((w) => w.id!)}
-                value={selectedWhitelistId || walletsForWithdrawCurrency[0].id!}
-                onChange={setSelectedWhitelistId}
-                formatLabel={(id) => {
-                  const w = whitelistedWallets.find((x) => x.id === id);
-                  return w?.label || formatNetworkLabel(w?.currency || withdrawCurrency);
-                }}
-              />
-            ) : (
-              <Text style={styles.hint}>Add a {formatNetworkLabel(withdrawCurrency)} wallet in Settings.</Text>
-            )}
-            {selectedWhitelistId ? (
-              <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
-            ) : null}
-            {totpEnabled ? (
-              <TextInput
-                style={inputStyle}
-                value={withdrawTotpCode}
-                onChangeText={setWithdrawTotpCode}
-                placeholder='Authenticator code (app 2FA)'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='number-pad'
-                maxLength={10}
-              />
-            ) : null}
-            <PrimaryButton
-              label={withdrawSubmitting ? 'Submitting…' : 'Continue'}
-              onPress={() => void onWithdraw()}
-              disabled={!withdrawReady || withdrawSubmitting}
-            />
-          </>
+          <Text style={styles.hint}>Add a {formatNetworkLabel(withdrawCurrency)} wallet in Settings.</Text>
         )}
+        {selectedWhitelistId ? (
+          <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
+        ) : null}
+        {totpEnabled ? (
+          <TextInput
+            style={inputStyle}
+            value={withdrawTotpCode}
+            onChangeText={setWithdrawTotpCode}
+            placeholder='Authenticator code'
+            placeholderTextColor={palette.textSecondary}
+            keyboardType='number-pad'
+            maxLength={10}
+          />
+        ) : null}
+        <PrimaryButton
+          label={withdrawSubmitting ? 'Submitting…' : 'Submit withdrawal'}
+          onPress={() => void onWithdraw()}
+          disabled={!withdrawReady || withdrawSubmitting}
+        />
       </FormModal>
     </View>
   );
@@ -596,7 +508,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   label: { color: palette.textSecondary, marginBottom: 8 },
   fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 4, marginBottom: 6, fontWeight: '600' },
-  sectionTitle: { color: palette.textSecondary, marginBottom: 10, fontSize: 16, fontWeight: '700' },
+  sectionTitle: { color: palette.textPrimary, marginBottom: 14, fontSize: 17, fontWeight: '700' },
+  activityCard: { paddingTop: 16, paddingBottom: 8 },
   item: { color: palette.textPrimary, marginBottom: 6 },
   hint: { color: palette.textSecondary, marginTop: 4, marginBottom: 8, fontSize: 12 },
   errorText: { color: '#f87171', marginBottom: 8 },

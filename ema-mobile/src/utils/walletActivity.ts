@@ -1,5 +1,21 @@
 import type { NowpaymentsSummary, WalletActivityRow } from '../types';
+import { palette } from '../theme/colors';
 import { formatLedgerSource } from './walletDisplay';
+
+export function formatAssetDisplay(asset: string): string {
+  const a = String(asset || '').toLowerCase();
+  if (a === 'usdttrc20' || a === 'usdt') return 'USDT';
+  if (a === 'usdterc20') return 'USDT (ERC20)';
+  if (a === 'eth') return 'ETH';
+  if (a === 'btc') return 'BTC';
+  return a.toUpperCase();
+}
+
+function formatAmountDisplay(amount: number): string {
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '0';
+  return n.toFixed(8).replace(/\.?0+$/, '') || '0';
+}
 
 function mergeFromParts(summary: NowpaymentsSummary): WalletActivityRow[] {
   const items: WalletActivityRow[] = [];
@@ -57,10 +73,10 @@ function mergeFromParts(summary: NowpaymentsSummary): WalletActivityRow[] {
 
 export function mergeWalletActivity(summary: NowpaymentsSummary | null | undefined): WalletActivityRow[] {
   if (!summary) return [];
-  if (summary.activity?.length) {
-    return [...summary.activity].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  }
-  return mergeFromParts(summary);
+  const base = summary.activity?.length
+    ? [...summary.activity]
+    : mergeFromParts(summary);
+  return sortActivityNewestFirst(attachRunningBalances(base.map((r) => ({ ...r }))));
 }
 
 export function formatActivityStatus(status: string): string {
@@ -74,18 +90,67 @@ export function formatActivityStatus(status: string): string {
   return status ? status.charAt(0).toUpperCase() + status.slice(1) : 'Pending';
 }
 
-export function activityTitle(row: WalletActivityRow): string {
+export function activityHeadline(row: WalletActivityRow): string {
   const dir = row.direction === 'in' ? 'Deposit' : 'Withdrawal';
-  return `${dir} · ${row.asset.toUpperCase()}`;
+  return `${dir} ${formatAssetDisplay(row.asset)}`;
+}
+
+export function activityTimestamp(createdAt: string): string {
+  const ms = Date.parse(createdAt);
+  if (!Number.isFinite(ms)) return '—';
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+export function activityTypeLine(row: WalletActivityRow): string {
+  const type =
+    row.direction === 'in'
+      ? row.kind === 'payment'
+        ? 'Deposit'
+        : formatLedgerSource(row.source)
+      : 'Withdraw';
+  if (row.availableBalance != null && Number.isFinite(row.availableBalance)) {
+    return `Type ${type} · Available balance ${formatAmountDisplay(row.availableBalance)}`;
+  }
+  const settled = row.status === 'completed' || row.status === 'finished';
+  return settled ? `Type ${type}` : `Type ${type} · ${formatActivityStatus(row.status)}`;
+}
+
+export function activityAmountText(row: WalletActivityRow): { text: string; color: string } {
+  const n = formatAmountDisplay(row.amount);
+  const sign = row.direction === 'in' ? '+' : '-';
+  const color = row.direction === 'in' ? palette.success : palette.danger;
+  return { text: `${sign}${n}`, color };
+}
+
+/** @deprecated use activityHeadline */
+export function activityTitle(row: WalletActivityRow): string {
+  return activityHeadline(row);
 }
 
 export function activitySubtitle(row: WalletActivityRow): string {
-  const time = Number.isFinite(Date.parse(row.createdAt))
-    ? new Date(row.createdAt).toLocaleString()
-    : '—';
-  const status = formatActivityStatus(row.status);
-  if (row.status === 'completed' || row.status === 'finished') {
-    return `${time} · ${formatLedgerSource(row.source)}`;
+  return `${activityTimestamp(row.createdAt)} · ${activityTypeLine(row)}`;
+}
+
+function attachRunningBalances(items: WalletActivityRow[]): WalletActivityRow[] {
+  const asc = [...items].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const running: Record<string, number> = {};
+  for (const row of asc) {
+    const asset = String(row.asset || '').toLowerCase();
+    if (!asset) continue;
+    if (!running[asset]) running[asset] = 0;
+    const n = Number(row.amount);
+    if (!Number.isFinite(n)) continue;
+    if (row.direction === 'in') running[asset] += n;
+    else running[asset] = Math.max(0, running[asset] - n);
+    if (row.status === 'completed' || row.status === 'finished') {
+      row.availableBalance = running[asset];
+    }
   }
-  return `${time} · ${status}`;
+  return asc.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+}
+
+export function sortActivityNewestFirst(rows: WalletActivityRow[]): WalletActivityRow[] {
+  return [...rows].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }

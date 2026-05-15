@@ -3,6 +3,7 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 export type ExtraStackParamList = {
   ExtraHub: undefined;
   P2P: undefined;
+  SendById: undefined;
   LocalMoney: undefined;
   Settings: undefined;
 };
@@ -95,7 +96,7 @@ export interface Order {
 
 export interface WalletTransaction {
   id: string;
-  type: 'deposit' | 'withdraw';
+  type: 'deposit' | 'withdraw' | 'peer_send' | 'peer_receive';
   amount: number;
   status: string;
   created_at: string;
@@ -167,6 +168,7 @@ export interface WalletActivityRow {
   status: string;
   source: string;
   createdAt: string;
+  availableBalance?: number;
 }
 
 export interface NowpaymentsPayoutRow {
