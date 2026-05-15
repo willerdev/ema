@@ -35,6 +35,7 @@ const { getClient, getAuthorizedClient } = require('./services/alpacaClient');
 const { ensureMetaApiAccount, fetchMt5Balance, fetchMt5OpenPositions, placeMetaApiTrade, extractErrorMessage } = require('./services/mt5Client');
 
 const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
+const { registerNowpaymentsRoutes, handlePaymentWebhook, handlePayoutWebhook } = require('./nowpaymentsRoutes');
 const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
 const { registerContractRoutes } = require('./contractRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
@@ -54,6 +55,30 @@ app.post(
   }
 );
 registerMt5EaWebhookRoutes(app);
+app.post(
+  '/webhooks/nowpayments/payment',
+  express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+  (req, res, next) => {
+    handlePaymentWebhook(req, res).catch(next);
+  }
+);
+app.post(
+  '/webhooks/nowpayments/payout',
+  express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => {
+      req.rawBody = buf;
+    },
+  }),
+  (req, res, next) => {
+    handlePayoutWebhook(req, res).catch(next);
+  }
+);
 app.use(express.json());
 
 function alpacaErrorMessage(error, fallback) {
@@ -553,6 +578,7 @@ app.post('/alpaca/orders', async (req, res) => {
 });
 
 registerCryptoRoutes(app, { authMiddleware });
+registerNowpaymentsRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
@@ -572,6 +598,11 @@ app.post('/wallet/deposit', authMiddleware, async (req, res) => {
     const amount = Number(req.body.amount);
     const method = req.body.method || 'bank_transfer';
     const referenceId = req.body.referenceId || `DEP-${Date.now()}`;
+    if (method === 'crypto') {
+      return res.status(400).json({
+        message: 'Crypto deposits use NOWPayments. Open Wallet → Crypto tab to deposit.',
+      });
+    }
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
 
     const wallet = await ensureWalletForUser(req.userId);

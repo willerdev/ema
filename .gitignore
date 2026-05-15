@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 .env
 .env.*
+!.env.example
+!**/.env.example
 *.log
 dist/
 build/
@@ -12,5 +14,6 @@ ema-mobile/android/
 ema-mobile/ios/
 backend/sql/metaapi.txt
 backend/tatum.txt
+coinpayment.txt
 supabase.txt
 **/supabase.txt

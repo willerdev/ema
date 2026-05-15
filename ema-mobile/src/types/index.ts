@@ -119,6 +119,86 @@ export interface CryptoSummary {
   swap: { enabled: boolean; message: string };
 }
 
+export interface NowpaymentsBalanceRow {
+  asset: string;
+  available: string;
+  totalIn: string;
+  totalOut: string;
+  reserved: string;
+}
+
+export interface NowpaymentsPaymentRow {
+  id: string;
+  paymentId: string | null;
+  orderId: string;
+  status: string;
+  payCurrency: string;
+  payAmount: string | null;
+  payAddress: string | null;
+  priceAmount: number;
+  priceCurrency: string;
+  createdAt: string;
+}
+
+export interface NowpaymentsPayoutRow {
+  id: string;
+  payoutId: string | null;
+  status: string;
+  currency: string;
+  address: string;
+  amount: number;
+  createdAt: string;
+}
+
+export interface NowpaymentsLedgerRow {
+  id: string;
+  asset: string;
+  direction: 'in' | 'out';
+  amount: number;
+  source: string;
+  createdAt: string;
+}
+
+export interface NowpaymentsSummary {
+  balances: NowpaymentsBalanceRow[];
+  payments: NowpaymentsPaymentRow[];
+  payouts: NowpaymentsPayoutRow[];
+  ledger: NowpaymentsLedgerRow[];
+  configured: boolean;
+}
+
+export interface NowpaymentsCreateDepositResponse {
+  id: string;
+  paymentId: string | null;
+  orderId: string;
+  payAddress: string | null;
+  payAmount: string | null;
+  payCurrency: string;
+  priceAmount: number;
+  priceCurrency: string;
+  status: string;
+  expirationEstimateDate: string | null;
+}
+
+export interface NowpaymentsDepositStatus {
+  id: string;
+  paymentId: string | null;
+  status: string;
+  payAddress: string | null;
+  payAmount: string | null;
+  payCurrency: string;
+  ledgerCredited: boolean;
+}
+
+export interface NowpaymentsWithdrawalResponse {
+  id: string;
+  payoutId: string | null;
+  status: string;
+  currency: string;
+  address: string;
+  amount: number;
+}
+
 export interface Mt5AccountConfig {
   id?: string;
   login: string;

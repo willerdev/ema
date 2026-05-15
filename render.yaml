@@ -25,3 +25,11 @@ services:
         value: https://api.alpaca.markets
       - key: DEV_RESET_TOKEN
         sync: false
+      - key: APP_BASE_URL
+        value: https://ema-0gp3.onrender.com
+      - key: NOWPAYMENTS_API_KEY
+        sync: false
+      - key: NOWPAYMENTS_IPN_SECRET
+        sync: false
+      - key: NOWPAYMENTS_API_BASE
+        value: https://api.nowpayments.io/v1

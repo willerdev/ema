@@ -14,21 +14,25 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
 import { authService } from '../services/authService';
-import { cryptoWalletService } from '../services/cryptoWalletService';
+import { nowpaymentsService } from '../services/nowpaymentsService';
 import { walletService } from '../services/walletService';
-import { CryptoSummary, WalletTransaction } from '../types';
+import {
+  NowpaymentsCreateDepositResponse,
+  NowpaymentsDepositStatus,
+  NowpaymentsSummary,
+  WalletTransaction,
+} from '../types';
 import { palette } from '../theme/colors';
 
 type WalletTab = 'cash' | 'crypto';
-const SEND_COOLDOWN_MS = 60 * 1000;
-const SEND_COOLDOWN_STORAGE_KEY = 'wallet_crypto_last_send_attempt_at';
+
+const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
 export function WalletScreen() {
   const insets = useSafeAreaInsets();
@@ -36,62 +40,27 @@ export function WalletScreen() {
 
   const [balance, setBalance] = useState<number | null>(null);
   const [amount, setAmount] = useState('');
-  const [withdrawAddress, setWithdrawAddress] = useState('');
-  const [withdrawNetwork, setWithdrawNetwork] = useState('');
-  const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
+  const [cashWithdrawTotpCode, setCashWithdrawTotpCode] = useState('');
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
 
-  const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
-  const [cryptoSendTo, setCryptoSendTo] = useState('');
-  const [cryptoSendAmount, setCryptoSendAmount] = useState('');
-  const [cryptoSendAsset, setCryptoSendAsset] = useState<'ETH' | 'USDT'>('ETH');
-  const [cryptoError, setCryptoError] = useState<string | null>(null);
+  const [npSummary, setNpSummary] = useState<NowpaymentsSummary | null>(null);
+  const [npError, setNpError] = useState<string | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
-  const [receiveModalOpen, setReceiveModalOpen] = useState(false);
-  const [sendModalOpen, setSendModalOpen] = useState(false);
-  const [quickServicesModalOpen, setQuickServicesModalOpen] = useState(false);
-  const [lastSendAttemptAt, setLastSendAttemptAt] = useState<number | null>(null);
-  const [nowMs, setNowMs] = useState(Date.now());
 
-  useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  const [depositUsdAmount, setDepositUsdAmount] = useState('');
+  const [depositPayCurrency, setDepositPayCurrency] = useState('usdttrc20');
+  const [activeDeposit, setActiveDeposit] = useState<NowpaymentsCreateDepositResponse | null>(null);
+  const [depositStatus, setDepositStatus] = useState<NowpaymentsDepositStatus | null>(null);
+  const [depositModalOpen, setDepositModalOpen] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const raw = await AsyncStorage.getItem(SEND_COOLDOWN_STORAGE_KEY);
-        if (!active || !raw) return;
-        const ts = Number(raw);
-        if (!Number.isFinite(ts) || ts <= 0) return;
-        setLastSendAttemptAt(ts);
-      } catch {
-        // no-op
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        if (lastSendAttemptAt) {
-          await AsyncStorage.setItem(SEND_COOLDOWN_STORAGE_KEY, String(lastSendAttemptAt));
-        } else {
-          await AsyncStorage.removeItem(SEND_COOLDOWN_STORAGE_KEY);
-        }
-      } catch {
-        // no-op
-      }
-    })();
-  }, [lastSendAttemptAt]);
+  const [withdrawAmount, setWithdrawAmount] = useState('');
+  const [withdrawCurrency, setWithdrawCurrency] = useState('usdttrc20');
+  const [withdrawAddress, setWithdrawAddress] = useState('');
+  const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
+  const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
 
   const refreshCash = useCallback(async () => {
     try {
@@ -110,31 +79,21 @@ export function WalletScreen() {
     }
   }, []);
 
-  const refreshCrypto = useCallback(async () => {
-    setCryptoError(null);
+  const refreshNowpayments = useCallback(async () => {
+    setNpError(null);
     try {
-      let summary = await cryptoWalletService.getSummary();
-      if (!summary.onboarded) {
-        try {
-          await cryptoWalletService.onboard();
-          summary = await cryptoWalletService.getSummary();
-        } catch (e: any) {
-          setCryptoError(sanitizeCryptoError(e?.message || 'Crypto onboarding failed'));
-          setCryptoSummary(null);
-          return;
-        }
-      }
-      setCryptoSummary(summary);
+      const summary = await nowpaymentsService.getSummary();
+      setNpSummary(summary);
     } catch (e: any) {
-      setCryptoError(sanitizeCryptoError(e?.message || 'Failed to load crypto wallet'));
-      setCryptoSummary(null);
+      setNpError(sanitizeError(e?.message || 'Failed to load crypto wallet'));
+      setNpSummary(null);
     }
   }, []);
 
   const refresh = useCallback(async () => {
     await refreshCash();
-    if (tab === 'crypto') await refreshCrypto();
-  }, [refreshCash, refreshCrypto, tab]);
+    if (tab === 'crypto') await refreshNowpayments();
+  }, [refreshCash, refreshNowpayments, tab]);
 
   usePolling(refresh, 60000, true);
 
@@ -144,111 +103,135 @@ export function WalletScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  const onDeposit = async () => {
+  const pollActiveDeposit = useCallback(async () => {
+    if (!activeDeposit?.id) return;
     try {
-      await walletService.deposit(Number(amount), 'crypto', `REF-${Date.now()}`);
+      const status = await nowpaymentsService.getDeposit(activeDeposit.id);
+      setDepositStatus(status);
+      if (status.ledgerCredited || status.status === 'finished') {
+        await refreshNowpayments();
+      }
+    } catch {
+      // ignore poll errors
+    }
+  }, [activeDeposit?.id, refreshNowpayments]);
+
+  useEffect(() => {
+    if (!depositModalOpen || !activeDeposit?.id) return;
+    void pollActiveDeposit();
+    const t = setInterval(() => void pollActiveDeposit(), 15000);
+    return () => clearInterval(t);
+  }, [depositModalOpen, activeDeposit?.id, pollActiveDeposit]);
+
+  const onCashDeposit = async () => {
+    try {
+      await walletService.deposit(Number(amount), 'bank_transfer', `REF-${Date.now()}`);
+      setAmount('');
       refreshCash();
-      Alert.alert('Done', 'Deposit request completed');
+      Alert.alert('Done', 'Cash deposit recorded');
     } catch (error: any) {
       Alert.alert('Wallet Error', error.message);
     }
   };
 
-  const onWithdraw = async () => {
-    if (!withdrawFormReady) return;
+  const onCashWithdraw = async () => {
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const totpOk = !totpEnabled || cashWithdrawTotpCode.replace(/\s/g, '').length >= 6;
+    if (!totpOk) return;
     try {
-      await walletService.withdraw(Number(amount), 'crypto', {
-        network: withdrawNetwork.trim(),
-        destinationAddress: withdrawAddress.trim(),
-        ...(totpEnabled ? { totpCode: withdrawTotpCode.replace(/\s/g, '') } : {}),
+      await walletService.withdraw(n, 'bank_transfer', {
+        ...(totpEnabled ? { totpCode: cashWithdrawTotpCode.replace(/\s/g, '') } : {}),
       });
-      setWithdrawAddress('');
-      setWithdrawNetwork('');
-      setWithdrawTotpCode('');
       setAmount('');
+      setCashWithdrawTotpCode('');
       refreshCash();
-      Alert.alert('Done', 'Withdrawal request submitted');
+      Alert.alert('Done', 'Cash withdrawal request submitted');
     } catch (error: any) {
       Alert.alert('Wallet Error', error.message);
+    }
+  };
+
+  const onCreateCryptoDeposit = async () => {
+    const priceAmount = Number(depositUsdAmount);
+    if (!Number.isFinite(priceAmount) || priceAmount <= 0) {
+      Alert.alert('Invalid amount', 'Enter a USD amount to deposit.');
+      return;
+    }
+    try {
+      setNpError(null);
+      const created = await nowpaymentsService.createDeposit(priceAmount, depositPayCurrency, 'usd');
+      setActiveDeposit(created);
+      setDepositStatus({
+        id: created.id,
+        paymentId: created.paymentId,
+        status: created.status,
+        payAddress: created.payAddress,
+        payAmount: created.payAmount,
+        payCurrency: created.payCurrency,
+        ledgerCredited: false,
+      });
+      setDepositModalOpen(true);
+      await refreshNowpayments();
+    } catch (e: any) {
+      Alert.alert('Deposit failed', sanitizeError(e?.message || 'Could not create payment'));
+    }
+  };
+
+  const onCryptoWithdraw = async () => {
+    const n = Number(withdrawAmount);
+    if (!Number.isFinite(n) || n <= 0 || !withdrawAddress.trim()) return;
+    const totpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
+    if (!totpOk) return;
+    try {
+      setNpError(null);
+      await nowpaymentsService.createWithdrawal(
+        withdrawCurrency,
+        withdrawAddress.trim(),
+        n,
+        totpEnabled ? withdrawTotpCode.replace(/\s/g, '') : undefined
+      );
+      setWithdrawAmount('');
+      setWithdrawAddress('');
+      setWithdrawTotpCode('');
+      setWithdrawModalOpen(false);
+      await refreshNowpayments();
+      Alert.alert('Submitted', 'Withdrawal sent to NOWPayments. Balance updates when payout completes.');
+    } catch (e: any) {
+      Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
     }
   };
 
   const onCopyAddress = async (addr: string) => {
     try {
       await Clipboard.setStringAsync(addr);
-      setCopyToast('Wallet address copied');
+      setCopyToast('Address copied');
       setTimeout(() => setCopyToast(null), 1800);
     } catch {
-      Alert.alert('Copy failed', 'Could not copy address. Please try again.');
+      Alert.alert('Copy failed', 'Could not copy address.');
     }
   };
 
-  const onCryptoSend = async () => {
-    if (!sendWindowOpen) {
-      setCryptoError(`Send window opens in ${sendCooldownSec}s. Please wait before sending again.`);
-      return;
-    }
-    setLastSendAttemptAt(Date.now());
-    try {
-      setCryptoError(null);
-      const r = await cryptoWalletService.send(cryptoSendTo.trim(), cryptoSendAmount.trim(), cryptoSendAsset);
-      setCryptoSendTo('');
-      setCryptoSendAmount('');
-      setCryptoError('Transaction submitted. Activity and balances update after network confirmation.');
-      Alert.alert('Sent', r.txId ? `Tx: ${r.txId}` : 'Transaction submitted');
-      setSendModalOpen(false);
-    } catch (e: any) {
-      setCryptoError(sanitizeCryptoError(e?.message || 'Send failed'));
-    }
-  };
-
-  function sanitizeCryptoError(raw: string) {
+  function sanitizeError(raw: string) {
     const text = String(raw || '');
-    const lower = text.toLowerCase();
-    if (lower.includes('too many requests') || lower.includes('429') || lower.includes('exceeded maximum retry limit')) {
-      return 'Provider rate limit reached. Please wait about 1 minute and tap Retry.';
-    }
-    if (lower.includes('missing revert data') || lower.includes('call_exception')) {
-      return 'Transfer failed on-chain. Check USDT amount and ETH gas, then retry.';
-    }
-    if (lower.includes('missing token') || lower.includes('unauthorized') || lower.includes('401')) {
-      return 'Your session expired. Please log in again.';
-    }
-    return text.length > 180 ? 'Crypto service is temporarily unavailable. Please retry shortly.' : text;
+    if (text.length > 200) return 'Service temporarily unavailable. Please retry.';
+    return text;
   }
 
-  const receiveWallets = cryptoSummary?.wallets ?? [];
-  const ethReceiveWallet = receiveWallets.find((w) => String(w.asset).toUpperCase() === 'ETH');
-  const usdtReceiveWallet =
-    receiveWallets.find(
-      (w) => String(w.asset).toUpperCase() === 'USDT' && String(w.chain).toUpperCase() === 'TRON'
-    ) || receiveWallets.find((w) => String(w.asset).toUpperCase() === 'USDT');
-  const primaryWalletAddress =
-    cryptoSummary?.depositAddress || ethReceiveWallet?.address || receiveWallets[0]?.address || null;
-  const ethReceiveAddress = ethReceiveWallet?.address || primaryWalletAddress;
-  const usdtTrc20ReceiveAddress = usdtReceiveWallet?.address || null;
-  const usdtReceiveSubtitle =
-    String(usdtReceiveWallet?.chain || '').toUpperCase() === 'TRON' ? 'TRC20 (Tron)' : `USDT (${usdtReceiveWallet?.chain || 'network'})`;
-  const ethBalance = cryptoSummary?.balances.find((b) => b.asset === 'ETH')?.balance || '0';
-  const usdtBalance = cryptoSummary?.balances.find((b) => b.asset === 'USDT')?.balance || '0';
-  const totalBalanceDisplay = (() => {
-    const total = (parseFloat(ethBalance) || 0) + (parseFloat(usdtBalance) || 0);
-    return Number.isFinite(total) ? total.toFixed(4) : '0.0000';
-  })();
-  const msSinceSendAttempt = lastSendAttemptAt ? nowMs - lastSendAttemptAt : Number.POSITIVE_INFINITY;
-  const sendCooldownLeftMs = Math.max(0, SEND_COOLDOWN_MS - msSinceSendAttempt);
-  const sendCooldownSec = Math.ceil(sendCooldownLeftMs / 1000);
-  const sendWindowOpen = sendCooldownLeftMs <= 0;
+  const cashWithdrawTotpOk = !totpEnabled || cashWithdrawTotpCode.replace(/\s/g, '').length >= 6;
+  const cashAmountOk = amount.trim().length > 0 && Number.isFinite(Number(amount)) && Number(amount) > 0;
 
-  const withdrawAmountNum = Number(amount);
-  const withdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
-  const withdrawFormReady =
-    amount.trim().length > 0 &&
-    Number.isFinite(withdrawAmountNum) &&
-    withdrawAmountNum > 0 &&
+  const cryptoWithdrawTotpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
+  const cryptoWithdrawReady =
+    withdrawAmount.trim().length > 0 &&
+    Number.isFinite(Number(withdrawAmount)) &&
+    Number(withdrawAmount) > 0 &&
     withdrawAddress.trim().length > 0 &&
-    withdrawNetwork.trim().length > 0 &&
-    withdrawTotpOk;
+    cryptoWithdrawTotpOk;
+
+  const payAddress = depositStatus?.payAddress || activeDeposit?.payAddress;
+  const payAmount = depositStatus?.payAmount || activeDeposit?.payAmount;
+  const payStatus = depositStatus?.status || activeDeposit?.status || 'waiting';
 
   return (
     <View style={styles.container}>
@@ -256,176 +239,149 @@ export function WalletScreen() {
         contentContainerStyle={{ padding: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
-      <View style={styles.tabRow}>
-        <Text
-          style={[styles.tab, tab === 'cash' && styles.tabActive]}
-          onPress={() => {
-            setTab('cash');
-            void refreshCash();
-          }}
-        >
-          Cash wallet
-        </Text>
-        <Text style={[styles.tab, tab === 'crypto' && styles.tabActive]} onPress={() => { setTab('crypto'); void refreshCrypto(); }}>
-          Crypto (ETH / USDT)
-        </Text>
-      </View>
+        <View style={styles.tabRow}>
+          <Text
+            style={[styles.tab, tab === 'cash' && styles.tabActive]}
+            onPress={() => {
+              setTab('cash');
+              void refreshCash();
+            }}
+          >
+            Cash wallet
+          </Text>
+          <Text
+            style={[styles.tab, tab === 'crypto' && styles.tabActive]}
+            onPress={() => {
+              setTab('crypto');
+              void refreshNowpayments();
+            }}
+          >
+            Crypto
+          </Text>
+        </View>
 
-      {tab === 'cash' ? (
-        <>
-          <Card>
-            <Text style={styles.label}>Cash wallet balance</Text>
-            <Text style={styles.balance}>{balance === null ? '--' : `$${balance.toFixed(2)}`}</Text>
-            <Text style={styles.item}>Synced from your saved cash balance on the server.</Text>
-            <Text style={styles.item}>{lastUpdatedAt ? `Status: ${Date.now() - lastUpdatedAt > 20000 ? 'stale' : 'live'}` : 'Status: unavailable'}</Text>
-          </Card>
-
-          <Card>
-            <Text style={styles.label}>Deposit / Withdraw</Text>
-            <TextInput style={styles.input} value={amount} onChangeText={setAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} keyboardType='numeric' />
-            <Text style={styles.withdrawSectionLabel}>Withdraw details (required to withdraw)</Text>
-            <TextInput
-              style={styles.input}
-              value={withdrawNetwork}
-              onChangeText={setWithdrawNetwork}
-              placeholder='Network (e.g. Ethereum, Tron TRC20)'
-              placeholderTextColor={palette.textSecondary}
-              autoCapitalize='words'
-            />
-            <TextInput
-              style={styles.input}
-              value={withdrawAddress}
-              onChangeText={setWithdrawAddress}
-              placeholder='Destination address'
-              placeholderTextColor={palette.textSecondary}
-              autoCapitalize='none'
-            />
-            {totpEnabled ? (
-              <>
-                <Text style={styles.withdrawSectionLabel}>Authenticator (required)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={withdrawTotpCode}
-                  onChangeText={setWithdrawTotpCode}
-                  placeholder='6-digit Google Authenticator code'
-                  placeholderTextColor={palette.textSecondary}
-                  keyboardType='number-pad'
-                  maxLength={10}
-                />
-              </>
-            ) : null}
-            <View style={styles.actions}>
-              <PrimaryButton
-                label='Deposit'
-                onPress={onDeposit}
-                style={{ flex: 1 }}
-                disabled={!amount.trim() || !Number.isFinite(Number(amount)) || Number(amount) <= 0}
-              />
-              <View style={{ width: 8 }} />
-              <PrimaryButton label='Withdraw' onPress={onWithdraw} variant='danger' style={{ flex: 1 }} disabled={!withdrawFormReady} />
-            </View>
-          </Card>
-
-          <Card>
-            <Text style={styles.label}>Transaction History</Text>
-            {transactions.map((t) => (
-              <Text key={t.id} style={styles.item}>{t.type.toUpperCase()} ${Number(t.amount).toFixed(2)} - {t.status} - {new Date(t.created_at).toLocaleDateString()}</Text>
-            ))}
-            {!transactions.length && <Text style={styles.item}>No transactions yet</Text>}
-          </Card>
-        </>
-      ) : (
-        <>
-          {cryptoError ? (
+        {tab === 'cash' ? (
+          <>
             <Card>
-              <Text style={styles.errorText}>{cryptoError}</Text>
-              <PrimaryButton label='Retry' onPress={() => void refreshCrypto()} />
+              <Text style={styles.label}>Cash wallet balance</Text>
+              <Text style={styles.balance}>{balance === null ? '--' : `$${balance.toFixed(2)}`}</Text>
+              <Text style={styles.item}>Internal USD ledger for airfarming and contracts.</Text>
+              <Text style={styles.hint}>Crypto deposits and withdrawals are on the Crypto tab (NOWPayments).</Text>
             </Card>
-          ) : null}
 
-          {cryptoSummary?.onboarded ? (
-            <>
-              <Card style={styles.heroCard}>
-                <Text style={styles.heroCaption}>Crypto Wallet Balance</Text>
-                <Text style={styles.heroBalance}>{totalBalanceDisplay}</Text>
-                <View style={styles.heroMetaRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.heroMetaLabel}>Receive · ETH (Ethereum)</Text>
-                    <Text style={styles.heroMetaValue}>
-                      {ethReceiveAddress ? `${ethReceiveAddress.slice(0, 8)}…${ethReceiveAddress.slice(-6)}` : 'Not ready'}
-                    </Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.heroMetaLabel}>Receive · {usdtReceiveSubtitle}</Text>
-                    <Text style={styles.heroMetaValue}>
-                      {usdtTrc20ReceiveAddress
-                        ? `${usdtTrc20ReceiveAddress.slice(0, 6)}…${usdtTrc20ReceiveAddress.slice(-6)}`
-                        : '—'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.rateRow}>
-                  <View style={[styles.rateDot, sendWindowOpen ? styles.rateDotReady : styles.rateDotCooling]} />
-                  <Text style={styles.rateText}>
-                    {sendWindowOpen
-                      ? 'Withdraw window open (safe to send)'
-                      : `Cooling down: wait ${sendCooldownSec}s before next send`}
-                  </Text>
-                </View>
-                <View style={styles.quickActionsRow}>
-                  <PrimaryButton label='Receive' onPress={() => setReceiveModalOpen(true)} style={{ flex: 1 }} />
-                  <View style={{ width: 8 }} />
-                  <PrimaryButton label='Send' onPress={() => setSendModalOpen(true)} style={{ flex: 1 }} />
-                </View>
-              </Card>
+            <Card>
+              <Text style={styles.label}>Cash deposit / withdraw</Text>
+              <TextInput
+                style={styles.input}
+                value={amount}
+                onChangeText={setAmount}
+                placeholder='Amount (USD)'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='numeric'
+              />
+              {totpEnabled ? (
+                <>
+                  <Text style={styles.withdrawSectionLabel}>Authenticator (required for withdraw)</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={cashWithdrawTotpCode}
+                    onChangeText={setCashWithdrawTotpCode}
+                    placeholder='6-digit code'
+                    placeholderTextColor={palette.textSecondary}
+                    keyboardType='number-pad'
+                    maxLength={10}
+                  />
+                </>
+              ) : null}
+              <View style={styles.actions}>
+                <PrimaryButton label='Deposit' onPress={onCashDeposit} style={{ flex: 1 }} disabled={!cashAmountOk} />
+                <View style={{ width: 8 }} />
+                <PrimaryButton
+                  label='Withdraw'
+                  onPress={onCashWithdraw}
+                  variant='danger'
+                  style={{ flex: 1 }}
+                  disabled={!cashAmountOk || !cashWithdrawTotpOk}
+                />
+              </View>
+            </Card>
 
+            <Card>
+              <Text style={styles.label}>Transaction History</Text>
+              {transactions.map((t) => (
+                <Text key={t.id} style={styles.item}>
+                  {t.type.toUpperCase()} ${Number(t.amount).toFixed(2)} - {t.status} -{' '}
+                  {new Date(t.created_at).toLocaleDateString()}
+                </Text>
+              ))}
+              {!transactions.length && <Text style={styles.item}>No transactions yet</Text>}
+            </Card>
+          </>
+        ) : (
+          <>
+            {npError ? (
               <Card>
-                <Text style={styles.sectionTitle}>Assets</Text>
-                <View style={styles.assetGrid}>
-                  <View style={styles.assetTile}>
-                    <Text style={styles.assetLabel}>ETH</Text>
-                    <Text style={styles.assetValue}>{ethBalance}</Text>
-                    <Text style={styles.assetSub}>Main wallet</Text>
-                  </View>
-                  <View style={styles.assetTile}>
-                    <Text style={styles.assetLabel}>USDT</Text>
-                    <Text style={styles.assetValue}>{usdtBalance}</Text>
-                    <Text style={styles.assetSub}>Wallet ready by default</Text>
-                  </View>
-                </View>
+                <Text style={styles.errorText}>{npError}</Text>
+                <PrimaryButton label='Retry' onPress={() => void refreshNowpayments()} />
               </Card>
+            ) : null}
 
-              <Card>
-                <Text style={styles.sectionTitle}>Options</Text>
-                <Text style={styles.item}>Open quick actions to send, receive, or check services.</Text>
-                <PrimaryButton label='Open Quick Services' onPress={() => setQuickServicesModalOpen(true)} />
-              </Card>
+            <Card style={styles.heroCard}>
+              <Text style={styles.heroCaption}>Crypto balances (NOWPayments)</Text>
+              {npSummary?.balances?.length ? (
+                npSummary.balances.map((b) => (
+                  <View key={b.asset} style={styles.balanceRow}>
+                    <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
+                    <Text style={styles.assetValue}>{b.available}</Text>
+                    {Number(b.reserved) > 0 ? (
+                      <Text style={styles.assetSub}>Reserved: {b.reserved}</Text>
+                    ) : null}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.item}>No crypto balance yet. Create a deposit below.</Text>
+              )}
+              <View style={styles.quickActionsRow}>
+                <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
+                <View style={{ width: 8 }} />
+                <PrimaryButton label='Withdraw' onPress={() => setWithdrawModalOpen(true)} style={{ flex: 1 }} />
+              </View>
+            </Card>
 
-              <Card>
-                <Text style={styles.sectionTitle}>Recent Activity</Text>
-                {cryptoSummary.activity.map((t) => (
-                  <Text key={t.id} style={styles.item}>
-                    {t.direction.toUpperCase()} {t.amountDisplay} {t.asset} — {(t.txHash || '').slice(0, 10)}…
+            <Card>
+              <Text style={styles.sectionTitle}>Recent activity</Text>
+              {npSummary?.ledger?.slice(0, 12).map((e) => (
+                <Text key={e.id} style={styles.item}>
+                  {e.direction.toUpperCase()} {e.amount} {e.asset} ({e.source})
+                </Text>
+              ))}
+              {!npSummary?.ledger?.length && <Text style={styles.item}>No ledger entries yet</Text>}
+            </Card>
+
+            <Card>
+              <Text style={styles.sectionTitle}>Pending deposits</Text>
+              {npSummary?.payments
+                ?.filter((p) => !['finished', 'failed', 'expired', 'refunded'].includes(p.status))
+                .map((p) => (
+                  <Text key={p.id} style={styles.item}>
+                    {p.payCurrency} {p.payAmount || p.priceAmount} — {p.status}
                   </Text>
                 ))}
-                {!cryptoSummary.activity.length && <Text style={styles.item}>No recorded transfers yet</Text>}
-              </Card>
-            </>
-          ) : cryptoError ? null : (
-            <Card>
-              <Text style={styles.item}>Preparing your crypto wallet…</Text>
+              {!npSummary?.payments?.some(
+                (p) => !['finished', 'failed', 'expired', 'refunded'].includes(p.status)
+              ) && <Text style={styles.item}>None</Text>}
             </Card>
-          )}
-        </>
-      )}
+          </>
+        )}
       </ScrollView>
+
       {copyToast ? (
         <View style={styles.toastWrap}>
           <Text style={styles.toastText}>{copyToast}</Text>
         </View>
       ) : null}
 
-      <Modal visible={receiveModalOpen} transparent animationType='fade' onRequestClose={() => setReceiveModalOpen(false)}>
+      <Modal visible={depositModalOpen} transparent animationType='fade' onRequestClose={() => setDepositModalOpen(false)}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -436,57 +392,73 @@ export function WalletScreen() {
               style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
               onPress={() => {
                 Keyboard.dismiss();
-                setReceiveModalOpen(false);
+                setDepositModalOpen(false);
               }}
             />
             <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
-              <ScrollView
-                keyboardShouldPersistTaps='handled'
-                style={{ maxHeight: '92%', width: '100%' }}
-                contentContainerStyle={{ flexGrow: 0 }}
-                showsVerticalScrollIndicator={false}
-              >
+              <ScrollView keyboardShouldPersistTaps='handled' style={{ maxHeight: '92%' }} showsVerticalScrollIndicator={false}>
                 <View style={styles.modalCard}>
-                  <Text style={styles.modalTitle}>Receive Crypto</Text>
-                  <Text style={styles.receiveIntro}>Use the address for the network you are sending on.</Text>
-
-                  <View style={[styles.receiveBlock, styles.receiveBlockFirst]}>
-                    <Text style={styles.receiveBlockTitle}>ETH · Ethereum</Text>
-                    <Text style={styles.modalMono}>{ethReceiveAddress || 'Not available'}</Text>
-                    {ethReceiveAddress ? (
-                      <View style={styles.qrWrap}>
-                        <QRCode value={ethReceiveAddress} size={140} color='#111827' backgroundColor='white' />
+                  <Text style={styles.modalTitle}>Crypto deposit</Text>
+                  {!activeDeposit ? (
+                    <>
+                      <Text style={styles.hint}>Amount is priced in USD; you pay in the selected cryptocurrency.</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={depositUsdAmount}
+                        onChangeText={setDepositUsdAmount}
+                        placeholder='Amount in USD'
+                        placeholderTextColor={palette.textSecondary}
+                        keyboardType='numeric'
+                      />
+                      <Text style={styles.withdrawSectionLabel}>Pay with</Text>
+                      <View style={styles.row}>
+                        {PAY_CURRENCY_OPTIONS.map((c) => (
+                          <Text
+                            key={c}
+                            style={[styles.pill, depositPayCurrency === c && styles.active]}
+                            onPress={() => setDepositPayCurrency(c)}
+                          >
+                            {c}
+                          </Text>
+                        ))}
                       </View>
-                    ) : null}
-                    <PrimaryButton
-                      label='Copy ETH address'
-                      onPress={() => {
-                        if (ethReceiveAddress) void onCopyAddress(ethReceiveAddress);
-                      }}
-                      disabled={!ethReceiveAddress}
-                      style={{ marginTop: 8 }}
-                    />
-                  </View>
-
-                  <View style={styles.receiveBlock}>
-                    <Text style={styles.receiveBlockTitle}>USDT · {usdtReceiveSubtitle}</Text>
-                    <Text style={styles.modalMono}>{usdtTrc20ReceiveAddress || 'Not available'}</Text>
-                    {usdtTrc20ReceiveAddress ? (
-                      <View style={styles.qrWrap}>
-                        <QRCode value={usdtTrc20ReceiveAddress} size={140} color='#111827' backgroundColor='white' />
-                      </View>
-                    ) : null}
-                    <PrimaryButton
-                      label='Copy USDT (TRC20) address'
-                      onPress={() => {
-                        if (usdtTrc20ReceiveAddress) void onCopyAddress(usdtTrc20ReceiveAddress);
-                      }}
-                      disabled={!usdtTrc20ReceiveAddress}
-                      style={{ marginTop: 8 }}
-                    />
-                  </View>
-
-                  <PrimaryButton label='Dismiss' onPress={() => setReceiveModalOpen(false)} style={{ marginTop: 12 }} />
+                      <PrimaryButton label='Create payment' onPress={() => void onCreateCryptoDeposit()} />
+                    </>
+                  ) : (
+                    <>
+                      <Text style={styles.item}>Status: {payStatus}</Text>
+                      <Text style={styles.item}>
+                        Send {payAmount || '—'} {activeDeposit.payCurrency} to:
+                      </Text>
+                      <Text style={styles.modalMono}>{payAddress || 'Address pending…'}</Text>
+                      {payAddress ? (
+                        <View style={styles.qrWrap}>
+                          <QRCode value={payAddress} size={140} color='#111827' backgroundColor='white' />
+                        </View>
+                      ) : null}
+                      <PrimaryButton
+                        label='Copy address'
+                        onPress={() => {
+                          if (payAddress) void onCopyAddress(payAddress);
+                        }}
+                        disabled={!payAddress}
+                      />
+                      <PrimaryButton label='Refresh status' onPress={() => void pollActiveDeposit()} style={{ marginTop: 8 }} />
+                      {depositStatus?.ledgerCredited ? (
+                        <Text style={styles.hint}>Payment credited to your crypto balance.</Text>
+                      ) : null}
+                      <PrimaryButton
+                        label='New deposit'
+                        onPress={() => {
+                          setActiveDeposit(null);
+                          setDepositStatus(null);
+                          setDepositUsdAmount('');
+                        }}
+                        style={{ marginTop: 8 }}
+                      />
+                    </>
+                  )}
+                  <PrimaryButton label='Close' onPress={() => setDepositModalOpen(false)} style={{ marginTop: 12 }} />
                 </View>
               </ScrollView>
             </View>
@@ -494,7 +466,7 @@ export function WalletScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={sendModalOpen} transparent animationType='fade' onRequestClose={() => setSendModalOpen(false)}>
+      <Modal visible={withdrawModalOpen} transparent animationType='fade' onRequestClose={() => setWithdrawModalOpen(false)}>
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -505,91 +477,58 @@ export function WalletScreen() {
               style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
               onPress={() => {
                 Keyboard.dismiss();
-                setSendModalOpen(false);
+                setWithdrawModalOpen(false);
               }}
             />
             <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
               <View style={styles.modalCard}>
-                <Text style={styles.modalTitle}>Send Crypto</Text>
-                <TextInput style={styles.input} value={cryptoSendTo} onChangeText={setCryptoSendTo} placeholder='To address 0x…' placeholderTextColor={palette.textSecondary} autoCapitalize='none' />
-                <TextInput style={styles.input} value={cryptoSendAmount} onChangeText={setCryptoSendAmount} placeholder='Amount' placeholderTextColor={palette.textSecondary} />
+                <Text style={styles.modalTitle}>Crypto withdraw</Text>
+                <Text style={styles.hint}>Requires NOWPayments custody balance on the merchant account.</Text>
+                <TextInput
+                  style={styles.input}
+                  value={withdrawAmount}
+                  onChangeText={setWithdrawAmount}
+                  placeholder='Amount'
+                  placeholderTextColor={palette.textSecondary}
+                  keyboardType='numeric'
+                />
+                <Text style={styles.withdrawSectionLabel}>Currency</Text>
                 <View style={styles.row}>
-                  {(['ETH', 'USDT'] as const).map((a) => (
-                    <Text key={a} style={[styles.pill, cryptoSendAsset === a && styles.active]} onPress={() => setCryptoSendAsset(a)}>{a}</Text>
+                  {PAY_CURRENCY_OPTIONS.map((c) => (
+                    <Text
+                      key={c}
+                      style={[styles.pill, withdrawCurrency === c && styles.active]}
+                      onPress={() => setWithdrawCurrency(c)}
+                    >
+                      {c}
+                    </Text>
                   ))}
                 </View>
-                <Text style={styles.cooldownHint}>
-                  {sendWindowOpen ? 'Window open: send is enabled.' : `Window closed: send unlocks in ${sendCooldownSec}s.`}
-                </Text>
-                <View style={styles.modalButtonRow}>
-                  <PrimaryButton
-                    label='Send on-chain'
-                    onPress={onCryptoSend}
-                    disabled={!cryptoSendTo.trim() || !cryptoSendAmount.trim() || !sendWindowOpen}
-                    style={{ flex: 1 }}
+                <TextInput
+                  style={styles.input}
+                  value={withdrawAddress}
+                  onChangeText={setWithdrawAddress}
+                  placeholder='Destination address'
+                  placeholderTextColor={palette.textSecondary}
+                  autoCapitalize='none'
+                />
+                {totpEnabled ? (
+                  <TextInput
+                    style={styles.input}
+                    value={withdrawTotpCode}
+                    onChangeText={setWithdrawTotpCode}
+                    placeholder='Authenticator code'
+                    placeholderTextColor={palette.textSecondary}
+                    keyboardType='number-pad'
+                    maxLength={10}
                   />
-                  <View style={{ width: 8 }} />
-                  <PrimaryButton label='Dismiss' onPress={() => setSendModalOpen(false)} style={{ flex: 1 }} />
-                </View>
+                ) : null}
+                <PrimaryButton label='Submit withdrawal' onPress={() => void onCryptoWithdraw()} disabled={!cryptoWithdrawReady} />
+                <PrimaryButton label='Cancel' onPress={() => setWithdrawModalOpen(false)} style={{ marginTop: 8 }} />
               </View>
             </View>
           </View>
         </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={quickServicesModalOpen} transparent animationType='fade' onRequestClose={() => setQuickServicesModalOpen(false)}>
-        <View style={{ flex: 1 }}>
-          <Pressable
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.6)' }]}
-            onPress={() => setQuickServicesModalOpen(false)}
-          />
-          <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'center', padding: 20 }]}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Quick Services</Text>
-              <View style={styles.serviceRow}>
-                <Pressable
-                  style={styles.servicePill}
-                  onPress={() => {
-                    setQuickServicesModalOpen(false);
-                    setReceiveModalOpen(true);
-                  }}
-                >
-                  <Text style={styles.servicePillText}>Receive</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.servicePill}
-                  onPress={() => {
-                    setCryptoSendAsset('ETH');
-                    setQuickServicesModalOpen(false);
-                    setSendModalOpen(true);
-                  }}
-                >
-                  <Text style={styles.servicePillText}>Send ETH</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.servicePill}
-                  onPress={() => {
-                    setCryptoSendAsset('USDT');
-                    setQuickServicesModalOpen(false);
-                    setSendModalOpen(true);
-                  }}
-                >
-                  <Text style={styles.servicePillText}>Send USDT</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.servicePill}
-                  onPress={() => {
-                    setQuickServicesModalOpen(false);
-                    Alert.alert('Swap', 'Swap is currently unavailable.');
-                  }}
-                >
-                  <Text style={styles.servicePillText}>Swap</Text>
-                </Pressable>
-              </View>
-              <PrimaryButton label='Dismiss' onPress={() => setQuickServicesModalOpen(false)} style={{ marginTop: 12 }} />
-            </View>
-          </View>
-        </View>
       </Modal>
     </View>
   );
@@ -610,33 +549,15 @@ const styles = StyleSheet.create({
   pill: { color: palette.textPrimary, borderColor: palette.border, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
   active: { borderColor: palette.primary, color: palette.primary },
   item: { color: palette.textPrimary, marginBottom: 6 },
-  mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12 },
   hint: { color: palette.textSecondary, marginTop: 8, fontSize: 12 },
   errorText: { color: '#f87171', marginBottom: 8 },
   heroCard: { paddingTop: 18, paddingBottom: 18 },
-  heroCaption: { color: palette.textSecondary, marginBottom: 6, fontSize: 15 },
-  heroBalance: { color: palette.textPrimary, fontSize: 40, fontWeight: '800', marginBottom: 14 },
-  heroMetaRow: { flexDirection: 'row', gap: 12, borderTopWidth: 1, borderTopColor: palette.border, paddingTop: 12, marginBottom: 12 },
-  heroMetaLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 4 },
-  heroMetaValue: { color: palette.textPrimary, fontSize: 14, fontWeight: '600' },
-  rateRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
-  rateDot: { width: 10, height: 10, borderRadius: 999, marginRight: 8 },
-  rateDotReady: { backgroundColor: '#22c55e' },
-  rateDotCooling: { backgroundColor: '#ef4444' },
-  rateText: { color: palette.textSecondary, fontSize: 12, fontWeight: '600' },
-  quickActionsRow: { flexDirection: 'row' },
-  assetGrid: { flexDirection: 'row', gap: 10 },
-  assetTile: { flex: 1, backgroundColor: palette.surfaceElevated, borderRadius: 12, borderWidth: 1, borderColor: palette.border, padding: 12 },
-  assetLabel: { color: palette.textSecondary, fontSize: 13, marginBottom: 4 },
-  assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 4 },
+  heroCaption: { color: palette.textSecondary, marginBottom: 12, fontSize: 15 },
+  balanceRow: { marginBottom: 10 },
+  assetLabel: { color: palette.textSecondary, fontSize: 13 },
+  assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700' },
   assetSub: { color: palette.textSecondary, fontSize: 12 },
-  serviceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  servicePill: { borderRadius: 999, borderWidth: 1, borderColor: palette.border, backgroundColor: palette.surfaceElevated, paddingVertical: 10, paddingHorizontal: 14 },
-  servicePillText: { color: palette.textPrimary, fontWeight: '600' },
-  receiveIntro: { color: palette.textSecondary, fontSize: 13, marginBottom: 6, lineHeight: 18 },
-  receiveBlock: { marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: palette.border },
-  receiveBlockFirst: { marginTop: 0, paddingTop: 0, borderTopWidth: 0 },
-  receiveBlockTitle: { color: palette.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 8 },
+  quickActionsRow: { flexDirection: 'row', marginTop: 12 },
   modalCard: {
     backgroundColor: palette.surface,
     borderRadius: 16,
@@ -645,12 +566,8 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   modalTitle: { color: palette.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 10 },
-  modalLabel: { color: palette.textSecondary, marginTop: 6, marginBottom: 2, fontSize: 13 },
-  modalValue: { color: palette.textPrimary, fontWeight: '600' },
-  modalMono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12 },
-  cooldownHint: { color: palette.textSecondary, marginBottom: 8, fontSize: 12 },
+  modalMono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
   qrWrap: { alignItems: 'center', marginVertical: 12 },
-  modalButtonRow: { flexDirection: 'row', marginTop: 8 },
   toastWrap: {
     position: 'absolute',
     left: 16,

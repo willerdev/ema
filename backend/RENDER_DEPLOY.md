@@ -99,7 +99,27 @@ Run `backend/sql/schema.sql` (or `backend/sql/migrate_airfarming_contracts.sql` 
 
 - **`INTERNAL_CRON_SECRET`** — shared secret for `POST /internal/contracts/daily-accrue`. Send header `x-internal-cron-secret: <value>` or JSON body `{ "secret": "<value>" }`. Configure a Render **Cron Job** (or external scheduler) to call this once per day in UTC so contract balances accrue **2%** per day (idempotent per user per UTC date).
 
-## 8) Production hardening checklist
+## 8) NOWPayments (crypto wallet)
+
+Set on Render for service **ema-0gp3**:
+
+- `APP_BASE_URL=https://ema-0gp3.onrender.com`
+- `NOWPAYMENTS_API_KEY` — from NOWPayments dashboard
+- `NOWPAYMENTS_IPN_SECRET` — Payment Settings → IPN secret (must match dashboard)
+- `NOWPAYMENTS_API_BASE=https://api.nowpayments.io/v1` (or sandbox URL for testing)
+
+**IPN webhook URLs** (paste into NOWPayments Payment Settings / IPN callback):
+
+| Use | URL |
+|-----|-----|
+| Deposits | `https://ema-0gp3.onrender.com/webhooks/nowpayments/payment` |
+| Withdrawals | `https://ema-0gp3.onrender.com/webhooks/nowpayments/payout` |
+
+Run `backend/sql/migrations/20260515_nowpayments_wallet.sql` in Supabase. See `backend/docs/NOWPAYMENTS.md`.
+
+Withdrawals need **Custody** enabled and funded in the NOWPayments dashboard.
+
+## 9) Production hardening checklist
 
 - Disable or strictly guard dev-only endpoints (`/wallet/reset`)
 - Rotate secrets if they were ever shared in plain text

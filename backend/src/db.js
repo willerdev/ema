@@ -500,6 +500,215 @@ async function listContractWalletsWithPositiveBalance() {
   return data || [];
 }
 
+// --- NOWPayments crypto ledger ---
+
+async function insertNowpaymentsPayment(row) {
+  const { data, error } = await supabase.from('nowpayments_payments').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPaymentById(id) {
+  const { data, error } = await supabase.from('nowpayments_payments').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPaymentByOrderId(orderId) {
+  const { data, error } = await supabase.from('nowpayments_payments').select('*').eq('order_id', orderId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPaymentByNpId(paymentId) {
+  const { data, error } = await supabase
+    .from('nowpayments_payments')
+    .select('*')
+    .eq('payment_id', String(paymentId))
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPaymentForUser(userId, id) {
+  const { data, error } = await supabase
+    .from('nowpayments_payments')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function updateNowpaymentsPayment(id, patch) {
+  const { data, error } = await supabase
+    .from('nowpayments_payments')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listNowpaymentsPaymentsByUserId(userId, limit = 30) {
+  const { data, error } = await supabase
+    .from('nowpayments_payments')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function insertNowpaymentsPayout(row) {
+  const { data, error } = await supabase.from('nowpayments_payouts').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPayoutByUniqueId(uniqueExternalId) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('unique_external_id', uniqueExternalId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPayoutByNpId(payoutId) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('payout_id', String(payoutId))
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getNowpaymentsPayoutForUser(userId, id) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function updateNowpaymentsPayout(id, patch) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listNowpaymentsPayoutsByUserId(userId, limit = 30) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function listPendingNowpaymentsPayoutsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('nowpayments_payouts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('reserve_released', false)
+    .in('status', ['pending', 'processing', 'creating', 'sending', 'waiting']);
+  if (error) throw error;
+  return data || [];
+}
+
+async function insertCryptoLedgerEntry(row) {
+  const { data, error } = await supabase.from('crypto_ledger_entries').insert(row).select('*').single();
+  if (error) {
+    if (error.code === '23505') return null;
+    throw error;
+  }
+  return data;
+}
+
+async function getCryptoLedgerEntryBySource(source, sourceId, direction) {
+  const { data, error } = await supabase
+    .from('crypto_ledger_entries')
+    .select('*')
+    .eq('source', source)
+    .eq('source_id', sourceId)
+    .eq('direction', direction)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function listCryptoLedgerEntriesByUserId(userId, limit = 100) {
+  const { data, error } = await supabase
+    .from('crypto_ledger_entries')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+/** Available balance per asset: ledger in - ledger out - pending payout reserves. */
+async function getCryptoBalancesByUserId(userId) {
+  const [ledgerResult, pendingPayouts] = await Promise.all([
+    supabase.from('crypto_ledger_entries').select('asset, direction, amount').eq('user_id', userId),
+    listPendingNowpaymentsPayoutsByUserId(userId),
+  ]);
+  if (ledgerResult.error) throw ledgerResult.error;
+
+  const byAsset = {};
+  for (const row of ledgerResult.data || []) {
+    const asset = String(row.asset || '').toLowerCase();
+    if (!asset) continue;
+    const n = Number(row.amount);
+    if (!Number.isFinite(n)) continue;
+    if (!byAsset[asset]) byAsset[asset] = { in: 0, out: 0, reserved: 0 };
+    if (row.direction === 'in') byAsset[asset].in += n;
+    else if (row.direction === 'out') byAsset[asset].out += n;
+  }
+
+  for (const p of pendingPayouts) {
+    const asset = String(p.currency || '').toLowerCase();
+    const n = Number(p.amount);
+    if (!asset || !Number.isFinite(n)) continue;
+    if (!byAsset[asset]) byAsset[asset] = { in: 0, out: 0, reserved: 0 };
+    byAsset[asset].reserved += n;
+  }
+
+  const balances = [];
+  const allAssets = new Set([...Object.keys(byAsset)]);
+  for (const asset of allAssets) {
+    const { in: ins = 0, out: outs = 0, reserved = 0 } = byAsset[asset] || {};
+    const available = Math.max(0, ins - outs - reserved);
+    balances.push({
+      asset,
+      available: String(available),
+      totalIn: String(ins),
+      totalOut: String(outs),
+      reserved: String(reserved),
+    });
+  }
+  balances.sort((a, b) => a.asset.localeCompare(b.asset));
+  return balances;
+}
+
 module.exports = {
   getUserByEmail,
   getUserById,
@@ -548,4 +757,22 @@ module.exports = {
   getContractAccrualForUserDay,
   insertContractAccrual,
   listContractWalletsWithPositiveBalance,
+  insertNowpaymentsPayment,
+  getNowpaymentsPaymentById,
+  getNowpaymentsPaymentByOrderId,
+  getNowpaymentsPaymentByNpId,
+  getNowpaymentsPaymentForUser,
+  updateNowpaymentsPayment,
+  listNowpaymentsPaymentsByUserId,
+  insertNowpaymentsPayout,
+  getNowpaymentsPayoutByUniqueId,
+  getNowpaymentsPayoutByNpId,
+  updateNowpaymentsPayout,
+  getNowpaymentsPayoutForUser,
+  listNowpaymentsPayoutsByUserId,
+  listPendingNowpaymentsPayoutsByUserId,
+  insertCryptoLedgerEntry,
+  getCryptoLedgerEntryBySource,
+  listCryptoLedgerEntriesByUserId,
+  getCryptoBalancesByUserId,
 };
