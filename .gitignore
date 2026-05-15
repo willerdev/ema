@@ -10,10 +10,13 @@ dist/
 build/
 .expo/
 ema-mobile/.expo/
+ema-mobile/expo
+ema-mobile/ema-mobile@*
 ema-mobile/android/
 ema-mobile/ios/
 backend/sql/metaapi.txt
 backend/tatum.txt
 coinpayment.txt
+backend/sms_mobilemoney.txt
 supabase.txt
 **/supabase.txt

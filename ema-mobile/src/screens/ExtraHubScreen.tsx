@@ -1,0 +1,92 @@
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
+import { Card } from '../components/Card';
+import { ExtraStackParamList } from '../types';
+import { palette } from '../theme/colors';
+
+type Nav = NativeStackNavigationProp<ExtraStackParamList, 'ExtraHub'>;
+
+function ExtraMenuRow({
+  title,
+  subtitle,
+  icon,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.row} onPress={onPress}>
+      <View style={styles.iconWrap}>
+        <Ionicons name={icon} size={22} color={palette.primary} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowTitle}>{title}</Text>
+        <Text style={styles.rowSubtitle}>{subtitle}</Text>
+      </View>
+      <Text style={styles.chevron}>›</Text>
+    </Pressable>
+  );
+}
+
+export function ExtraHubScreen() {
+  const navigation = useNavigation<Nav>();
+
+  return (
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 16 }}>
+      <Text style={styles.title}>Extra</Text>
+      <Text style={styles.sub}>Peer trading and account settings</Text>
+
+      <Card style={styles.menuCard}>
+        <ExtraMenuRow
+          title='P2P'
+          subtitle='USDT rates in your local currency'
+          icon='swap-horizontal-outline'
+          onPress={() => navigation.navigate('P2P')}
+        />
+        <ExtraMenuRow
+          title='Mobile money'
+          subtitle='Deposit or withdraw with your phone number'
+          icon='phone-portrait-outline'
+          onPress={() => navigation.navigate('LocalMoney')}
+        />
+        <ExtraMenuRow
+          title='Settings'
+          subtitle='Profile, security, compliance, and more'
+          icon='settings-outline'
+          onPress={() => navigation.navigate('Settings')}
+        />
+      </Card>
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: palette.background },
+  title: { color: palette.textPrimary, fontSize: 26, fontWeight: '800', marginBottom: 6 },
+  sub: { color: palette.textSecondary, marginBottom: 16, lineHeight: 20 },
+  menuCard: { paddingVertical: 4 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+    gap: 12,
+  },
+  iconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: palette.surfaceElevated,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowTitle: { color: palette.textPrimary, fontSize: 17, fontWeight: '700' },
+  rowSubtitle: { color: palette.textSecondary, fontSize: 13, marginTop: 2 },
+  chevron: { color: palette.textSecondary, fontSize: 22 },
+});

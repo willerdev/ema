@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -17,6 +17,7 @@ import { whitelistWalletService } from '../services/whitelistWalletService';
 import { useToast } from '../hooks/useToast';
 import {
   ComplianceProfile,
+  ExtraStackParamList,
   PlannedInvestmentDuration,
   RootStackParamList,
   SourceOfFunds,
@@ -64,8 +65,13 @@ function SettingsRow({
   );
 }
 
+type SettingsNav = CompositeNavigationProp<
+  NativeStackNavigationProp<ExtraStackParamList, 'Settings'>,
+  NativeStackNavigationProp<RootStackParamList>
+>;
+
 export function SettingsScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<SettingsNav>();
   const { user, logout } = useAuth();
   const { showToast } = useToast();
   const [aboutModal, setAboutModal] = useState<AboutSectionKey | null>(null);

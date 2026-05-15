@@ -53,6 +53,7 @@ const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
 const { registerComplianceRoutes } = require('./complianceRoutes');
 const { registerWhitelistWalletRoutes } = require('./whitelistWalletRoutes');
 const { registerNotificationRoutes } = require('./notificationRoutes');
+const { registerLocalMoneyRoutes, handleFlutterwaveWebhook } = require('./localMoneyRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
 
@@ -95,6 +96,9 @@ app.post(
     handlePayoutWebhook(req, res).catch(next);
   }
 );
+app.post('/webhooks/flutterwave', express.json({ limit: '2mb' }), (req, res, next) => {
+  handleFlutterwaveWebhook(req, res).catch(next);
+});
 app.use(express.json());
 
 function alpacaErrorMessage(error, fallback) {
@@ -605,6 +609,7 @@ app.post('/alpaca/orders', async (req, res) => {
 registerCryptoRoutes(app, { authMiddleware });
 registerNowpaymentsRoutes(app, { authMiddleware });
 registerComplianceRoutes(app, { authMiddleware });
+registerLocalMoneyRoutes(app, { authMiddleware });
 registerWhitelistWalletRoutes(app, { authMiddleware });
 registerNotificationRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });

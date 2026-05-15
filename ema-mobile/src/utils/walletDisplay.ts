@@ -2,6 +2,8 @@
 export function formatLedgerSource(source: string): string {
   const s = String(source || '').toLowerCase();
   if (!s || s.includes('nowpayment') || s.includes('np_')) return 'Wallet';
+  if (s.includes('local_deposit')) return 'Mobile deposit';
+  if (s.includes('local_withdraw')) return 'Mobile withdrawal';
   if (s.includes('deposit')) return 'Deposit';
   if (s.includes('withdraw') || s.includes('payout')) return 'Withdrawal';
   if (s.includes('airfarm')) return 'Airfarming';

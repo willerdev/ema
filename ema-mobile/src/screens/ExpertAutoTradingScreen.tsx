@@ -21,6 +21,7 @@ import { useToast } from '../hooks/useToast';
 import { mt5Service } from '../services/mt5Service';
 import type { RootStackParamList } from '../types';
 import { palette } from '../theme/colors';
+import { withTimeout } from '../utils/withTimeout';
 
 const STORAGE_ACTIVE = 'ema_expert_ea_active';
 const STORAGE_DERIVED = 'ema_expert_ea_derived';
@@ -67,6 +68,7 @@ export function ExpertAutoTradingScreen() {
   const navigation = useNavigation<Nav>();
   const { showToast } = useToast();
   const [mt5Connected, setMt5Connected] = useState<boolean | null>(null);
+  const [mt5CheckDone, setMt5CheckDone] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
@@ -117,12 +119,15 @@ export function ExpertAutoTradingScreen() {
   }, []);
 
   const checkMt5 = useCallback(async () => {
+    setMt5CheckDone(false);
     try {
-      const list = await mt5Service.listAccounts();
+      const list = await withTimeout(mt5Service.listAccounts(), 5000, 'MT5 accounts');
       const rows = list.accounts || [];
       setMt5Connected(rows.length > 0);
     } catch {
       setMt5Connected(false);
+    } finally {
+      setMt5CheckDone(true);
     }
   }, []);
 
@@ -266,30 +271,25 @@ export function ExpertAutoTradingScreen() {
           within the parameters you define.
         </Text>
 
-        {mt5Connected === null ? (
-          <Card>
-            <Text style={styles.meta}>Checking MT5 connection…</Text>
-          </Card>
-        ) : null}
+        {!mt5CheckDone ? <Text style={styles.checkingMeta}>Checking saved MT5 account…</Text> : null}
 
-        {mt5Connected === false ? (
+        {mt5CheckDone && !mt5Connected ? (
           <Card>
-            <Text style={styles.cardTitle}>Connect MT5 first</Text>
+            <Text style={styles.cardTitle}>Save MT5 details first</Text>
             <Text style={styles.meta}>
-              Link your MetaTrader 5 account on the MT5 tab, then return to Expert Account Manager to configure risk and
-              activate the expert.
+              Add your MetaTrader 5 login on the MT5 tab (saved offline). Live sync is optional — you can connect later.
             </Text>
-            <PrimaryButton label='Connect MT5' onPress={goMt5} style={{ marginTop: 12 }} />
+            <PrimaryButton label='Open MT5' onPress={goMt5} style={{ marginTop: 12 }} />
           </Card>
         ) : null}
 
-        {mt5Connected === true && !prefsLoaded ? (
+        {!prefsLoaded ? (
           <Card>
-            <Text style={styles.meta}>Loading…</Text>
+            <Text style={styles.meta}>Loading settings…</Text>
           </Card>
         ) : null}
 
-        {mt5Connected === true && prefsLoaded ? (
+        {prefsLoaded ? (
           <>
             <Card>
               <Text style={styles.cardTitle}>Risk parameters</Text>
@@ -466,6 +466,7 @@ const styles = StyleSheet.create({
   sub: { color: palette.textSecondary, lineHeight: 20, marginBottom: 16 },
   cardTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
   meta: { color: palette.textSecondary, lineHeight: 20 },
+  checkingMeta: { color: palette.textSecondary, fontSize: 12, marginBottom: 10 },
   fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 10, marginBottom: 4, fontWeight: '600' },
   input: {
     backgroundColor: palette.surfaceElevated,

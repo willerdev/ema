@@ -24,6 +24,8 @@ import { useToast } from '../hooks/useToast';
 import { mt5Service } from '../services/mt5Service';
 import { Mt5AccountConfig, Mt5Balance, Mt5HistoryDeal, Mt5Position } from '../types';
 import { palette } from '../theme/colors';
+import { isMt5LivePaused, setMt5LivePaused } from '../utils/mt5LiveSession';
+import { withTimeout } from '../utils/withTimeout';
 
 type Mt5Panel = 'balance' | 'positions' | 'history';
 
@@ -62,12 +64,13 @@ export function MT5Screen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closingId, setClosingId] = useState<string | null>(null);
-  const [status, setStatus] = useState('Connect an MT5 account to view live data.');
+  const [liveConnected, setLiveConnected] = useState(false);
+  const [status, setStatus] = useState('Save your MT5 details, then connect live when you are ready.');
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
 
   const loadAccounts = useCallback(async () => {
-    const list = await mt5Service.listAccounts();
+    const list = await withTimeout(mt5Service.listAccounts(), 8000, 'MT5 accounts');
     const rows = list.accounts || [];
     setAccounts(rows);
     if (!rows.length) {
@@ -77,8 +80,19 @@ export function MT5Screen() {
     setSelectedAccountId((prev) => (rows.some((a) => a.id === prev) ? prev : rows[0].id || ''));
   }, []);
 
+  const loadCachedBalance = useCallback(async (accountId: string) => {
+    const snap = await mt5Service.getBalance(accountId);
+    setBalance({
+      ...snap,
+      isLive: false,
+    });
+    const updated = snap.updatedAt ? `Saved · ${formatTime(snap.updatedAt)}` : 'Saved — connect live to sync';
+    setStatus(updated);
+    return snap;
+  }, []);
+
   const loadLiveBalance = useCallback(async (accountId: string) => {
-    const live = await mt5Service.refreshBalance(accountId);
+    const live = await withTimeout(mt5Service.refreshBalance(accountId), 45000, 'MT5 live sync');
     setBalance(live);
     setStatus(`Live · ${new Date().toLocaleTimeString()}`);
     return live;
@@ -95,13 +109,18 @@ export function MT5Screen() {
   }, []);
 
   const refreshPanel = useCallback(
-    async (accountId: string, target: Mt5Panel) => {
+    async (accountId: string, target: Mt5Panel, live: boolean) => {
       if (!accountId) return;
+      if (!live) {
+        if (target === 'balance') await loadCachedBalance(accountId);
+        else setStatus('Connect live to load positions and history.');
+        return;
+      }
       if (target === 'balance') await loadLiveBalance(accountId);
       else if (target === 'positions') await loadPositions(accountId);
       else await loadHistory(accountId);
     },
-    [loadLiveBalance, loadPositions, loadHistory]
+    [loadCachedBalance, loadLiveBalance, loadPositions, loadHistory]
   );
 
   const refreshAll = useCallback(async () => {
@@ -116,6 +135,8 @@ export function MT5Screen() {
   useFocusEffect(
     useCallback(() => {
       void (async () => {
+        const paused = await isMt5LivePaused();
+        setLiveConnected(!paused);
         await refreshAll();
       })();
     }, [refreshAll])
@@ -124,10 +145,10 @@ export function MT5Screen() {
   useEffect(() => {
     if (!selectedAccountId) return;
     setLoading(true);
-    void refreshPanel(selectedAccountId, panel)
+    void refreshPanel(selectedAccountId, panel, liveConnected)
       .catch((error: any) => setStatus(String(error?.message || 'Failed to load MT5 data')))
       .finally(() => setLoading(false));
-  }, [selectedAccountId]);
+  }, [selectedAccountId, liveConnected]);
 
   const onPullRefresh = useCallback(async () => {
     if (!selectedAccountId) {
@@ -138,13 +159,13 @@ export function MT5Screen() {
     }
     setRefreshing(true);
     try {
-      await refreshPanel(selectedAccountId, panel);
+      await refreshPanel(selectedAccountId, panel, liveConnected);
     } catch (error: any) {
       Alert.alert('MT5', String(error?.message || 'Refresh failed'));
     } finally {
       setRefreshing(false);
     }
-  }, [selectedAccountId, panel, refreshPanel, refreshAll]);
+  }, [selectedAccountId, panel, liveConnected, refreshPanel, refreshAll]);
 
   const selectPanel = async (next: Mt5Panel) => {
     setPanel(next);
@@ -155,7 +176,7 @@ export function MT5Screen() {
     }
     setLoading(true);
     try {
-      await refreshPanel(selectedAccountId, next);
+      await refreshPanel(selectedAccountId, next, liveConnected);
     } catch (error: any) {
       Alert.alert('MT5', String(error?.message || 'Failed to load data'));
     } finally {
@@ -163,9 +184,46 @@ export function MT5Screen() {
     }
   };
 
+  const onConnectLive = async () => {
+    if (!selectedAccountId) {
+      Alert.alert('MT5', 'Select or save an account first.');
+      return;
+    }
+    setLoading(true);
+    try {
+      await setMt5LivePaused(false);
+      setLiveConnected(true);
+      await refreshPanel(selectedAccountId, panel, true);
+      showToast('Connected to live MT5 data');
+    } catch (error: any) {
+      setLiveConnected(false);
+      await setMt5LivePaused(true);
+      Alert.alert('Live connection failed', String(error?.message || 'Try again later.'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onDisconnectLive = async () => {
+    await setMt5LivePaused(true);
+    setLiveConnected(false);
+    setPositions([]);
+    setHistory([]);
+    if (selectedAccountId) {
+      await loadCachedBalance(selectedAccountId).catch(() => {
+        setBalance(null);
+        setStatus('Disconnected — saved details kept. Connect live when ready.');
+      });
+    } else {
+      setBalance(null);
+      setStatus('Disconnected — connect live when ready.');
+    }
+    showToast('Live MT5 disconnected');
+  };
+
   usePolling(() => {
-    if (!selectedAccountId || addOpen || fabOpen) return;
-    void refreshPanel(selectedAccountId, panel).catch(() => {});
+    if (!selectedAccountId || !liveConnected || addOpen || fabOpen) return;
+    void refreshPanel(selectedAccountId, panel, true).catch(() => {});
   }, 15000, true);
 
   const onSaveAccount = async () => {
@@ -182,13 +240,16 @@ export function MT5Screen() {
       setPassword('');
       setServer('');
       setAccountName('');
+      await setMt5LivePaused(true);
+      setLiveConnected(false);
       await loadAccounts();
       const id = saved.account?.id || '';
       if (id) {
         setSelectedAccountId(id);
-        await refreshPanel(id, 'balance');
+        setPanel('balance');
+        await loadCachedBalance(id);
       }
-      showToast('MT5 account connected');
+      showToast('MT5 details saved — tap Connect live when ready');
     } catch (error: any) {
       Alert.alert('MT5 Error', error?.message || 'Failed to save MT5 account');
     } finally {
@@ -222,7 +283,7 @@ export function MT5Screen() {
 
   const renderBalance = () => (
     <Card>
-      <Text style={styles.cardTitle}>Live balance</Text>
+      <Text style={styles.cardTitle}>{liveConnected ? 'Live balance' : 'Account balance'}</Text>
       {loading && !balance ? <ActivityIndicator color={palette.primary} style={{ marginVertical: 12 }} /> : null}
       <Text style={styles.balanceMain}>
         {balance ? `${balance.currency} ${balance.balance.toFixed(2)}` : '—'}
@@ -230,7 +291,22 @@ export function MT5Screen() {
       <Text style={styles.meta}>Equity: {balance ? `${balance.currency} ${balance.equity.toFixed(2)}` : '—'}</Text>
       <Text style={styles.meta}>Login: {balance?.login || selectedAccount?.login || '—'}</Text>
       <Text style={styles.meta}>Server: {balance?.server || selectedAccount?.server || '—'}</Text>
+      <Text style={styles.meta}>
+        {liveConnected ? 'Live connection active' : 'Offline — showing saved details only'}
+      </Text>
       <Text style={styles.meta}>{status}</Text>
+      <View style={styles.liveRow}>
+        {liveConnected ? (
+          <PrimaryButton compact label='Disconnect' variant='danger' onPress={() => void onDisconnectLive()} />
+        ) : (
+          <PrimaryButton
+            compact
+            label={loading ? 'Connecting…' : 'Connect live'}
+            onPress={() => void onConnectLive()}
+            disabled={loading || !selectedAccountId}
+          />
+        )}
+      </View>
     </Card>
   );
 
@@ -308,7 +384,7 @@ export function MT5Screen() {
                 onPress={() => {
                   if (!account.id) return;
                   setSelectedAccountId(account.id);
-                  void refreshPanel(account.id, panel);
+                  void refreshPanel(account.id, panel, liveConnected);
                 }}
               >
                 <Text style={styles.accountTitle}>{account.accountName || account.login}</Text>
@@ -371,8 +447,8 @@ export function MT5Screen() {
                 return;
               }
               setLoading(true);
-              void refreshPanel(selectedAccountId, panel)
-                .then(() => showToast('Refreshed'))
+              void refreshPanel(selectedAccountId, panel, liveConnected)
+                .then(() => showToast(liveConnected ? 'Refreshed live data' : 'Reloaded saved details'))
                 .catch((e: any) => Alert.alert('MT5', e?.message || 'Refresh failed'))
                 .finally(() => setLoading(false));
             }}
@@ -415,12 +491,15 @@ export function MT5Screen() {
           />
           <View style={[styles.modalSheet, { paddingBottom: Math.max(16, insets.bottom + 10) }]}>
             <Text style={styles.cardTitle}>Add MT5 account</Text>
+            <Text style={styles.meta}>
+              Your login details are saved securely. Live sync runs only when you tap Connect live.
+            </Text>
             <TextInput style={styles.input} value={login} onChangeText={setLogin} placeholder='MT5 Login ID' placeholderTextColor={palette.textSecondary} />
             <TextInput style={styles.input} value={password} onChangeText={setPassword} placeholder='MT5 Password' secureTextEntry placeholderTextColor={palette.textSecondary} />
             <TextInput style={styles.input} value={server} onChangeText={setServer} placeholder='Broker server' placeholderTextColor={palette.textSecondary} />
             <TextInput style={styles.input} value={accountName} onChangeText={setAccountName} placeholder='Label (optional)' placeholderTextColor={palette.textSecondary} />
             <View style={styles.modalRow}>
-              <PrimaryButton label={loading ? 'Saving…' : 'Save'} onPress={() => void onSaveAccount()} disabled={loading} style={{ flex: 1 }} />
+              <PrimaryButton label={loading ? 'Saving…' : 'Save details'} onPress={() => void onSaveAccount()} disabled={loading} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
               <PrimaryButton label='Cancel' onPress={() => setAddOpen(false)} variant='danger' style={{ flex: 1 }} />
             </View>
@@ -438,6 +517,7 @@ const styles = StyleSheet.create({
   cardTitle: { color: palette.textPrimary, fontSize: 17, fontWeight: '700', marginBottom: 8 },
   meta: { color: palette.textSecondary, marginBottom: 4, fontSize: 13 },
   balanceMain: { color: palette.textPrimary, fontSize: 34, fontWeight: '800', marginVertical: 8 },
+  liveRow: { flexDirection: 'row', marginTop: 12, gap: 8 },
   input: {
     backgroundColor: palette.surfaceElevated,
     borderWidth: 1,

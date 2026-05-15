@@ -6,7 +6,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
 import { MT5Screen } from '../screens/MT5Screen';
-import { SettingsScreen } from '../screens/SettingsScreen';
+import { ExtraStackNavigator } from './ExtraStackNavigator';
 import { palette } from '../theme/colors';
 import { RootTabParamList } from '../types';
 
@@ -17,7 +17,7 @@ const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyph
   Trades: 'stats-chart',
   Wallet: 'wallet',
   MT5: 'analytics',
-  Settings: 'settings',
+  Extra: 'grid',
 };
 
 const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
@@ -25,7 +25,7 @@ const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.gly
   Trades: 'stats-chart-outline',
   Wallet: 'wallet-outline',
   MT5: 'analytics-outline',
-  Settings: 'settings-outline',
+  Extra: 'grid-outline',
 };
 
 export function MainTabNavigator() {
@@ -72,7 +72,11 @@ export function MainTabNavigator() {
       <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
       <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
       <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
-      <Tab.Screen name='Settings' component={SettingsScreen} options={{ tabBarLabel: 'Settings' }} />
+      <Tab.Screen
+        name='Extra'
+        component={ExtraStackNavigator}
+        options={{ tabBarLabel: 'Extra', headerShown: false }}
+      />
     </Tab.Navigator>
   );
 }

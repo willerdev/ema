@@ -1,11 +1,18 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
+export type ExtraStackParamList = {
+  ExtraHub: undefined;
+  P2P: undefined;
+  LocalMoney: undefined;
+  Settings: undefined;
+};
+
 export type RootTabParamList = {
   Home: undefined;
   Trades: undefined;
   Wallet: undefined;
   MT5: undefined;
-  Settings: undefined;
+  Extra: NavigatorScreenParams<ExtraStackParamList> | undefined;
 };
 
 export type RootStackParamList = {

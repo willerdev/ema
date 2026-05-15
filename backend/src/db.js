@@ -692,6 +692,20 @@ async function getCryptoBalancesByUserId(userId) {
     byAsset[asset].reserved += n;
   }
 
+  let pendingLocal = [];
+  try {
+    pendingLocal = await listPendingLocalMoneyWithdrawalsByUserId(userId);
+  } catch (e) {
+    if (!isMissingTableError(e)) throw e;
+  }
+  for (const o of pendingLocal) {
+    const asset = String(o.crypto_asset || 'usdt').toLowerCase();
+    const n = Number(o.crypto_amount);
+    if (!Number.isFinite(n)) continue;
+    if (!byAsset[asset]) byAsset[asset] = { in: 0, out: 0, reserved: 0 };
+    byAsset[asset].reserved += n;
+  }
+
   const balances = [];
   const allAssets = new Set([...Object.keys(byAsset)]);
   for (const asset of allAssets) {
@@ -867,6 +881,83 @@ async function listNotificationsForUser(userId, limit = 100) {
   return out;
 }
 
+// --- Local mobile money (deposit / withdraw to phone) ---
+
+async function insertLocalMoneyOrder(row) {
+  const { data, error } = await supabase.from('local_money_orders').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateLocalMoneyOrder(id, patch) {
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function getLocalMoneyOrderForUser(id, userId) {
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .select('*')
+    .eq('id', id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getLocalMoneyOrderByReference(reference) {
+  const ref = String(reference || '').trim();
+  if (!ref) return null;
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .select('*')
+    .eq('provider_reference', ref)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getLocalMoneyOrderByChargeId(chargeId) {
+  const id = String(chargeId || '').trim();
+  if (!id) return null;
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .select('*')
+    .eq('provider_charge_id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function listLocalMoneyOrdersByUserId(userId, limit = 30) {
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function listPendingLocalMoneyWithdrawalsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('local_money_orders')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('type', 'withdraw')
+    .eq('ledger_posted', true)
+    .in('status', ['pending', 'awaiting_approval', 'processing']);
+  if (error) throw error;
+  return data || [];
+}
+
 async function createAppNotification({ userId, title, body }) {
   const row = {
     user_id: userId || null,
@@ -955,4 +1046,11 @@ module.exports = {
   MAX_WHITELISTED_WALLETS_PER_USER,
   listNotificationsForUser,
   createAppNotification,
+  insertLocalMoneyOrder,
+  updateLocalMoneyOrder,
+  getLocalMoneyOrderForUser,
+  getLocalMoneyOrderByReference,
+  getLocalMoneyOrderByChargeId,
+  listLocalMoneyOrdersByUserId,
+  listPendingLocalMoneyWithdrawalsByUserId,
 };
