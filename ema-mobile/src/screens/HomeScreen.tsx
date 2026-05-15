@@ -7,23 +7,12 @@ import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { nowpaymentsService } from '../services/nowpaymentsService';
 import { useTradingStore } from '../store/useTradingStore';
-import type { NowpaymentsLedgerRow, NowpaymentsSummary } from '../types';
+import type { NowpaymentsSummary, WalletActivityRow } from '../types';
 import { palette } from '../theme/colors';
 import { sanitizeUserFacingError } from '../utils/userFacingError';
-import { formatLedgerSource } from '../utils/walletDisplay';
+import { activitySubtitle, activityTitle, formatActivityStatus, mergeWalletActivity } from '../utils/walletActivity';
 
 const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v2';
-
-function formatLedgerTime(createdAt: string) {
-  const ms = Date.parse(createdAt);
-  if (!Number.isFinite(ms)) return '—';
-  return new Date(ms).toLocaleString();
-}
-
-function ledgerTitle(row: NowpaymentsLedgerRow) {
-  const dir = row.direction === 'in' ? 'Deposit' : 'Withdrawal';
-  return `${dir} · ${row.asset.toUpperCase()}`;
-}
 
 export function HomeScreen() {
   const { user } = useAuth();
@@ -67,10 +56,7 @@ export function HomeScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  const recentLedger = useMemo(() => {
-    const rows = npSummary?.ledger ?? [];
-    return [...rows].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).slice(0, 15);
-  }, [npSummary?.ledger]);
+  const recentActivity = useMemo(() => mergeWalletActivity(npSummary).slice(0, 15), [npSummary]);
 
   const alpacaEquity =
     account?.equity !== undefined && account?.equity !== null ? `$${Number(account.equity).toFixed(2)}` : null;
@@ -137,14 +123,12 @@ export function HomeScreen() {
 
       <Card style={styles.activityCard}>
         <Text style={styles.section}>Recent transactions</Text>
-        {recentLedger.length ? (
-          recentLedger.map((row) => (
+        {recentActivity.length ? (
+          recentActivity.map((row: WalletActivityRow) => (
             <View key={row.id} style={styles.activityRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.activityTitle}>{ledgerTitle(row)}</Text>
-                <Text style={styles.meta}>
-                  {formatLedgerTime(row.createdAt)} · {formatLedgerSource(row.source)}
-                </Text>
+                <Text style={styles.activityTitle}>{activityTitle(row)}</Text>
+                <Text style={styles.meta}>{activitySubtitle(row)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text style={styles.amount}>
@@ -157,7 +141,11 @@ export function HomeScreen() {
                     row.direction === 'in' ? styles.badgeIn : styles.badgeOut,
                   ]}
                 >
-                  {row.direction === 'in' ? 'IN' : 'OUT'}
+                  {row.status === 'completed' || row.status === 'finished'
+                    ? row.direction === 'in'
+                      ? 'IN'
+                      : 'OUT'
+                    : formatActivityStatus(row.status).toUpperCase()}
                 </Text>
               </View>
             </View>

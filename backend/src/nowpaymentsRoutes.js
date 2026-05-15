@@ -22,9 +22,11 @@ const {
 const np = require('./services/nowpaymentsClient');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { verifyUserTotp } = require('./totpVerify');
+const { buildWalletActivity, mapPublicActivity } = require('./walletActivity');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
+const TERMINAL_FAILED_PAYMENT_STATUSES = ['failed', 'expired', 'refunded'];
 
 const { normalizeCurrency } = require('./currencyNormalize');
 
@@ -98,18 +100,39 @@ function verifyNowpaymentsIpn(req) {
   }
 }
 
+/** Credit user wallet in the crypto they paid with, not the merchant outcome-wallet currency. */
+function depositCreditAmountAndAsset(paymentRow) {
+  const asset = normalizeCurrency(paymentRow.pay_currency);
+  if (!asset) return { asset: null, amount: null };
+  const paid = Number(paymentRow.actually_paid);
+  const expected = Number(paymentRow.pay_amount);
+  let amount = null;
+  if (Number.isFinite(paid) && paid > 0) amount = paid;
+  else if (Number.isFinite(expected) && expected > 0) amount = expected;
+  return { asset, amount };
+}
+
+function isPaymentFinished(status) {
+  return String(status || '').toLowerCase() === FINISHED_PAYMENT_STATUS;
+}
+
 async function creditPaymentLedger(paymentRow) {
-  if (paymentRow.ledger_credited) return;
-  const asset = normalizeCurrency(paymentRow.outcome_currency || paymentRow.pay_currency);
-  const amountRaw =
-    paymentRow.outcome_amount || paymentRow.actually_paid || paymentRow.pay_amount || paymentRow.price_amount;
-  const amount = Number(amountRaw);
-  if (!asset || !Number.isFinite(amount) || amount <= 0) return;
+  if (paymentRow.ledger_credited) return paymentRow;
+  const { asset, amount } = depositCreditAmountAndAsset(paymentRow);
+  if (!asset || !Number.isFinite(amount) || amount <= 0) {
+    console.warn('NOWPayments deposit not credited: missing pay amount', {
+      paymentId: paymentRow.payment_id,
+      orderId: paymentRow.order_id,
+      status: paymentRow.payment_status,
+      payCurrency: paymentRow.pay_currency,
+      actuallyPaid: paymentRow.actually_paid,
+    });
+    return paymentRow;
+  }
 
   const existing = await getCryptoLedgerEntryBySource('payment', paymentRow.id, 'in');
   if (existing) {
-    await updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
-    return;
+    return updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
   }
 
   await insertCryptoLedgerEntry({
@@ -121,7 +144,42 @@ async function creditPaymentLedger(paymentRow) {
     source: 'payment',
     source_id: paymentRow.id,
   });
-  await updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
+  return updateNowpaymentsPayment(paymentRow.id, { ledger_credited: true });
+}
+
+async function syncPaymentFromProvider(row) {
+  if (!np.configured() || !row?.payment_id) return row;
+  let remote;
+  try {
+    remote = await np.getPayment(row.payment_id);
+  } catch (e) {
+    console.warn('NOWPayments getPayment failed', row.payment_id, e.message);
+    return row;
+  }
+  const status = remote.payment_status || remote.status || row.payment_status;
+  let updated = await updateNowpaymentsPayment(row.id, {
+    payment_status: status,
+    actually_paid: remote.actually_paid != null ? String(remote.actually_paid) : row.actually_paid,
+    pay_amount: remote.pay_amount != null ? String(remote.pay_amount) : row.pay_amount,
+    pay_currency: remote.pay_currency ? normalizeCurrency(remote.pay_currency) : row.pay_currency,
+    outcome_amount: remote.outcome_amount != null ? String(remote.outcome_amount) : row.outcome_amount,
+    outcome_currency: remote.outcome_currency != null ? String(remote.outcome_currency) : row.outcome_currency,
+    raw_last_ipn: remote,
+  });
+  if (isPaymentFinished(status) && !updated.ledger_credited) {
+    updated = await creditPaymentLedger(updated);
+  }
+  return updated;
+}
+
+async function syncUncreditedPaymentsForUser(userId, limit = 15) {
+  const payments = await listNowpaymentsPaymentsByUserId(userId, limit);
+  for (const p of payments) {
+    if (p.ledger_credited || !p.payment_id) continue;
+    const st = String(p.payment_status || '').toLowerCase();
+    if (TERMINAL_FAILED_PAYMENT_STATUSES.includes(st)) continue;
+    await syncPaymentFromProvider(p);
+  }
 }
 
 async function finalizePayoutLedger(payoutRow) {
@@ -160,15 +218,17 @@ async function applyPaymentIpn(body) {
   const patch = {
     payment_status: status,
     actually_paid: body.actually_paid != null ? String(body.actually_paid) : row.actually_paid,
+    pay_amount: body.pay_amount != null ? String(body.pay_amount) : row.pay_amount,
     outcome_amount: body.outcome_amount != null ? String(body.outcome_amount) : row.outcome_amount,
     outcome_currency: body.outcome_currency != null ? String(body.outcome_currency) : row.outcome_currency,
     raw_last_ipn: body,
   };
+  if (body.pay_currency) patch.pay_currency = normalizeCurrency(body.pay_currency);
   if (paymentId && !row.payment_id) patch.payment_id = paymentId;
 
-  const updated = await updateNowpaymentsPayment(row.id, patch);
-  if (String(status).toLowerCase() === FINISHED_PAYMENT_STATUS) {
-    await creditPaymentLedger(updated);
+  let updated = await updateNowpaymentsPayment(row.id, patch);
+  if (isPaymentFinished(status) && !updated.ledger_credited) {
+    updated = await creditPaymentLedger(updated);
   }
   return { ok: true, recorded: true };
 }
@@ -218,6 +278,7 @@ async function applyPayoutStatusToRow(row, status, rawBody) {
 async function handlePaymentWebhook(req, res) {
   try {
     if (!verifyNowpaymentsIpn(req)) {
+      console.warn('NOWPayments payment IPN rejected: invalid signature (check NOWPAYMENTS_IPN_SECRET)');
       return res.status(401).json({ message: 'Invalid IPN signature' });
     }
     const result = await applyPaymentIpn(req.body || {});
@@ -265,12 +326,17 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
   app.get('/nowpayments/summary', authMiddleware, async (req, res) => {
     try {
+      if (np.configured()) {
+        await syncUncreditedPaymentsForUser(req.userId);
+      }
       const balances = await getCryptoBalancesByUserId(req.userId);
       const payments = await listNowpaymentsPaymentsByUserId(req.userId, 20);
       const payouts = await listNowpaymentsPayoutsByUserId(req.userId, 20);
       const ledger = await listCryptoLedgerEntriesByUserId(req.userId, 40);
+      const activity = buildWalletActivity({ ledger, payments, payouts });
       return res.json({
         balances,
+        activity: activity.map(mapPublicActivity),
         payments: payments.map((p) => ({
           id: p.id,
           paymentId: p.payment_id,
@@ -281,6 +347,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
           payAddress: p.pay_address,
           priceAmount: p.price_amount,
           priceCurrency: p.price_currency,
+          ledgerCredited: p.ledger_credited,
           createdAt: p.created_at,
         })),
         payouts: payouts.map((p) => ({
@@ -299,6 +366,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
           direction: e.direction,
           amount: e.amount,
           source: e.source,
+          sourceId: e.source_id,
           createdAt: e.created_at,
         })),
         configured: np.configured(),
@@ -321,6 +389,9 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       const orderId = `ema-${req.userId}-${newId()}`;
       const ipnUrl = paymentIpnUrl();
+      if (!ipnUrl) {
+        console.warn('NOWPayments: APP_BASE_URL not set — deposit IPN callbacks will not be sent on create');
+      }
       const npBody = {
         price_amount: priceAmount,
         price_currency: priceCurrency,
@@ -374,32 +445,32 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       if (np.configured() && row.payment_id) {
         try {
-          const remote = await np.getPayment(row.payment_id);
-          const status = remote.payment_status || remote.status;
-          if (status && status !== row.payment_status) {
-            const updated = await updateNowpaymentsPayment(row.id, {
-              payment_status: status,
-              actually_paid: remote.actually_paid != null ? String(remote.actually_paid) : row.actually_paid,
-              outcome_amount: remote.outcome_amount != null ? String(remote.outcome_amount) : row.outcome_amount,
-              outcome_currency: remote.outcome_currency != null ? String(remote.outcome_currency) : row.outcome_currency,
-              raw_last_ipn: remote,
-            });
-            if (String(status).toLowerCase() === FINISHED_PAYMENT_STATUS) {
-              await creditPaymentLedger(updated);
-            }
-            return res.json({
-              id: updated.id,
-              paymentId: updated.payment_id,
-              status: updated.payment_status,
-              payAddress: updated.pay_address,
-              payAmount: updated.pay_amount,
-              payCurrency: updated.pay_currency,
-              ledgerCredited: updated.ledger_credited,
-            });
-          }
+          const updated = await syncPaymentFromProvider(row);
+          return res.json({
+            id: updated.id,
+            paymentId: updated.payment_id,
+            status: updated.payment_status,
+            payAddress: updated.pay_address,
+            payAmount: updated.pay_amount,
+            payCurrency: updated.pay_currency,
+            ledgerCredited: updated.ledger_credited,
+          });
         } catch {
           // return cached row
         }
+      }
+
+      if (isPaymentFinished(row.payment_status) && !row.ledger_credited) {
+        const credited = await creditPaymentLedger(row);
+        return res.json({
+          id: credited.id,
+          paymentId: credited.payment_id,
+          status: credited.payment_status,
+          payAddress: credited.pay_address,
+          payAmount: credited.pay_amount,
+          payCurrency: credited.pay_currency,
+          ledgerCredited: credited.ledger_credited,
+        });
       }
 
       return res.json({

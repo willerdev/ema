@@ -30,7 +30,8 @@ import {
 } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
-import { findBalanceForNetwork, formatLedgerSource, maxWithdrawableAmount } from '../utils/walletDisplay';
+import { findBalanceForNetwork, maxWithdrawableAmount } from '../utils/walletDisplay';
+import { activitySubtitle, activityTitle, mergeWalletActivity } from '../utils/walletActivity';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
@@ -152,11 +153,12 @@ export function WalletScreen() {
   }, [activeDeposit?.id, refreshNowpayments, showToast]);
 
   useEffect(() => {
-    if (!depositModalOpen || !activeDeposit?.id) return;
+    if (!activeDeposit?.id) return;
+    if (depositStatus?.ledgerCredited) return;
     void pollActiveDeposit();
     const t = setInterval(() => void pollActiveDeposit(), 15000);
     return () => clearInterval(t);
-  }, [depositModalOpen, activeDeposit?.id, pollActiveDeposit]);
+  }, [activeDeposit?.id, depositStatus?.ledgerCredited, pollActiveDeposit]);
 
   const onCreateDeposit = async () => {
     const priceAmount = Number(depositUsdAmount);
@@ -280,6 +282,7 @@ export function WalletScreen() {
   const payAddress = depositStatus?.payAddress || activeDeposit?.payAddress;
   const payAmount = depositStatus?.payAmount || activeDeposit?.payAmount;
   const payStatus = depositStatus?.status || activeDeposit?.status || 'waiting';
+  const recentActivity = mergeWalletActivity(npSummary).slice(0, 12);
 
   const inputStyle = {
     backgroundColor: palette.surfaceElevated,
@@ -355,12 +358,13 @@ export function WalletScreen() {
 
         <Card>
           <Text style={styles.sectionTitle}>Recent activity</Text>
-          {npSummary?.ledger?.slice(0, 12).map((e) => (
-            <Text key={e.id} style={styles.item}>
-              {e.direction.toUpperCase()} {e.amount} {e.asset} · {formatLedgerSource(e.source)}
+          {recentActivity.map((row) => (
+            <Text key={row.id} style={styles.item}>
+              {activityTitle(row)} — {row.direction === 'in' ? '+' : '−'}
+              {row.amount} · {activitySubtitle(row)}
             </Text>
           ))}
-          {!npSummary?.ledger?.length && <Text style={styles.item}>No activity yet</Text>}
+          {!recentActivity.length && <Text style={styles.item}>No activity yet</Text>}
         </Card>
       </ScrollView>
 

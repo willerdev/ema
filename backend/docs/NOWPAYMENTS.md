@@ -33,7 +33,20 @@ Run in Supabase SQL editor (in order):
 
 1. App calls `POST /nowpayments/deposits` with `priceAmount`, `priceCurrency`, `payCurrency`.
 2. User sends crypto to the returned `pay_address`.
-3. NOWPayments POSTs IPN on status changes; when status is **`finished`**, the server credits `crypto_ledger_entries`.
+3. NOWPayments POSTs IPN on status changes; when status is **`finished`**, the server credits `crypto_ledger_entries` in **`pay_currency`** using **`actually_paid`** (not `outcome_currency`, which is your merchant outcome wallet).
+4. The app also syncs status on `GET /nowpayments/deposits/:id` and `GET /nowpayments/summary` so balances update even if IPN was missed.
+
+### Deposits not showing in the wallet?
+
+| Check | Action |
+|-------|--------|
+| `APP_BASE_URL` on Render | Must be `https://ema-0gp3.onrender.com` so create-payment includes IPN URL |
+| NOWPayments dashboard IPN | Set callback URL to `https://ema-0gp3.onrender.com/webhooks/nowpayments/payment` and match `NOWPAYMENTS_IPN_SECRET` |
+| Payment status | Only **`finished`** credits the ledger; `confirming` / `waiting` do not |
+| Wrong network or amount | Use the exact `pay_address` and `pay_amount` from the app |
+| Tables | Run migration `20260515_nowpayments_wallet.sql` in Supabase |
+
+Pull to refresh on Wallet or reopen the deposit — the server polls NOWPayments for uncredited payments.
 
 ## Withdrawals
 

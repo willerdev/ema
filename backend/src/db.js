@@ -636,7 +636,14 @@ async function listPendingNowpaymentsPayoutsByUserId(userId) {
     .select('*')
     .eq('user_id', userId)
     .eq('reserve_released', false)
-    .in('status', ['pending', 'processing', 'creating', 'sending', 'waiting']);
+    .in('status', [
+      'pending',
+      'processing',
+      'creating',
+      'sending',
+      'waiting',
+      'awaiting_verify',
+    ]);
   if (error) throw error;
   return data || [];
 }

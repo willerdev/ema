@@ -154,6 +154,18 @@ export interface NowpaymentsPaymentRow {
   payAddress: string | null;
   priceAmount: number;
   priceCurrency: string;
+  ledgerCredited?: boolean;
+  createdAt: string;
+}
+
+export interface WalletActivityRow {
+  id: string;
+  kind: 'ledger' | 'payment' | 'payout';
+  direction: 'in' | 'out';
+  asset: string;
+  amount: number;
+  status: string;
+  source: string;
   createdAt: string;
 }
 
@@ -173,11 +185,13 @@ export interface NowpaymentsLedgerRow {
   direction: 'in' | 'out';
   amount: number;
   source: string;
+  sourceId?: string;
   createdAt: string;
 }
 
 export interface NowpaymentsSummary {
   balances: NowpaymentsBalanceRow[];
+  activity?: WalletActivityRow[];
   payments: NowpaymentsPaymentRow[];
   payouts: NowpaymentsPayoutRow[];
   ledger: NowpaymentsLedgerRow[];
