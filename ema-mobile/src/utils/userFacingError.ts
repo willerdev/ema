@@ -13,6 +13,10 @@ const INTERNAL_PATTERNS = [
   'jwt_secret',
   'webhook',
   'provisioning',
+  'authorization header',
+  'bearer',
+  'jwt',
+  'jwttoken',
 ];
 
 export function sanitizeUserFacingError(raw: string, fallback = 'Something went wrong. Please try again.'): string {

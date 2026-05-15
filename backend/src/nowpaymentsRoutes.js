@@ -419,6 +419,12 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
   app.post('/nowpayments/withdrawals', authMiddleware, requireComplianceProfile, async (req, res) => {
     try {
       if (!np.configured()) return res.status(503).json({ message: notConfiguredMessage });
+      if (!np.payoutAuthConfigured()) {
+        return res.status(503).json({
+          message: 'Withdrawals are not fully enabled on the server yet. Please try again later.',
+          code: 'PAYOUT_NOT_CONFIGURED',
+        });
+      }
 
       const totp = await verifyUserTotp(req.userId, req.body.totpCode);
       if (!totp.ok) return res.status(totp.status).json({ message: totp.message });
@@ -506,7 +512,10 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });
-      return res.status(e.status || 500).json({ message: e.message || 'Withdrawal failed' });
+      return res.status(e.status || 500).json({
+        message: np.toPublicPayoutError(e),
+        code: e.code || undefined,
+      });
     }
   });
 }

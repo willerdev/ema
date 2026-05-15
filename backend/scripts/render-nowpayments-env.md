@@ -8,6 +8,10 @@ In [Render Dashboard](https://dashboard.render.com/) â†’ service **ema-0gp3** â†
 | `NOWPAYMENTS_API_KEY` | line under "API key" |
 | `NOWPAYMENTS_IPN_SECRET` | line after "ipn secret :" |
 | `NOWPAYMENTS_API_BASE` | `https://api.nowpayments.io/v1` |
+| `NOWPAYMENTS_EMAIL` | Your NOWPayments account login email (required for **withdrawals**) |
+| `NOWPAYMENTS_PASSWORD` | Your NOWPayments account password (required for **withdrawals**) |
+
+Withdrawals use a separate payout login on the payment provider. Without email/password the app may show a generic withdrawal error.
 
 **IPN URLs in NOWPayments dashboard:**
 
