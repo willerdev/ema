@@ -1,4 +1,5 @@
 import { authStorage } from './storage';
+import { sanitizeUserFacingError } from '../utils/userFacingError';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
@@ -64,8 +65,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response) {
-    const hint = lastNetworkError instanceof Error ? ` (${lastNetworkError.message})` : '';
-    throw new Error(`Network request failed. API base URL: ${chosenBaseUrl}${hint}`);
+    throw new Error(sanitizeUserFacingError('Network request failed'));
   }
 
   // If fallback base URL worked, keep using it first in future requests.
@@ -93,13 +93,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!response.ok) {
-    const fallback = `Request failed (${response.status})`;
-    const htmlError = raw.trim().startsWith('<');
-    const message =
-      (htmlError ? `Server returned HTML (${response.status}). Check backend route/server state.` : '') ||
-      data?.message ||
-      (typeof data === 'string' ? data : '') ||
-      fallback;
+    const fallback = 'Request failed. Please try again.';
+    const rawMessage = data?.message || (typeof data === 'string' ? data : '') || fallback;
+    const message = sanitizeUserFacingError(String(rawMessage), fallback);
     const err = new Error(message) as Error & { status?: number; code?: string };
     err.status = response.status;
     if (data?.code) err.code = String(data.code);

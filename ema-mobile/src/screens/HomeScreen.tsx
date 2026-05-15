@@ -123,7 +123,7 @@ export function HomeScreen() {
           <Text style={styles.meta}>No balance yet — deposit from the Wallet tab.</Text>
         ) : null}
         {npSummary && !npSummary.configured ? (
-          <Text style={styles.meta}>Payments provider not fully configured on server.</Text>
+          <Text style={styles.meta}>Deposits are temporarily unavailable. Please try again later.</Text>
         ) : null}
       </Card>
 

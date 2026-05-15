@@ -12,6 +12,7 @@ import * as Clipboard from 'expo-clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
+import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { usePolling } from '../hooks/usePolling';
 import { useToast } from '../hooks/useToast';
@@ -27,6 +28,7 @@ import {
   WhitelistedWallet,
 } from '../types';
 import { palette } from '../theme/colors';
+import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -227,9 +229,7 @@ export function WalletScreen() {
   };
 
   function sanitizeError(raw: string) {
-    const text = String(raw || '');
-    if (text.length > 200) return 'Service temporarily unavailable. Please retry.';
-    return text;
+    return sanitizeUserFacingError(raw, 'Service temporarily unavailable. Please try again.');
   }
 
   const walletsForWithdrawCurrency = whitelistedWallets.filter((w) => w.currency === withdrawCurrency);
@@ -339,18 +339,13 @@ export function WalletScreen() {
               placeholderTextColor={palette.textSecondary}
               keyboardType='numeric'
             />
-            <Text style={styles.fieldLabel}>Pay with</Text>
-            <View style={styles.chipRow}>
-              {PAY_CURRENCY_OPTIONS.map((c) => (
-                <Text
-                  key={c}
-                  style={[styles.chip, depositPayCurrency === c && styles.chipActive]}
-                  onPress={() => setDepositPayCurrency(c)}
-                >
-                  {c}
-                </Text>
-              ))}
-            </View>
+            <Text style={styles.fieldLabel}>Network</Text>
+            <OptionHighlightList
+              options={PAY_CURRENCY_OPTIONS}
+              value={depositPayCurrency}
+              onChange={setDepositPayCurrency}
+              formatLabel={formatNetworkLabel}
+            />
             <PrimaryButton label='Create payment' onPress={() => void onCreateDeposit()} />
           </>
         ) : (
@@ -391,37 +386,30 @@ export function WalletScreen() {
           placeholderTextColor={palette.textSecondary}
           keyboardType='numeric'
         />
-        <Text style={styles.fieldLabel}>Currency</Text>
-        <View style={styles.chipRow}>
-          {PAY_CURRENCY_OPTIONS.map((c) => (
-            <Text
-              key={c}
-              style={[styles.chip, withdrawCurrency === c && styles.chipActive]}
-              onPress={() => {
-                setWithdrawCurrency(c);
-                const first = whitelistedWallets.find((w) => w.currency === c);
-                setSelectedWhitelistId(first?.id ?? null);
-              }}
-            >
-              {c}
-            </Text>
-          ))}
-        </View>
+        <Text style={styles.fieldLabel}>Network</Text>
+        <OptionHighlightList
+          options={PAY_CURRENCY_OPTIONS}
+          value={withdrawCurrency}
+          onChange={(c) => {
+            setWithdrawCurrency(c);
+            const first = whitelistedWallets.find((w) => w.currency === c);
+            setSelectedWhitelistId(first?.id ?? null);
+          }}
+          formatLabel={formatNetworkLabel}
+        />
         <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
         {walletsForWithdrawCurrency.length ? (
-          <View style={styles.chipRow}>
-            {walletsForWithdrawCurrency.map((w) => (
-              <Text
-                key={w.id}
-                style={[styles.chip, selectedWhitelistId === w.id && styles.chipActive]}
-                onPress={() => setSelectedWhitelistId(w.id)}
-              >
-                {w.label || w.currency}
-              </Text>
-            ))}
-          </View>
+          <OptionHighlightList
+            options={walletsForWithdrawCurrency.map((w) => w.id!)}
+            value={selectedWhitelistId || walletsForWithdrawCurrency[0].id!}
+            onChange={setSelectedWhitelistId}
+            formatLabel={(id) => {
+              const w = whitelistedWallets.find((x) => x.id === id);
+              return w?.label || formatNetworkLabel(w?.currency || withdrawCurrency);
+            }}
+          />
         ) : (
-          <Text style={styles.hint}>Add a {withdrawCurrency} wallet in Settings.</Text>
+          <Text style={styles.hint}>Add a {formatNetworkLabel(withdrawCurrency)} wallet in Settings.</Text>
         )}
         {selectedWhitelistId ? (
           <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
@@ -458,17 +446,6 @@ const styles = StyleSheet.create({
   assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700' },
   assetSub: { color: palette.textSecondary, fontSize: 12 },
   quickActionsRow: { flexDirection: 'row', marginTop: 12 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  chip: {
-    color: palette.textPrimary,
-    borderColor: palette.border,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    fontSize: 12,
-  },
-  chipActive: { borderColor: palette.primary, color: palette.primary },
   mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
   qrWrap: { alignItems: 'center', marginVertical: 12 },
   complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },

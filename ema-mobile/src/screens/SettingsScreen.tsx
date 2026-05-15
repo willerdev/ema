@@ -6,6 +6,7 @@ import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
+import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
@@ -23,6 +24,7 @@ import {
 } from '../types';
 import { ABOUT_EMA, AboutSectionKey } from '../content/aboutEma';
 import { palette } from '../theme/colors';
+import { formatNetworkLabel } from '../utils/userFacingError';
 
 const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -438,7 +440,7 @@ export function SettingsScreen() {
             subtitle={whitelistSummary}
             onPress={() => setWhitelistModalOpen(true)}
           />
-          <SettingsRow title='Alpaca API keys' subtitle='Connect trading account' onPress={() => setAlpacaModalOpen(true)} />
+          <SettingsRow title='Trading account keys' subtitle='Link your broker for forex trades' onPress={() => setAlpacaModalOpen(true)} />
           <SettingsRow title='Security' subtitle={securitySummary} onPress={() => setSecurityModalOpen(true)} />
         </Card>
 
@@ -629,18 +631,13 @@ export function SettingsScreen() {
               value={wlLabel}
               onChangeText={setWlLabel}
             />
-            <Text style={styles.subLabel}>Currency</Text>
-            <View style={styles.chipRow}>
-              {WL_CURRENCY_OPTIONS.map((c) => (
-                <Text
-                  key={c}
-                  style={[styles.chip, wlCurrency === c && styles.chipActive]}
-                  onPress={() => setWlCurrency(c)}
-                >
-                  {c}
-                </Text>
-              ))}
-            </View>
+            <Text style={styles.subLabel}>Network</Text>
+            <OptionHighlightList
+              options={WL_CURRENCY_OPTIONS}
+              value={wlCurrency}
+              onChange={setWlCurrency}
+              formatLabel={formatNetworkLabel}
+            />
             <TextInput
               style={styles.input}
               placeholder='Wallet address'
@@ -662,7 +659,7 @@ export function SettingsScreen() {
 
       <FormModal
         visible={alpacaModalOpen}
-        title='Alpaca API keys'
+        title='Trading account keys'
         onClose={() => setAlpacaModalOpen(false)}
         footer={
           <View style={{ gap: 8, marginTop: 12 }}>
@@ -674,7 +671,7 @@ export function SettingsScreen() {
         <Text style={styles.modalHint}>Keys are stored securely and used for trading features.</Text>
         <TextInput
           style={styles.input}
-          placeholder='Alpaca API key'
+          placeholder='API key'
           placeholderTextColor={palette.textSecondary}
           value={apiKey}
           onChangeText={setApiKey}
@@ -682,7 +679,7 @@ export function SettingsScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder='Alpaca secret key'
+          placeholder='Secret key'
           placeholderTextColor={palette.textSecondary}
           value={secretKey}
           onChangeText={setSecretKey}

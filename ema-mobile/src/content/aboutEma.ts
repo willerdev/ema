@@ -19,7 +19,7 @@ export const ABOUT_EMA: Record<
     title: 'What we do',
     subtitle: 'Products and safeguards in one app',
     paragraphs: [
-      'Unified crypto wallet: deposits and withdrawals through our payments partner, with compliance checks and whitelisted withdrawal addresses.',
+      'Unified crypto wallet: deposits and withdrawals with compliance checks and whitelisted withdrawal addresses.',
       'Expert Account Manager: connect MT5, set risk per trade, drawdown caps, news and swing preferences, then enable managed execution within your limits.',
       'Trading hub: broker-linked forex (Alpaca), airfarming yield events, and contract accrual products—each with its own balance and rules.',
       'Security: two-factor authentication, AML review on withdrawals, and clear notices that we never call or text you to move funds.',
