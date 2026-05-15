@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "ema-mobile",
+    "name": "AirFarmerPro",
     "slug": "ema",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Ema uses your location to show local currency rates for P2P and mobile money."
+        "NSLocationWhenInUseUsageDescription": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money."
       }
     },
     "android": {
@@ -42,7 +42,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Ema uses your location to show local currency rates for P2P and mobile money in your country."
+          "locationWhenInUsePermission": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money in your country."
         }
       ]
     ]
