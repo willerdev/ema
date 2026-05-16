@@ -6,6 +6,9 @@ import { AirfarmingTradeScreen } from '../screens/AirfarmingTradeScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
+import { TransactionHistoryScreen } from '../screens/TransactionHistoryScreen';
+import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
+import { CryptoDepositPaymentScreen } from '../screens/CryptoDepositPaymentScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { useAuth } from '../context/AuthContext';
 import { palette } from '../theme/colors';
@@ -41,6 +44,24 @@ export function RootNavigator() {
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
       <Stack.Screen name='Notifications' component={NotificationsScreen} options={{ title: 'Notifications' }} />
+      <Stack.Screen name='TransactionHistory' component={TransactionHistoryScreen} options={{ title: 'Asset history' }} />
+      <Stack.Screen
+        name='TransactionDetail'
+        component={TransactionDetailScreen}
+        options={({ route }) => ({
+          title:
+            route.params.row.category === 'withdraw'
+              ? 'Withdrawal details'
+              : route.params.row.category === 'deposit'
+                ? 'Deposit details'
+                : 'Transaction details',
+        })}
+      />
+      <Stack.Screen
+        name='CryptoDepositPayment'
+        component={CryptoDepositPaymentScreen}
+        options={{ title: 'Complete payment' }}
+      />
     </Stack.Navigator>
   );
 }

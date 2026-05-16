@@ -232,6 +232,29 @@ async function createMt5AccountForUser(userId, { login, password, server, accoun
   return data;
 }
 
+async function deleteMt5EaRowsForAccount(accountId) {
+  for (const table of ['mt5_ea_commands', 'mt5_ea_telemetry']) {
+    const { error } = await supabase.from(table).delete().eq('mt5_account_id', accountId);
+    if (error && !isMissingTableError(error)) throw error;
+  }
+}
+
+async function deleteMt5AccountForUser(userId, accountId) {
+  const account = await getMt5AccountByIdForUser(userId, accountId);
+  if (!account) return false;
+
+  await deleteMt5EaRowsForAccount(accountId);
+
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', accountId)
+    .select('id');
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+}
+
 async function setMt5AccountMetaApiId(userId, accountId, metaapiAccountId) {
   const { error } = await supabase
     .from('mt5_accounts')
@@ -1034,6 +1057,56 @@ async function createAppNotification({ userId, title, body }) {
   return data;
 }
 
+async function getNotificationPreferencesByUserId(userId) {
+  const { data, error } = await supabase
+    .from('user_notification_preferences')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertNotificationPreferences(userId, patch) {
+  const existing = await getNotificationPreferencesByUserId(userId);
+  const now = new Date().toISOString();
+  let premiumAlertsEnabled =
+    patch.premiumAlertsEnabled !== undefined
+      ? Boolean(patch.premiumAlertsEnabled)
+      : Boolean(existing?.premium_alerts_enabled);
+  let notifySms =
+    patch.notifySms !== undefined ? Boolean(patch.notifySms) : Boolean(existing?.notify_sms);
+  let notifyEmail =
+    patch.notifyEmail !== undefined ? Boolean(patch.notifyEmail) : Boolean(existing?.notify_email);
+  let premiumTermsAcceptedAt = existing?.premium_terms_accepted_at || null;
+
+  if (patch.acceptPremiumTerms) {
+    premiumTermsAcceptedAt = now;
+  }
+  if (!premiumAlertsEnabled) {
+    notifySms = false;
+    notifyEmail = false;
+  }
+
+  const row = {
+    user_id: userId,
+    premium_alerts_enabled: premiumAlertsEnabled,
+    notify_sms: notifySms,
+    notify_email: notifyEmail,
+    premium_terms_accepted_at: premiumTermsAcceptedAt,
+    updated_at: now,
+    ...(existing ? {} : { created_at: now }),
+  };
+
+  const { data, error } = await supabase
+    .from('user_notification_preferences')
+    .upsert(row, { onConflict: 'user_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 module.exports = {
   getUserByEmail,
   getUserById,
@@ -1053,6 +1126,7 @@ module.exports = {
   listMt5AccountsByUserId,
   getMt5AccountByIdForUser,
   createMt5AccountForUser,
+  deleteMt5AccountForUser,
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
   getMt5AccountByEaWebhookToken,
@@ -1113,6 +1187,8 @@ module.exports = {
   MAX_WHITELISTED_WALLETS_PER_USER,
   listNotificationsForUser,
   createAppNotification,
+  getNotificationPreferencesByUserId,
+  upsertNotificationPreferences,
   insertLocalMoneyOrder,
   updateLocalMoneyOrder,
   getLocalMoneyOrderForUser,

@@ -5,6 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
 import { Card } from '../components/Card';
+import { SettingsSkeleton } from '../components/Skeleton';
 import { FormModal } from '../components/FormModal';
 import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -23,9 +24,12 @@ import {
   SourceOfFunds,
   WhitelistedWallet,
 } from '../types';
-import { ABOUT_EMA, AboutSectionKey } from '../content/aboutEma';
+import { ABOUT_EMA, AboutSectionKey, PREMIUM_ALERTS_TERMS } from '../content/aboutEma';
+import { notificationPreferencesService } from '../services/notificationPreferencesService';
+import type { NotificationPreferences } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel } from '../utils/userFacingError';
+import { navigateToTransactionHistory } from '../utils/navigationHelpers';
 
 const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -81,11 +85,16 @@ export function SettingsScreen() {
   const [biometric, setBiometric] = useState(false);
   const [profile, setProfile] = useState<{ username: string; accountStatus: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
   const [complianceModalOpen, setComplianceModalOpen] = useState(false);
   const [whitelistModalOpen, setWhitelistModalOpen] = useState(false);
   const [alpacaModalOpen, setAlpacaModalOpen] = useState(false);
   const [securityModalOpen, setSecurityModalOpen] = useState(false);
+  const [alertsModalOpen, setAlertsModalOpen] = useState(false);
+  const [alertPrefs, setAlertPrefs] = useState<NotificationPreferences | null>(null);
+  const [alertPrefsBusy, setAlertPrefsBusy] = useState(false);
+  const [alertTermsAccepted, setAlertTermsAccepted] = useState(false);
 
   const [totpStatus, setTotpStatus] = useState<TotpStatus | null>(null);
   const [totpBusy, setTotpBusy] = useState(false);
@@ -185,9 +194,45 @@ export function SettingsScreen() {
     }
   }, []);
 
+  const loadAlertPrefs = useCallback(async () => {
+    try {
+      const data = await notificationPreferencesService.get();
+      setAlertPrefs(data.preferences);
+      setAlertTermsAccepted(Boolean(data.preferences.premiumTermsAcceptedAt));
+    } catch {
+      setAlertPrefs(null);
+    }
+  }, []);
+
   const refreshAll = useCallback(async () => {
-    await Promise.all([loadProfile(), loadTotpStatus(), loadCompliance(), loadWhitelistedWallets()]);
-  }, [loadProfile, loadTotpStatus, loadCompliance, loadWhitelistedWallets]);
+    await Promise.all([
+      loadProfile(),
+      loadTotpStatus(),
+      loadCompliance(),
+      loadWhitelistedWallets(),
+      loadAlertPrefs(),
+    ]);
+    setInitialLoading(false);
+  }, [loadProfile, loadTotpStatus, loadCompliance, loadWhitelistedWallets, loadAlertPrefs]);
+
+  const saveAlertPrefs = async (patch: {
+    premiumAlertsEnabled?: boolean;
+    notifySms?: boolean;
+    notifyEmail?: boolean;
+    acceptPremiumTerms?: boolean;
+  }) => {
+    setAlertPrefsBusy(true);
+    try {
+      const data = await notificationPreferencesService.save(patch);
+      setAlertPrefs(data.preferences);
+      if (patch.acceptPremiumTerms) setAlertTermsAccepted(true);
+      showToast('Alert preferences saved');
+    } catch (error: any) {
+      Alert.alert('Save failed', String(error?.message || 'Could not save alert preferences'));
+    } finally {
+      setAlertPrefsBusy(false);
+    }
+  };
 
   const addWhitelistedWallet = async () => {
     if (!wlAddress.trim()) {
@@ -396,6 +441,10 @@ export function SettingsScreen() {
       ? '2FA setup in progress'
       : '2FA off';
 
+  const alertsSummary = alertPrefs?.premiumAlertsEnabled
+    ? `$2/week · ${[alertPrefs.notifySms && 'SMS', alertPrefs.notifyEmail && 'Email'].filter(Boolean).join(' + ') || 'no channels'}`
+    : 'Off — enable SMS or email when deposits or withdrawals complete';
+
   return (
     <>
       <ScrollView
@@ -403,6 +452,10 @@ export function SettingsScreen() {
         contentContainerStyle={{ padding: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
+        {initialLoading ? (
+          <SettingsSkeleton />
+        ) : (
+          <>
         <Card>
           <Text style={styles.label}>Profile</Text>
           <Text style={styles.value}>Email: {user?.email}</Text>
@@ -432,6 +485,11 @@ export function SettingsScreen() {
             subtitle='Saved messages for you and everyone'
             onPress={() => navigation.navigate('Notifications')}
           />
+          <SettingsRow
+            title='Asset history'
+            subtitle='All deposits, withdrawals, and transfers'
+            onPress={() => navigateToTransactionHistory(navigation)}
+          />
         </Card>
 
         <Card style={styles.menuCard}>
@@ -448,6 +506,11 @@ export function SettingsScreen() {
           />
           <SettingsRow title='Trading account keys' subtitle='Link your broker for forex trades' onPress={() => setAlpacaModalOpen(true)} />
           <SettingsRow title='Security' subtitle={securitySummary} onPress={() => setSecurityModalOpen(true)} />
+          <SettingsRow
+            title='Deposit & withdrawal alerts'
+            subtitle={alertsSummary}
+            onPress={() => setAlertsModalOpen(true)}
+          />
         </Card>
 
         <Card>
@@ -460,6 +523,8 @@ export function SettingsScreen() {
         </Card>
 
         <PrimaryButton label='Logout' onPress={logout} variant='danger' />
+          </>
+        )}
       </ScrollView>
 
       {aboutModal ? (
@@ -818,6 +883,81 @@ export function SettingsScreen() {
             <PrimaryButton compact label={totpBusy ? '…' : 'Set up 2FA'} onPress={() => void startTotpSetup()} disabled={totpBusy} />
           </>
         )}
+      </FormModal>
+
+      <FormModal
+        visible={alertsModalOpen}
+        title='Deposit & withdrawal alerts'
+        onClose={() => setAlertsModalOpen(false)}
+        footer={
+          <PrimaryButton
+            label='Close'
+            onPress={() => setAlertsModalOpen(false)}
+            style={{ marginTop: 12 }}
+          />
+        }
+      >
+        <Text style={styles.modalHint}>{PREMIUM_ALERTS_TERMS}</Text>
+        <View style={styles.rowBetween}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.value}>Premium alerts ($2/week)</Text>
+            <Text style={styles.rowSubtitle}>SMS and/or email when deposits or withdrawals finish</Text>
+          </View>
+          <Switch
+            value={Boolean(alertPrefs?.premiumAlertsEnabled)}
+            onValueChange={(on) => {
+              if (on && !alertTermsAccepted && !alertPrefs?.premiumTermsAcceptedAt) {
+                Alert.alert(
+                  'Subscription terms',
+                  PREMIUM_ALERTS_TERMS,
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    {
+                      text: 'I agree — $2/week',
+                      onPress: () => {
+                        setAlertTermsAccepted(true);
+                        void saveAlertPrefs({
+                          premiumAlertsEnabled: true,
+                          acceptPremiumTerms: true,
+                        });
+                      },
+                    },
+                  ]
+                );
+                return;
+              }
+              void saveAlertPrefs({ premiumAlertsEnabled: on });
+            }}
+            disabled={alertPrefsBusy}
+            thumbColor={alertPrefs?.premiumAlertsEnabled ? palette.primary : '#ccc'}
+          />
+        </View>
+        <View style={[styles.rowBetween, { marginTop: 16, opacity: alertPrefs?.premiumAlertsEnabled ? 1 : 0.45 }]}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.value}>SMS notifications</Text>
+            <Text style={styles.rowSubtitle}>
+              {phone.trim() ? `To ${phone}` : 'Add phone in compliance profile'}
+            </Text>
+          </View>
+          <Switch
+            value={Boolean(alertPrefs?.notifySms)}
+            onValueChange={(on) => void saveAlertPrefs({ notifySms: on, premiumAlertsEnabled: true })}
+            disabled={alertPrefsBusy || !alertPrefs?.premiumAlertsEnabled || !phone.trim()}
+            thumbColor={alertPrefs?.notifySms ? palette.primary : '#ccc'}
+          />
+        </View>
+        <View style={[styles.rowBetween, { marginTop: 16, opacity: alertPrefs?.premiumAlertsEnabled ? 1 : 0.45 }]}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.value}>Email notifications</Text>
+            <Text style={styles.rowSubtitle}>{user?.email || 'Account email'}</Text>
+          </View>
+          <Switch
+            value={Boolean(alertPrefs?.notifyEmail)}
+            onValueChange={(on) => void saveAlertPrefs({ notifyEmail: on, premiumAlertsEnabled: true })}
+            disabled={alertPrefsBusy || !alertPrefs?.premiumAlertsEnabled}
+            thumbColor={alertPrefs?.notifyEmail ? palette.primary : '#ccc'}
+          />
+        </View>
       </FormModal>
     </>
   );

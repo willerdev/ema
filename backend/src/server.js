@@ -22,6 +22,7 @@ const {
   listMt5AccountsByUserId,
   getMt5AccountByIdForUser,
   createMt5AccountForUser,
+  deleteMt5AccountForUser,
   setMt5AccountMetaApiId,
   updateMt5AccountSnapshot,
   insertMt5EaCommand,
@@ -55,6 +56,7 @@ const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
 const { registerComplianceRoutes } = require('./complianceRoutes');
 const { registerWhitelistWalletRoutes } = require('./whitelistWalletRoutes');
 const { registerNotificationRoutes } = require('./notificationRoutes');
+const { registerNotificationPreferencesRoutes } = require('./notificationPreferencesRoutes');
 const { registerLocalMoneyRoutes, handleFlutterwaveWebhook } = require('./localMoneyRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
@@ -614,6 +616,7 @@ registerComplianceRoutes(app, { authMiddleware });
 registerLocalMoneyRoutes(app, { authMiddleware });
 registerWhitelistWalletRoutes(app, { authMiddleware });
 registerNotificationRoutes(app, { authMiddleware });
+registerNotificationPreferencesRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
@@ -854,6 +857,27 @@ app.post('/mt5/accounts', authMiddleware, async (req, res) => {
     return res.status(500).json({ message: extractErrorMessage(error, 'Failed to save MT5 account') });
   }
 });
+
+async function handleRemoveMt5Account(req, res) {
+  try {
+    const accountId = String(req.params.id || '').trim();
+    if (!accountId) return res.status(400).json({ message: 'Account id is required' });
+
+    const removed = await deleteMt5AccountForUser(req.userId, accountId);
+    if (!removed) return res.status(404).json({ message: 'MT5 account not found' });
+
+    const accounts = await listMt5AccountsByUserId(req.userId);
+    return res.json({
+      success: true,
+      accounts: accounts.map(toMt5Summary),
+    });
+  } catch (error) {
+    return res.status(500).json({ message: extractErrorMessage(error, 'Failed to remove MT5 account') });
+  }
+}
+
+app.delete('/mt5/accounts/:id', authMiddleware, handleRemoveMt5Account);
+app.post('/mt5/accounts/:id/remove', authMiddleware, handleRemoveMt5Account);
 
 app.get('/mt5/accounts/:id/balance', authMiddleware, async (req, res) => {
   try {

@@ -1,11 +1,14 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useCallback, useState } from 'react';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '../components/Card';
+import { MenuListSkeleton } from '../components/Skeleton';
 import { ExtraStackParamList } from '../types';
 import { palette } from '../theme/colors';
+import { navigateToTransactionHistory } from '../utils/navigationHelpers';
 
 type Nav = NativeStackNavigationProp<ExtraStackParamList, 'ExtraHub'>;
 
@@ -36,39 +39,83 @@ function ExtraMenuRow({
 
 export function ExtraHubScreen() {
   const navigation = useNavigation<Nav>();
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const load = useCallback(async () => {
+    await new Promise((r) => setTimeout(r, 280));
+    setLoading(false);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      void load();
+    }, [load])
+  );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setLoading(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
+
+  const openHistory = () => {
+    const root = navigation.getParent()?.getParent();
+    if (root) {
+      navigateToTransactionHistory(root);
+    } else {
+      navigateToTransactionHistory(navigation);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
+      >
         <Text style={styles.title}>Extra</Text>
         <Text style={styles.sub}>Peer trading and account settings</Text>
 
-        <Card style={styles.menuCard}>
-          <ExtraMenuRow
-            title='Send by ID'
-            subtitle='Transfer trading USD to another member'
-            icon='arrow-forward-circle-outline'
-            onPress={() => navigation.navigate('SendById')}
-          />
-          <ExtraMenuRow
-            title='P2P'
-            subtitle='USDT rates in your local currency'
-            icon='swap-horizontal-outline'
-            onPress={() => navigation.navigate('P2P')}
-          />
-          <ExtraMenuRow
-            title='Mobile money'
-            subtitle='Deposit or withdraw with your phone number'
-            icon='phone-portrait-outline'
-            onPress={() => navigation.navigate('LocalMoney')}
-          />
-          <ExtraMenuRow
-            title='Settings'
-            subtitle='Profile, security, compliance, and more'
-            icon='settings-outline'
-            onPress={() => navigation.navigate('Settings')}
-          />
-        </Card>
+        {loading ? (
+          <MenuListSkeleton rows={5} />
+        ) : (
+          <Card style={styles.menuCard}>
+            <ExtraMenuRow
+              title='Asset history'
+              subtitle='Deposits, withdrawals, transfers, and more'
+              icon='time-outline'
+              onPress={openHistory}
+            />
+            <ExtraMenuRow
+              title='Send by ID'
+              subtitle='Transfer trading USD to another member'
+              icon='arrow-forward-circle-outline'
+              onPress={() => navigation.navigate('SendById')}
+            />
+            <ExtraMenuRow
+              title='P2P'
+              subtitle='USDT rates in your local currency'
+              icon='swap-horizontal-outline'
+              onPress={() => navigation.navigate('P2P')}
+            />
+            <ExtraMenuRow
+              title='Mobile money'
+              subtitle='Deposit or withdraw with your phone number'
+              icon='phone-portrait-outline'
+              onPress={() => navigation.navigate('LocalMoney')}
+            />
+            <ExtraMenuRow
+              title='Settings'
+              subtitle='Profile, security, compliance, and more'
+              icon='settings-outline'
+              onPress={() => navigation.navigate('Settings')}
+            />
+          </Card>
+        )}
       </ScrollView>
     </SafeAreaView>
   );

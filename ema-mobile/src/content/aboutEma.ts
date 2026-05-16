@@ -1,5 +1,8 @@
 export type AboutSectionKey = 'who' | 'what' | 'profit';
 
+export const PREMIUM_ALERTS_TERMS =
+  'Optional SMS and email alerts for completed deposits and withdrawals cost $2 per week while enabled. You may turn alerts off anytime in Settings; fees already charged for the current week are not refunded. Alerts require a valid phone (SMS) and account email (email). Message and data rates from your carrier may apply.';
+
 export const ABOUT_EMA: Record<
   AboutSectionKey,
   { title: string; subtitle: string; paragraphs: string[] }
@@ -32,6 +35,7 @@ export const ABOUT_EMA: Record<
     paragraphs: [
       'We retain up to 10% of net revenues from investment programs and trading profits generated on the platform, after strategy costs where applicable.',
       'Service fees apply to financial market access, premium features, and certain trading operations executed through integrated brokers and payment rails.',
+      'Optional deposit and withdrawal SMS or email alerts are billed at $2 per week when you enable them in Settings. You choose the channels; charges recur weekly while the subscription stays on.',
       'Withdrawal processing fees may apply on outbound crypto transfers, as shown before you confirm a payout.',
       'Fee schedules can vary by product; amounts are presented in-app prior to commitment. Token-holder governance may adjust fee parameters over time.',
       'We do not profit from holding your assets outside these disclosed mechanisms, and we do not solicit off-app transfers.',

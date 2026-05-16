@@ -30,6 +30,9 @@ export function sanitizeUserFacingError(raw: string, fallback = 'Something went 
   if (lower.includes('network request failed') || lower.includes('failed to fetch')) {
     return 'Unable to reach Ema right now. Check your connection and try again.';
   }
+  if (lower.includes('cannot delete') || lower.includes('cannot post')) {
+    return 'This action is not available yet. Update the app or try again after the server has been updated.';
+  }
   return text;
 }
 

@@ -1,25 +1,27 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from '../components/Card';
+import { PrimaryButton } from '../components/PrimaryButton';
+import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
-import { nowpaymentsService } from '../services/nowpaymentsService';
+import { useTransactionFeed } from '../hooks/useTransactionFeed';
 import { useTradingStore } from '../store/useTradingStore';
-import type { NowpaymentsSummary } from '../types';
 import { palette } from '../theme/colors';
-import { sanitizeUserFacingError } from '../utils/userFacingError';
-import { mergeWalletActivity } from '../utils/walletActivity';
+import { navigateToTransactionDetail, navigateToTransactionHistory } from '../utils/navigationHelpers';
+import { filterActivityToday } from '../utils/walletActivity';
 
 const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v2';
 
 export function HomeScreen() {
+  const navigation = useNavigation();
   const { user } = useAuth();
   const { account, refreshDashboard, loading, dashboardError } = useTradingStore();
-  const [npSummary, setNpSummary] = useState<NowpaymentsSummary | null>(null);
-  const [cryptoError, setCryptoError] = useState<string | null>(null);
+  const { npSummary, rows, loading: feedLoading, error: cryptoError, refresh: refreshFeed } = useTransactionFeed();
   const [refreshing, setRefreshing] = useState(false);
   const [noticeVisible, setNoticeVisible] = useState(true);
 
@@ -34,20 +36,9 @@ export function HomeScreen() {
     void AsyncStorage.setItem(HOME_NOTICE_DISMISS_KEY, '1');
   };
 
-  const refreshCrypto = useCallback(async () => {
-    setCryptoError(null);
-    try {
-      const summary = await nowpaymentsService.getSummary();
-      setNpSummary(summary);
-    } catch (e: any) {
-      setCryptoError(sanitizeUserFacingError(e?.message || 'Failed to load wallet'));
-      setNpSummary(null);
-    }
-  }, []);
-
   const refresh = useCallback(async () => {
-    await Promise.all([refreshCrypto(), refreshDashboard()]);
-  }, [refreshCrypto, refreshDashboard]);
+    await Promise.all([refreshFeed(), refreshDashboard()]);
+  }, [refreshFeed, refreshDashboard]);
 
   usePolling(refresh, 60000, true);
 
@@ -57,7 +48,8 @@ export function HomeScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  const recentActivity = useMemo(() => mergeWalletActivity(npSummary).slice(0, 15), [npSummary]);
+  const recentActivity = useMemo(() => filterActivityToday(rows, 5), [rows]);
+  const balancesLoading = feedLoading && !npSummary && !cryptoError;
 
   const alpacaEquity =
     account?.equity !== undefined && account?.equity !== null ? `$${Number(account.equity).toFixed(2)}` : null;
@@ -102,30 +94,56 @@ export function HomeScreen() {
         </Card>
       ) : null}
 
-      <Card style={styles.cryptoHero}>
-        <Text style={styles.cryptoHeroLabel}>Crypto wallet</Text>
-        {cryptoError ? <Text style={styles.warn}>{cryptoError}</Text> : null}
-        {!npSummary && !cryptoError ? <Text style={styles.meta}>Loading balances…</Text> : null}
-        {npSummary?.balances?.length ? (
-          npSummary.balances.map((b) => (
-            <View key={b.asset} style={styles.balanceRow}>
-              <Text style={styles.assetCode}>{b.asset.toUpperCase()}</Text>
-              <Text style={styles.balanceValue}>{b.available}</Text>
-              {Number(b.reserved) > 0 ? <Text style={styles.reserved}>Reserved: {b.reserved}</Text> : null}
-            </View>
-          ))
-        ) : npSummary && !cryptoError ? (
-          <Text style={styles.meta}>No balance yet — deposit from the Wallet tab.</Text>
-        ) : null}
-        {npSummary && !npSummary.configured ? (
-          <Text style={styles.meta}>Deposits are temporarily unavailable. Please try again later.</Text>
-        ) : null}
-      </Card>
+      {balancesLoading ? (
+        <BalanceSkeleton />
+      ) : (
+        <Card style={styles.cryptoHero}>
+          <Text style={styles.cryptoHeroLabel}>Crypto wallet</Text>
+          {cryptoError ? <Text style={styles.warn}>{cryptoError}</Text> : null}
+          {npSummary?.balances?.length ? (
+            npSummary.balances.map((b) => (
+              <View key={b.asset} style={styles.balanceRow}>
+                <Text style={styles.assetCode}>{b.asset.toUpperCase()}</Text>
+                <Text style={styles.balanceValue}>{b.available}</Text>
+                {Number(b.reserved) > 0 ? <Text style={styles.reserved}>Reserved: {b.reserved}</Text> : null}
+              </View>
+            ))
+          ) : npSummary && !cryptoError ? (
+            <Text style={styles.meta}>No balance yet — deposit from the Wallet tab.</Text>
+          ) : null}
+          {npSummary && !npSummary.configured ? (
+            <Text style={styles.meta}>Deposits are temporarily unavailable. Please try again later.</Text>
+          ) : null}
+        </Card>
+      )}
 
-      <Card style={styles.activityCard}>
-        <Text style={styles.section}>Recent transactions</Text>
-        <WalletActivityList rows={recentActivity} emptyMessage='No transactions yet.' />
-      </Card>
+      {feedLoading && !rows.length ? (
+        <ActivityListSkeleton rows={5} />
+      ) : (
+        <Card style={styles.activityCard}>
+          <View style={styles.activityHeader}>
+            <Text style={styles.section}>Today&apos;s transactions</Text>
+            {rows.length > 5 ? (
+              <Pressable onPress={() => navigateToTransactionHistory(navigation)}>
+                <Text style={styles.moreLink}>More</Text>
+              </Pressable>
+            ) : null}
+          </View>
+          <WalletActivityList
+            rows={recentActivity}
+            variant='compact'
+            emptyMessage='No transactions today.'
+            onPressRow={(row) => navigateToTransactionDetail(navigation, row)}
+          />
+          {rows.length > 0 && recentActivity.length === 0 ? (
+            <PrimaryButton
+              label='View all history'
+              onPress={() => navigateToTransactionHistory(navigation)}
+              style={{ marginTop: 12 }}
+            />
+          ) : null}
+        </Card>
+      )}
 
       {showAlpaca ? (
         <View style={styles.alpacaFootnoteWrap}>
@@ -161,6 +179,8 @@ const styles = StyleSheet.create({
   meta: { color: palette.textSecondary, marginBottom: 4 },
   warn: { color: '#fbbf24', marginBottom: 6 },
   activityCard: { marginBottom: 8 },
+  activityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  moreLink: { color: palette.primary, fontSize: 14, fontWeight: '700' },
   activityRow: {
     flexDirection: 'row',
     alignItems: 'center',

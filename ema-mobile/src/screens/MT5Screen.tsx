@@ -64,6 +64,7 @@ export function MT5Screen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [closingId, setClosingId] = useState<string | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [liveConnected, setLiveConnected] = useState(false);
   const [status, setStatus] = useState('Save your MT5 details, then connect live when you are ready.');
 
@@ -182,6 +183,50 @@ export function MT5Screen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const onRemoveAccount = (account: Mt5AccountConfig) => {
+    if (!account.id) return;
+    const label = account.accountName || account.login || 'this account';
+    Alert.alert(
+      'Remove MT5 connection',
+      `Remove ${label} from Ema? Saved credentials and cached balance will be deleted. This does not close your broker account.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setRemovingId(account.id!);
+              try {
+                const res = await mt5Service.deleteAccount(account.id!);
+                const rows = res.accounts || [];
+                setAccounts(rows);
+                if (account.id === selectedAccountId) {
+                  await setMt5LivePaused(true);
+                  setLiveConnected(false);
+                  setBalance(null);
+                  setPositions([]);
+                  setHistory([]);
+                  setSelectedAccountId(rows[0]?.id || '');
+                  setStatus(
+                    rows.length
+                      ? 'Connection removed. Select another account or connect live.'
+                      : 'No MT5 account linked. Use + to connect.'
+                  );
+                }
+                showToast('MT5 connection removed');
+              } catch (error: any) {
+                Alert.alert('MT5', String(error?.message || 'Failed to remove connection'));
+              } finally {
+                setRemovingId(null);
+              }
+            })();
+          },
+        },
+      ]
+    );
   };
 
   const onConnectLive = async () => {
@@ -377,19 +422,34 @@ export function MT5Screen() {
           {!accounts.length ? <Text style={styles.meta}>No MT5 account linked yet. Use + to connect.</Text> : null}
           {accounts.map((account) => {
             const selected = account.id === selectedAccountId;
+            const removing = account.id === removingId;
             return (
-              <Pressable
-                key={account.id}
-                style={[styles.accountRow, selected && styles.accountRowActive]}
-                onPress={() => {
-                  if (!account.id) return;
-                  setSelectedAccountId(account.id);
-                  void refreshPanel(account.id, panel, liveConnected);
-                }}
-              >
-                <Text style={styles.accountTitle}>{account.accountName || account.login}</Text>
-                <Text style={styles.meta}>{account.server}</Text>
-              </Pressable>
+              <View key={account.id} style={[styles.accountRow, selected && styles.accountRowActive]}>
+                <Pressable
+                  style={styles.accountRowMain}
+                  onPress={() => {
+                    if (!account.id || removing) return;
+                    setSelectedAccountId(account.id);
+                    void refreshPanel(account.id, panel, liveConnected);
+                  }}
+                >
+                  <Text style={styles.accountTitle}>{account.accountName || account.login}</Text>
+                  <Text style={styles.meta}>{account.server}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.removeBtn}
+                  onPress={() => onRemoveAccount(account)}
+                  disabled={removing}
+                  hitSlop={10}
+                  accessibilityLabel='Remove MT5 connection'
+                >
+                  {removing ? (
+                    <ActivityIndicator size='small' color={palette.danger} />
+                  ) : (
+                    <Ionicons name='trash-outline' size={20} color={palette.danger} />
+                  )}
+                </Pressable>
+              </View>
             );
           })}
         </Card>
@@ -528,6 +588,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   accountRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: palette.border,
     borderRadius: 12,
@@ -536,6 +598,8 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surfaceElevated,
   },
   accountRowActive: { borderColor: palette.primary },
+  accountRowMain: { flex: 1, paddingRight: 8 },
+  removeBtn: { padding: 6, justifyContent: 'center', alignItems: 'center', minWidth: 32 },
   accountTitle: { color: palette.textPrimary, fontWeight: '700', marginBottom: 2 },
   panelTabs: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   panelTab: {

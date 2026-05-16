@@ -23,7 +23,24 @@ export type RootStackParamList = {
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
   Notifications: undefined;
+  TransactionHistory: { initialTab?: TransactionHistoryTab } | undefined;
+  TransactionDetail: { row: WalletActivityRow };
+  CryptoDepositPayment: { deposit: NowpaymentsCreateDepositResponse };
 };
+
+export interface NotificationPreferences {
+  premiumAlertsEnabled: boolean;
+  notifySms: boolean;
+  notifyEmail: boolean;
+  premiumTermsAcceptedAt: string | null;
+}
+
+export interface NotificationPreferencesResponse {
+  preferences: NotificationPreferences;
+  weeklyPriceUsd: number;
+}
+
+export type TransactionHistoryTab = 'all' | 'deposit' | 'withdraw' | 'transfer' | 'p2p' | 'fiat';
 
 export type AppNotification = {
   id: string;
@@ -159,16 +176,25 @@ export interface NowpaymentsPaymentRow {
   createdAt: string;
 }
 
+export type WalletActivityKind = 'ledger' | 'payment' | 'payout' | 'cash';
+
+export type TransactionCategory = 'deposit' | 'withdraw' | 'transfer' | 'p2p' | 'fiat' | 'other';
+
 export interface WalletActivityRow {
   id: string;
-  kind: 'ledger' | 'payment' | 'payout';
+  kind: WalletActivityKind;
   direction: 'in' | 'out';
   asset: string;
   amount: number;
   status: string;
   source: string;
   createdAt: string;
+  category: TransactionCategory;
   availableBalance?: number;
+  address?: string;
+  txHash?: string;
+  fee?: number;
+  methodLabel?: string;
 }
 
 export interface NowpaymentsPayoutRow {

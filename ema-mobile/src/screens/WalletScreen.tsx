@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -8,10 +9,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
-import QRCode from 'react-native-qrcode-svg';
+import { useNavigation } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
+import { NetworkGridCompact } from '../components/NetworkGridCompact';
 import { OptionGrid } from '../components/OptionGrid';
 import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -23,38 +24,43 @@ import { nowpaymentsService } from '../services/nowpaymentsService';
 import { whitelistWalletService } from '../services/whitelistWalletService';
 import { walletService } from '../services/walletService';
 import {
-  NowpaymentsCreateDepositResponse,
-  NowpaymentsDepositStatus,
   NowpaymentsSummary,
+  WalletTransaction,
   WhitelistedWallet,
 } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
+import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
 import { findBalanceForNetwork, maxWithdrawableAmount } from '../utils/walletDisplay';
-import { mergeWalletActivity } from '../utils/walletActivity';
+import {
+  navigateToCryptoDepositPayment,
+  navigateToTransactionDetail,
+  navigateToTransactionHistory,
+} from '../utils/navigationHelpers';
+import { mergeAllWalletActivity } from '../utils/walletActivity';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
 
 export function WalletScreen() {
+  const navigation = useNavigation();
   const { showToast } = useToast();
 
   const [totpEnabled, setTotpEnabled] = useState(false);
   const [tradingBalance, setTradingBalance] = useState<number | null>(null);
+  const [cashTransactions, setCashTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
   const [npSummary, setNpSummary] = useState<NowpaymentsSummary | null>(null);
+  const [npLoading, setNpLoading] = useState(true);
   const [npError, setNpError] = useState<string | null>(null);
   const [whitelistedWallets, setWhitelistedWallets] = useState<WhitelistedWallet[]>([]);
   const [selectedWhitelistId, setSelectedWhitelistId] = useState<string | null>(null);
-  const depositCreditedToastShown = useRef(false);
-
   const [depositUsdAmount, setDepositUsdAmount] = useState('');
   const [depositPayCurrency, setDepositPayCurrency] = useState('usdttrc20');
-  const [activeDeposit, setActiveDeposit] = useState<NowpaymentsCreateDepositResponse | null>(null);
-  const [depositStatus, setDepositStatus] = useState<NowpaymentsDepositStatus | null>(null);
   const [depositModalOpen, setDepositModalOpen] = useState(false);
+  const [depositSubmitting, setDepositSubmitting] = useState(false);
 
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [withdrawCurrency, setWithdrawCurrency] = useState('usdttrc20');
@@ -101,6 +107,8 @@ export function WalletScreen() {
     } catch (e: any) {
       setNpError(sanitizeError(e?.message || 'Failed to load wallet'));
       setNpSummary(null);
+    } finally {
+      setNpLoading(false);
     }
   }, []);
 
@@ -108,8 +116,10 @@ export function WalletScreen() {
     try {
       const cash = await walletService.getWallet();
       setTradingBalance(cash.balance);
+      setCashTransactions(cash.transactions ?? []);
     } catch {
       setTradingBalance(null);
+      setCashTransactions([]);
     }
     try {
       const totp = await authService.getTotpStatus();
@@ -137,31 +147,6 @@ export function WalletScreen() {
     setRefreshing(false);
   }, [refresh]);
 
-  const pollActiveDeposit = useCallback(async () => {
-    if (!activeDeposit?.id) return;
-    try {
-      const status = await nowpaymentsService.getDeposit(activeDeposit.id);
-      setDepositStatus(status);
-      if (status.ledgerCredited || status.status === 'finished') {
-        await refreshNowpayments();
-        if (status.ledgerCredited && !depositCreditedToastShown.current) {
-          depositCreditedToastShown.current = true;
-          showToast('Deposit credited to your wallet');
-        }
-      }
-    } catch {
-      // ignore poll errors
-    }
-  }, [activeDeposit?.id, refreshNowpayments, showToast]);
-
-  useEffect(() => {
-    if (!activeDeposit?.id) return;
-    if (depositStatus?.ledgerCredited) return;
-    void pollActiveDeposit();
-    const t = setInterval(() => void pollActiveDeposit(), 15000);
-    return () => clearInterval(t);
-  }, [activeDeposit?.id, depositStatus?.ledgerCredited, pollActiveDeposit]);
-
   const onCreateDeposit = async () => {
     const priceAmount = Number(depositUsdAmount);
     if (!Number.isFinite(priceAmount) || priceAmount <= 0) {
@@ -169,23 +154,16 @@ export function WalletScreen() {
       return;
     }
     try {
+      setDepositSubmitting(true);
       setNpError(null);
       const created = await nowpaymentsService.createDeposit(priceAmount, depositPayCurrency, 'usd');
-      setActiveDeposit(created);
-      setDepositStatus({
-        id: created.id,
-        paymentId: created.paymentId,
-        status: created.status,
-        payAddress: created.payAddress,
-        payAmount: created.payAmount,
-        payCurrency: created.payCurrency,
-        ledgerCredited: false,
-      });
-      depositCreditedToastShown.current = false;
-      await refreshNowpayments();
-      showToast('Payment created — send crypto to the address shown');
+      setDepositModalOpen(false);
+      setDepositUsdAmount('');
+      navigateToCryptoDepositPayment(navigation, created);
     } catch (e: any) {
       Alert.alert('Deposit failed', sanitizeError(e?.message || 'Could not create payment'));
+    } finally {
+      setDepositSubmitting(false);
     }
   };
 
@@ -258,15 +236,6 @@ export function WalletScreen() {
     setWithdrawModalOpen(true);
   };
 
-  const onCopyAddress = async (addr: string) => {
-    try {
-      await Clipboard.setStringAsync(addr);
-      showToast('Address copied');
-    } catch {
-      Alert.alert('Copy failed', 'Could not copy address.');
-    }
-  };
-
   function sanitizeError(raw: string) {
     return sanitizeUserFacingError(raw, 'Service temporarily unavailable. Please try again.');
   }
@@ -285,10 +254,12 @@ export function WalletScreen() {
     walletsForWithdrawCurrency.some((w) => w.id === selectedWhitelistId) &&
     withdrawTotpOk;
 
-  const payAddress = depositStatus?.payAddress || activeDeposit?.payAddress;
-  const payAmount = depositStatus?.payAmount || activeDeposit?.payAmount;
-  const payStatus = depositStatus?.status || activeDeposit?.status || 'waiting';
-  const recentActivity = mergeWalletActivity(npSummary).slice(0, 12);
+  const allActivity = useMemo(
+    () => mergeAllWalletActivity(npSummary, cashTransactions),
+    [npSummary, cashTransactions]
+  );
+  const recentActivity = useMemo(() => allActivity.slice(0, 5), [allActivity]);
+  const walletLoading = npLoading && !npSummary && !npError;
 
   const inputStyle = {
     backgroundColor: palette.surfaceElevated,
@@ -332,98 +303,92 @@ export function WalletScreen() {
           ) : null}
         </Card>
 
-        <Card style={styles.heroCard}>
-          <Text style={styles.heroCaption}>Wallet balances</Text>
-          {npSummary?.balances?.length ? (
-            npSummary.balances.map((b) => (
-              <View key={b.asset} style={styles.balanceRow}>
-                <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
-                <Text style={styles.assetValue}>{b.available}</Text>
-                {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
-              </View>
-            ))
-          ) : (
-            <Text style={styles.item}>No balance yet. Deposit crypto to get started.</Text>
-          )}
-          {tradingBalance != null && tradingBalance > 0 ? (
-            <Text style={styles.hint}>
-              Trading balance (airfarming / contracts): ${tradingBalance.toFixed(2)} USD — separate from crypto wallet.
-            </Text>
-          ) : null}
-          <View style={styles.quickActionsRow}>
-            <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
-            <View style={{ width: 8 }} />
-            <PrimaryButton
-              label='Withdraw'
-              onPress={openWithdrawModal}
-              style={{ flex: 1 }}
-              disabled={!complianceComplete}
-            />
-          </View>
-        </Card>
+        {walletLoading ? (
+          <BalanceSkeleton />
+        ) : (
+          <Card style={styles.heroCard}>
+            <Text style={styles.heroCaption}>Wallet balances</Text>
+            {npSummary?.balances?.length ? (
+              npSummary.balances.map((b) => (
+                <View key={b.asset} style={styles.balanceRow}>
+                  <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
+                  <Text style={styles.assetValue}>{b.available}</Text>
+                  {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
+                </View>
+              ))
+            ) : (
+              <Text style={styles.item}>No balance yet. Deposit crypto to get started.</Text>
+            )}
+            {tradingBalance != null && tradingBalance > 0 ? (
+              <Text style={styles.hint}>
+                Trading balance (airfarming / contracts): ${tradingBalance.toFixed(2)} USD — separate from crypto wallet.
+              </Text>
+            ) : null}
+            <View style={styles.quickActionsRow}>
+              <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
+              <View style={{ width: 8 }} />
+              <PrimaryButton
+                label='Withdraw'
+                onPress={openWithdrawModal}
+                style={{ flex: 1 }}
+                disabled={!complianceComplete}
+              />
+            </View>
+          </Card>
+        )}
 
-        <Card style={styles.activityCard}>
-          <Text style={styles.sectionTitle}>Recent activity</Text>
-          <WalletActivityList rows={recentActivity} />
-        </Card>
+        {walletLoading && !allActivity.length ? (
+          <ActivityListSkeleton rows={5} />
+        ) : (
+          <Card style={styles.activityCard}>
+            <View style={styles.activityHeader}>
+              <Text style={styles.sectionTitle}>Recent activity</Text>
+              {allActivity.length > 5 ? (
+                <Pressable onPress={() => navigateToTransactionHistory(navigation)}>
+                  <Text style={styles.moreLink}>More</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <WalletActivityList
+              rows={recentActivity}
+              variant='compact'
+              emptyMessage='No activity yet.'
+              onPressRow={(row) => navigateToTransactionDetail(navigation, row)}
+            />
+            {allActivity.length > 0 && allActivity.length <= 5 ? (
+              <PrimaryButton
+                label='View all transactions'
+                onPress={() => navigateToTransactionHistory(navigation)}
+                style={{ marginTop: 12 }}
+              />
+            ) : null}
+          </Card>
+        )}
       </ScrollView>
 
-      <FormModal
-        visible={depositModalOpen}
-        title='Deposit'
-        onClose={() => setDepositModalOpen(false)}
-        footer={
-          activeDeposit ? (
-            <PrimaryButton label='Close' onPress={() => setDepositModalOpen(false)} style={{ marginTop: 12 }} />
-          ) : undefined
-        }
-      >
-        {!activeDeposit ? (
-          <>
-            <Text style={styles.hint}>Amount is priced in USD; you pay in the selected cryptocurrency.</Text>
-            <TextInput
-              style={inputStyle}
-              value={depositUsdAmount}
-              onChangeText={setDepositUsdAmount}
-              placeholder='Amount in USD'
-              placeholderTextColor={palette.textSecondary}
-              keyboardType='numeric'
-            />
-            <Text style={styles.fieldLabel}>Network</Text>
-            <OptionHighlightList
-              options={PAY_CURRENCY_OPTIONS}
-              value={depositPayCurrency}
-              onChange={setDepositPayCurrency}
-              formatLabel={formatNetworkLabel}
-            />
-            <PrimaryButton label='Create payment' onPress={() => void onCreateDeposit()} />
-          </>
-        ) : (
-          <>
-            <Text style={styles.item}>Status: {payStatus}</Text>
-            <Text style={styles.item}>
-              Send {payAmount || '—'} {activeDeposit.payCurrency} to:
-            </Text>
-            <Text style={styles.mono}>{payAddress || 'Address pending…'}</Text>
-            {payAddress ? (
-              <View style={styles.qrWrap}>
-                <QRCode value={payAddress} size={140} color='#111827' backgroundColor='white' />
-              </View>
-            ) : null}
-            <PrimaryButton label='Copy address' onPress={() => payAddress && void onCopyAddress(payAddress)} disabled={!payAddress} />
-            <PrimaryButton label='Refresh status' onPress={() => void pollActiveDeposit()} style={{ marginTop: 8 }} />
-            <PrimaryButton
-              label='New deposit'
-              onPress={() => {
-                setActiveDeposit(null);
-                setDepositStatus(null);
-                setDepositUsdAmount('');
-                depositCreditedToastShown.current = false;
-              }}
-              style={{ marginTop: 8 }}
-            />
-          </>
-        )}
+      <FormModal visible={depositModalOpen} title='Deposit' onClose={() => setDepositModalOpen(false)}>
+        <Text style={styles.hint}>Amount is priced in USD; you pay in the selected network.</Text>
+        <TextInput
+          style={inputStyle}
+          value={depositUsdAmount}
+          onChangeText={setDepositUsdAmount}
+          placeholder='Amount in USD'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='numeric'
+        />
+        <Text style={styles.fieldLabel}>Network</Text>
+        <NetworkGridCompact
+          options={PAY_CURRENCY_OPTIONS}
+          value={depositPayCurrency}
+          onChange={setDepositPayCurrency}
+          formatLabel={formatNetworkLabel}
+          featuredOptions={['usdttrc20', 'eth']}
+        />
+        <PrimaryButton
+          label={depositSubmitting ? 'Creating…' : 'Create payment'}
+          onPress={() => void onCreateDeposit()}
+          disabled={depositSubmitting}
+        />
       </FormModal>
 
       <FormModal
@@ -508,7 +473,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   label: { color: palette.textSecondary, marginBottom: 8 },
   fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 4, marginBottom: 6, fontWeight: '600' },
-  sectionTitle: { color: palette.textPrimary, marginBottom: 14, fontSize: 17, fontWeight: '700' },
+  sectionTitle: { color: palette.textPrimary, fontSize: 17, fontWeight: '700' },
+  activityHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
+  moreLink: { color: palette.primary, fontSize: 14, fontWeight: '700' },
   activityCard: { paddingTop: 16, paddingBottom: 8 },
   item: { color: palette.textPrimary, marginBottom: 6 },
   hint: { color: palette.textSecondary, marginTop: 4, marginBottom: 8, fontSize: 12 },
@@ -521,7 +488,6 @@ const styles = StyleSheet.create({
   assetSub: { color: palette.textSecondary, fontSize: 12 },
   quickActionsRow: { flexDirection: 'row', marginTop: 12 },
   mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
-  qrWrap: { alignItems: 'center', marginVertical: 12 },
   complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },
   complianceBannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
   gasCard: { marginBottom: 12, borderColor: palette.primary, borderLeftWidth: 3 },
