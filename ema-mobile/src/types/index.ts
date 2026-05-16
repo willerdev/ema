@@ -219,6 +219,10 @@ export interface NowpaymentsLedgerRow {
 
 export interface NowpaymentsSummary {
   balances: NowpaymentsBalanceRow[];
+  /** Internal USD cash wallet (airfarming / trading); funds USDT crypto withdrawals 1:1 when set. */
+  cashWalletUsd?: number;
+  maxWithdrawableUsdt?: number;
+  cashFundsCryptoWithdrawals?: boolean;
   activity?: WalletActivityRow[];
   payments: NowpaymentsPaymentRow[];
   payouts: NowpaymentsPayoutRow[];

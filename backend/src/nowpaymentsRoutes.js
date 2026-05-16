@@ -29,6 +29,12 @@ const {
   notifyWithdrawalOutcome,
   payoutOutcomeAlreadyNotified,
 } = require('./depositNotifications');
+const {
+  getCashWalletUsd,
+  getCombinedWithdrawable,
+  fundPayoutFromCashWallet,
+  refundCashFundingForPayout,
+} = require('./walletFunding');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -307,6 +313,7 @@ async function applyPayoutStatusToRow(row, status, rawBody) {
       await updateNowpaymentsPayout(updated.id, { reserve_released: true });
     }
   } else if (FAILED_PAYOUT_STATUSES.includes(st) && !updated.reserve_released) {
+    await refundCashFundingForPayout(updated);
     await updateNowpaymentsPayout(updated.id, { reserve_released: true, status: st });
   }
 }
@@ -367,12 +374,17 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         await syncPendingPayoutsForUser(req.userId);
       }
       const balances = await getCryptoBalancesByUserId(req.userId);
+      const cashWalletUsd = await getCashWalletUsd(req.userId);
+      const usdtFunding = await getCombinedWithdrawable(req.userId, 'usdttrc20');
       const payments = await listNowpaymentsPaymentsByUserId(req.userId, 20);
       const payouts = await listNowpaymentsPayoutsByUserId(req.userId, 20);
       const ledger = await listCryptoLedgerEntriesByUserId(req.userId, 40);
       const activity = buildWalletActivity({ ledger, payments, payouts });
       return res.json({
         balances,
+        cashWalletUsd,
+        maxWithdrawableUsdt: usdtFunding.maxWithdrawable,
+        cashFundsCryptoWithdrawals: true,
         activity: activity.map(mapPublicActivity),
         payments: payments.map((p) => ({
           id: p.id,
@@ -554,24 +566,73 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      const available = await getAvailableForAsset(req.userId, currency);
-      if (available < amount) {
-        return res.status(400).json({ message: 'Insufficient crypto balance', available, requested: amount });
+      const fundingPreview = await getCombinedWithdrawable(req.userId, currency);
+      if (amount > fundingPreview.maxWithdrawable) {
+        return res.status(400).json({
+          message: `Insufficient balance. Maximum withdrawable (after fee reserve): ${fundingPreview.maxWithdrawable.toFixed(6)}.`,
+          available: fundingPreview.combinedAvailable,
+          maxWithdrawable: fundingPreview.maxWithdrawable,
+          cryptoAvailable: fundingPreview.cryptoAvailable,
+          cashWalletUsd: fundingPreview.cashWalletUsd,
+          requested: amount,
+        });
       }
 
+      const payoutId = newId();
       const uniqueExternalId = newId().replace(/-/g, '').slice(0, 24);
-      const payoutRow = await insertNowpaymentsPayout({
-        id: newId(),
-        user_id: req.userId,
-        payout_id: null,
-        unique_external_id: uniqueExternalId,
-        currency,
-        address,
-        amount,
-        status: 'pending',
-        reserve_released: false,
-        raw_last_ipn: null,
-      });
+      let cashFunded = 0;
+      let payoutRow = null;
+
+      try {
+        const funding = await fundPayoutFromCashWallet({
+          userId: req.userId,
+          asset: currency,
+          amount,
+          payoutId,
+        });
+        cashFunded = funding.cashFunded;
+
+        const available = await getAvailableForAsset(req.userId, currency);
+        if (available < amount) {
+          if (cashFunded > 0) {
+            await refundCashFundingForPayout({
+              id: payoutId,
+              user_id: req.userId,
+              currency,
+              cash_funded_amount: cashFunded,
+            });
+          }
+          return res.status(400).json({
+            message: 'Insufficient balance after funding',
+            available,
+            requested: amount,
+          });
+        }
+
+        payoutRow = await insertNowpaymentsPayout({
+          id: payoutId,
+          user_id: req.userId,
+          payout_id: null,
+          unique_external_id: uniqueExternalId,
+          currency,
+          address,
+          amount,
+          cash_funded_amount: cashFunded,
+          status: 'pending',
+          reserve_released: false,
+          raw_last_ipn: null,
+        });
+      } catch (fundErr) {
+        if (cashFunded > 0) {
+          await refundCashFundingForPayout({
+            id: payoutId,
+            user_id: req.userId,
+            currency,
+            cash_funded_amount: cashFunded,
+          });
+        }
+        throw fundErr;
+      }
 
       const ipnUrl = payoutIpnUrl();
 
@@ -589,6 +650,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
           ],
         });
       } catch (e) {
+        await refundCashFundingForPayout(payoutRow);
         await updateNowpaymentsPayout(payoutRow.id, {
           status: 'failed',
           reserve_released: true,
@@ -599,6 +661,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       const { withdrawalId, batchId } = np.extractPayoutIds(npResult);
       if (!withdrawalId) {
+        await refundCashFundingForPayout(payoutRow);
         await updateNowpaymentsPayout(payoutRow.id, {
           status: 'failed',
           reserve_released: true,
@@ -639,6 +702,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
+        cashFunded: Number(updated.cash_funded_amount || 0),
         verified: Boolean(verifyRaw),
       });
     } catch (e) {

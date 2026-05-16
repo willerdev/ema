@@ -4,6 +4,7 @@ export function formatLedgerSource(source: string): string {
   if (!s || s.includes('nowpayment') || s.includes('np_')) return 'Wallet';
   if (s.includes('local_deposit')) return 'Mobile deposit';
   if (s.includes('local_withdraw')) return 'Mobile withdrawal';
+  if (s.includes('cash_wallet')) return 'Cash wallet';
   if (s.includes('deposit')) return 'Deposit';
   if (s.includes('withdraw') || s.includes('payout')) return 'Withdrawal';
   if (s.includes('airfarm')) return 'Airfarming';
@@ -29,4 +30,15 @@ export function findBalanceForNetwork(
     balances.find((b) => code.includes('usdt') && b.asset.toLowerCase().includes('usdt')) ||
     balances.find((b) => b.asset.toLowerCase().includes(code));
   return Number(row?.available ?? 0) || 0;
+}
+
+/** Crypto ledger + cash wallet (USD) for USDT-family networks. */
+export function combinedWithdrawableForNetwork(
+  summary: { balances?: { asset: string; available: string }[]; cashWalletUsd?: number } | null | undefined,
+  networkCode: string
+): number {
+  const crypto = findBalanceForNetwork(summary?.balances, networkCode);
+  const code = networkCode.toLowerCase();
+  const cash = code.includes('usdt') ? Number(summary?.cashWalletUsd ?? 0) || 0 : 0;
+  return crypto + cash;
 }

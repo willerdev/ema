@@ -32,7 +32,11 @@ import { palette } from '../theme/colors';
 import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacingError';
 import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
-import { findBalanceForNetwork, maxWithdrawableAmount } from '../utils/walletDisplay';
+import {
+  combinedWithdrawableForNetwork,
+  findBalanceForNetwork,
+  maxWithdrawableAmount,
+} from '../utils/walletDisplay';
 import {
   navigateToCryptoDepositPayment,
   navigateToTransactionDetail,
@@ -48,7 +52,6 @@ export function WalletScreen() {
   const { showToast } = useToast();
 
   const [totpEnabled, setTotpEnabled] = useState(false);
-  const [tradingBalance, setTradingBalance] = useState<number | null>(null);
   const [cashTransactions, setCashTransactions] = useState<WalletTransaction[]>([]);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -115,10 +118,8 @@ export function WalletScreen() {
   const refresh = useCallback(async () => {
     try {
       const cash = await walletService.getWallet();
-      setTradingBalance(cash.balance);
       setCashTransactions(cash.transactions ?? []);
     } catch {
-      setTradingBalance(null);
       setCashTransactions([]);
     }
     try {
@@ -167,7 +168,7 @@ export function WalletScreen() {
     }
   };
 
-  const availableForWithdraw = findBalanceForNetwork(npSummary?.balances, withdrawCurrency);
+  const availableForWithdraw = combinedWithdrawableForNetwork(npSummary, withdrawCurrency);
   const maxWithdraw = maxWithdrawableAmount(availableForWithdraw);
 
   const onWithdraw = async () => {
@@ -228,7 +229,7 @@ export function WalletScreen() {
       selectedWhitelistId && forCurrency.some((w) => w.id === selectedWhitelistId)
         ? selectedWhitelistId
         : forCurrency[0].id;
-    const snapMax = maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, withdrawCurrency));
+    const snapMax = maxWithdrawableAmount(combinedWithdrawableForNetwork(npSummary, withdrawCurrency));
     setSelectedWhitelistId(nextId ?? null);
     setWithdrawModalMax(snapMax);
     setWithdrawModalCurrencyLabel(formatNetworkLabel(withdrawCurrency));
@@ -308,22 +309,26 @@ export function WalletScreen() {
         ) : (
           <Card style={styles.heroCard}>
             <Text style={styles.heroCaption}>Wallet balances</Text>
-            {npSummary?.balances?.length ? (
-              npSummary.balances.map((b) => (
-                <View key={b.asset} style={styles.balanceRow}>
-                  <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
-                  <Text style={styles.assetValue}>{b.available}</Text>
-                  {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
-                </View>
-              ))
+            {npSummary?.balances?.length || (npSummary?.cashWalletUsd ?? 0) > 0 ? (
+              <>
+                {(npSummary?.cashWalletUsd ?? 0) > 0 ? (
+                  <View key='cash-wallet' style={styles.balanceRow}>
+                    <Text style={styles.assetLabel}>CASH (USD)</Text>
+                    <Text style={styles.assetValue}>{npSummary!.cashWalletUsd!.toFixed(2)}</Text>
+                    <Text style={styles.assetSub}>Withdrawable as USDT to whitelisted addresses</Text>
+                  </View>
+                ) : null}
+                {npSummary?.balances?.map((b) => (
+                  <View key={b.asset} style={styles.balanceRow}>
+                    <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
+                    <Text style={styles.assetValue}>{b.available}</Text>
+                    {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
+                  </View>
+                ))}
+              </>
             ) : (
               <Text style={styles.item}>No balance yet. Deposit crypto to get started.</Text>
             )}
-            {tradingBalance != null && tradingBalance > 0 ? (
-              <Text style={styles.hint}>
-                Trading balance (airfarming / contracts): ${tradingBalance.toFixed(2)} USD — separate from crypto wallet.
-              </Text>
-            ) : null}
             <View style={styles.quickActionsRow}>
               <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
               <View style={{ width: 8 }} />
@@ -425,7 +430,7 @@ export function WalletScreen() {
           onChange={(c) => {
             setWithdrawCurrency(c);
             setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
-            setWithdrawModalMax(maxWithdrawableAmount(findBalanceForNetwork(npSummary?.balances, c)));
+            setWithdrawModalMax(maxWithdrawableAmount(combinedWithdrawableForNetwork(npSummary, c)));
             const first = whitelistedWallets.find((w) => w.currency === c);
             setSelectedWhitelistId(first?.id ?? null);
           }}
