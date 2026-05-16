@@ -24,7 +24,12 @@ import { nowpaymentsService } from '../services/nowpaymentsService';
 import { ExtraStackParamList } from '../types';
 import { palette } from '../theme/colors';
 import { sanitizeUserFacingError } from '../utils/userFacingError';
-import { findBalanceForNetwork, maxWithdrawableAmount } from '../utils/walletDisplay';
+import {
+  MIN_MOMO_USDT,
+  maxWithdrawableAmount,
+  minFiatForMomo,
+  sumUsdtFamilyAvailable,
+} from '../utils/walletDisplay';
 
 type Nav = NativeStackNavigationProp<ExtraStackParamList, 'LocalMoney'>;
 
@@ -67,7 +72,7 @@ export function LocalMoneyScreen() {
       setComplianceComplete(profileRes.complete);
       setPhone(profileRes.profile?.phone || '');
       setTotpEnabled(Boolean(totpRes.enabled));
-      const usdt = findBalanceForNetwork(np?.balances, 'usdt');
+      const usdt = sumUsdtFamilyAvailable(np?.balances, np?.cashWalletUsd);
       setMaxUsdt(maxWithdrawableAmount(usdt));
     } catch {
       /* ignore */
@@ -88,10 +93,19 @@ export function LocalMoneyScreen() {
     marginTop: 8,
   };
 
+  const minFiat = region ? minFiatForMomo(region.usdtToFiatRate) : 0;
+
   const onDeposit = async () => {
     if (!countryCode || !supported) return;
     const amount = Number(fiatAmount);
     if (!Number.isFinite(amount) || amount <= 0) return;
+    if (amount < minFiat) {
+      Alert.alert(
+        'Amount too low',
+        `Minimum deposit is ${MIN_MOMO_USDT} USDT (~${minFiat.toLocaleString()} ${region?.fiatLabel}).`
+      );
+      return;
+    }
     setBusy(true);
     try {
       const res = await localMoneyService.deposit({
@@ -121,8 +135,15 @@ export function LocalMoneyScreen() {
     }
     const amount = Number(cryptoAmount);
     if (!Number.isFinite(amount) || amount <= 0) return;
+    if (amount < MIN_MOMO_USDT) {
+      Alert.alert('Amount too low', `Minimum withdrawal is ${MIN_MOMO_USDT} USDT.`);
+      return;
+    }
     if (maxUsdt > 0 && amount > maxUsdt) {
-      Alert.alert('Insufficient balance', `Maximum withdrawable: ${maxUsdt.toFixed(6)} USDT (fee reserve applied).`);
+      Alert.alert(
+        'Insufficient balance',
+        `Maximum withdrawable: ${Math.floor(maxUsdt)} USDT (fee reserve applied).`
+      );
       return;
     }
     const code = totpCode.replace(/\s/g, '');
@@ -253,8 +274,8 @@ export function LocalMoneyScreen() {
                 placeholderTextColor={palette.textSecondary}
               />
               <Text style={styles.hint}>
-                You will receive a payment prompt on your phone. We will text you when the deposit is initiated or
-                complete.
+                Minimum {MIN_MOMO_USDT} USDT (~{minFiat.toLocaleString()} {region?.fiatLabel}). You will receive a payment
+                prompt on your phone. We will text you when the deposit is initiated or complete.
               </Text>
               <PrimaryButton
                 label={busy ? 'Starting…' : 'Deposit with mobile money'}
@@ -284,8 +305,9 @@ export function LocalMoneyScreen() {
                   ≈ {estimatedFiat.toLocaleString()} {region?.fiatLabel}
                 </Text>
               ) : null}
+              <Text style={styles.meta}>Minimum withdrawal: {MIN_MOMO_USDT} USDT</Text>
               {maxUsdt > 0 ? (
-                <Text style={styles.meta}>Max withdrawable: {maxUsdt.toFixed(6)} USDT</Text>
+                <Text style={styles.meta}>Max withdrawable: {Math.floor(maxUsdt)} USDT</Text>
               ) : null}
               <Text style={[styles.fieldLabel, { marginTop: 12 }]}>Mobile number</Text>
               <TextInput

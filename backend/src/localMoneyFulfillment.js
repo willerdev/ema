@@ -5,6 +5,7 @@ const {
   updateLocalMoneyOrder,
 } = require('./db');
 const { getRegion, maskPhone } = require('./localMoneyRegions');
+const { canonicalUsdtAsset } = require('./usdtBalances');
 const { sendSms } = require('./services/twilioSms');
 const { notifyDepositCredited, notifyWithdrawalOutcome, formatAmount } = require('./depositNotifications');
 
@@ -27,7 +28,7 @@ async function creditDepositLedger(order) {
   await insertCryptoLedgerEntry({
     id: newId(),
     user_id: order.user_id,
-    asset: 'usdt',
+    asset: canonicalUsdtAsset(),
     direction: 'in',
     amount: usdt,
     source: 'local_deposit',

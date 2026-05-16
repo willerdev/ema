@@ -33,12 +33,13 @@ import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacing
 import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
 import {
+  aggregateBalancesForDisplay,
   combinedWithdrawableForNetwork,
-  findBalanceForNetwork,
   maxWithdrawableAmount,
 } from '../utils/walletDisplay';
 import {
   navigateToCryptoDepositPayment,
+  navigateToSupport,
   navigateToTransactionDetail,
   navigateToTransactionHistory,
 } from '../utils/navigationHelpers';
@@ -186,7 +187,7 @@ export function WalletScreen() {
     if (maxWithdraw > 0 && n > maxWithdraw) {
       Alert.alert(
         'Gas reserve required',
-        `Keep at least 5% of your balance for network fees. Maximum withdrawable now: ${maxWithdraw.toFixed(6)}.`
+        `Keep at least 5% of your balance for network fees. Maximum withdrawable now: ${Math.floor(maxWithdraw)}.`
       );
       return;
     }
@@ -311,18 +312,13 @@ export function WalletScreen() {
             <Text style={styles.heroCaption}>Wallet balances</Text>
             {npSummary?.balances?.length || (npSummary?.cashWalletUsd ?? 0) > 0 ? (
               <>
-                {(npSummary?.cashWalletUsd ?? 0) > 0 ? (
-                  <View key='cash-wallet' style={styles.balanceRow}>
-                    <Text style={styles.assetLabel}>CASH (USD)</Text>
-                    <Text style={styles.assetValue}>{npSummary!.cashWalletUsd!.toFixed(2)}</Text>
-                    <Text style={styles.assetSub}>Withdrawable as USDT to whitelisted addresses</Text>
-                  </View>
-                ) : null}
-                {npSummary?.balances?.map((b) => (
+                {aggregateBalancesForDisplay(npSummary?.balances, npSummary?.cashWalletUsd).map((b) => (
                   <View key={b.asset} style={styles.balanceRow}>
                     <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
                     <Text style={styles.assetValue}>{b.available}</Text>
-                    {Number(b.reserved) > 0 ? <Text style={styles.assetSub}>Reserved: {b.reserved}</Text> : null}
+                    {b.reserved && Number(b.reserved) > 0 ? (
+                      <Text style={styles.assetSub}>Reserved: {b.reserved}</Text>
+                    ) : null}
                   </View>
                 ))}
               </>
@@ -412,9 +408,15 @@ export function WalletScreen() {
         </View>
         <Text style={styles.gasTextModal}>
           Keep 5% in your wallet for gas. Max withdrawable:{' '}
-          {withdrawModalMax > 0 ? withdrawModalMax.toFixed(6) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
+          {withdrawModalMax > 0 ? Math.floor(withdrawModalMax) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
           can block future deposits.
         </Text>
+        <Pressable onPress={() => navigateToSupport(navigation, { category: 'withdraw' })} style={styles.supportLinkWrap}>
+          <Text style={styles.supportLinkText}>
+            Having trouble withdrawing? <Text style={styles.supportLinkAccent}>Get help in Support</Text>
+          </Text>
+        </Pressable>
+        <Text style={styles.ruleNote}>Rule : 1 . when a lion is hungry he eats</Text>
         <TextInput
           style={inputStyle}
           value={withdrawAmount}
@@ -499,6 +501,16 @@ const styles = StyleSheet.create({
   gasTitle: { color: palette.primary, fontWeight: '700', marginBottom: 6, fontSize: 14 },
   gasText: { color: palette.textSecondary, fontSize: 12, lineHeight: 18, marginBottom: 6 },
   gasTextModal: { color: '#fbbf24', fontSize: 12, lineHeight: 17, marginBottom: 10 },
+  supportLinkWrap: { marginBottom: 8 },
+  supportLinkText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16 },
+  supportLinkAccent: { color: palette.primary, fontWeight: '600' },
+  ruleNote: {
+    color: palette.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    fontStyle: 'italic',
+    marginBottom: 12,
+  },
   ipSlot: { minHeight: 52, marginBottom: 10, justifyContent: 'center' },
   ipText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16 },
 });

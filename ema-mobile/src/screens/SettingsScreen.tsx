@@ -29,7 +29,7 @@ import { notificationPreferencesService } from '../services/notificationPreferen
 import type { NotificationPreferences } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel } from '../utils/userFacingError';
-import { navigateToTransactionHistory } from '../utils/navigationHelpers';
+import { navigateToSupport, navigateToTransactionHistory } from '../utils/navigationHelpers';
 
 const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -510,6 +510,11 @@ export function SettingsScreen() {
             title='Deposit & withdrawal alerts'
             subtitle={alertsSummary}
             onPress={() => setAlertsModalOpen(true)}
+          />
+          <SettingsRow
+            title='Help & support'
+            subtitle='Withdrawal, deposit, earnings, or transfer issues'
+            onPress={() => navigateToSupport(navigation)}
           />
         </Card>
 

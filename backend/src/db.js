@@ -1046,6 +1046,45 @@ async function listPendingLocalMoneyWithdrawalsByUserId(userId) {
   return data || [];
 }
 
+async function insertSupportTicket(row) {
+  const now = new Date().toISOString();
+  const payload = {
+    id: row.id || id(),
+    user_id: row.user_id,
+    category: row.category,
+    status: row.status || 'under_review',
+    payload: row.payload || {},
+    related_activity_id: row.related_activity_id || null,
+    created_at: row.created_at || now,
+    updated_at: row.updated_at || now,
+  };
+  const { data, error } = await supabase.from('support_tickets').insert(payload).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listSupportTicketsByUserId(userId, limit = 30) {
+  const { data, error } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getSupportTicketForUser(userId, ticketId) {
+  const { data, error } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', ticketId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function createAppNotification({ userId, title, body }) {
   const row = {
     user_id: userId || null,
@@ -1187,6 +1226,9 @@ module.exports = {
   MAX_WHITELISTED_WALLETS_PER_USER,
   listNotificationsForUser,
   createAppNotification,
+  insertSupportTicket,
+  listSupportTicketsByUserId,
+  getSupportTicketForUser,
   getNotificationPreferencesByUserId,
   upsertNotificationPreferences,
   insertLocalMoneyOrder,

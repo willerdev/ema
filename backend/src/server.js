@@ -57,6 +57,8 @@ const { registerComplianceRoutes } = require('./complianceRoutes');
 const { registerWhitelistWalletRoutes } = require('./whitelistWalletRoutes');
 const { registerNotificationRoutes } = require('./notificationRoutes');
 const { registerNotificationPreferencesRoutes } = require('./notificationPreferencesRoutes');
+const { registerSupportRoutes } = require('./supportRoutes');
+const { notifyPeerTransfer } = require('./peerTransferNotifications');
 const { registerLocalMoneyRoutes, handleFlutterwaveWebhook } = require('./localMoneyRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
@@ -617,6 +619,7 @@ registerLocalMoneyRoutes(app, { authMiddleware });
 registerWhitelistWalletRoutes(app, { authMiddleware });
 registerNotificationRoutes(app, { authMiddleware });
 registerNotificationPreferencesRoutes(app, { authMiddleware });
+registerSupportRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 
@@ -712,10 +715,22 @@ app.post('/wallet/transfer', authMiddleware, requireComplianceProfile, async (re
     });
 
     const fromBalance = Number.parseFloat(String(result?.from_balance ?? 0)) || 0;
+    const recipientUserId = result?.to_user_id ? String(result.to_user_id) : null;
+    const idempotent = Boolean(result?.idempotent);
+
+    if (!idempotent && recipientUserId) {
+      void notifyPeerTransfer({
+        senderUserId: req.userId,
+        recipientUserId,
+        amount: roundedAmount,
+        recipientCode: toTransferCode,
+      });
+    }
+
     return res.json({
       transferId: result?.transfer_id,
       balance: fromBalance,
-      idempotent: Boolean(result?.idempotent),
+      idempotent,
     });
   } catch (error) {
     const mapped = mapRpcPeerTransferError(error);

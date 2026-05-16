@@ -1,4 +1,9 @@
-import type { NowpaymentsCreateDepositResponse, TransactionHistoryTab, WalletActivityRow } from '../types';
+import type {
+  NowpaymentsCreateDepositResponse,
+  RootStackParamList,
+  TransactionHistoryTab,
+  WalletActivityRow,
+} from '../types';
 
 type NavLike = {
   getParent: () => NavLike | undefined;
@@ -35,4 +40,12 @@ export function navigateToCryptoDepositPayment(
 ) {
   const root = getRootNavigation(navigation);
   root.navigate('CryptoDepositPayment', { deposit });
+}
+
+export function navigateToSupport(
+  navigation: NavLike,
+  params?: RootStackParamList['Support']
+) {
+  const root = getRootNavigation(navigation);
+  root.navigate('Support', params);
 }

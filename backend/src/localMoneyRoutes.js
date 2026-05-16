@@ -25,27 +25,20 @@ const {
 } = require('./localMoneyRegions');
 const flutterwave = require('./services/flutterwaveClient');
 const { sendSms } = require('./services/twilioSms');
+const {
+  MIN_MOMO_USDT,
+  totalUsdtFamilyAvailable,
+  maxWithdrawableUsdt,
+  minFiatForMomo,
+  debitUsdtFamily,
+  canonicalUsdtAsset,
+} = require('./usdtBalances');
 
 const SCHEMA_MSG =
   'Local money schema missing. Run backend/sql/migrations/20260519_local_mobile_money.sql in Supabase.';
 
-const GAS_RESERVE = 0.05;
-
 function newId() {
   return crypto.randomUUID();
-}
-
-function usdtAvailable(balances) {
-  const rows = balances || [];
-  const usdt =
-    rows.find((b) => b.asset === 'usdt') ||
-    rows.find((b) => String(b.asset).includes('usdt'));
-  return Number(usdt?.available ?? 0) || 0;
-}
-
-function maxWithdrawableUsdt(available) {
-  if (!Number.isFinite(available) || available <= 0) return 0;
-  return Math.max(0, available * (1 - GAS_RESERVE));
 }
 
 function toPublicOrder(row) {
@@ -150,9 +143,10 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
         }
 
         const fiatAmount = Number(req.body.fiatAmount);
-        if (!Number.isFinite(fiatAmount) || fiatAmount < 100) {
+        const minFiat = minFiatForMomo(regionDef);
+        if (!Number.isFinite(fiatAmount) || fiatAmount < minFiat) {
           return res.status(400).json({
-            message: `Enter a valid amount in ${region.fiatLabel} (minimum 100).`,
+            message: `Minimum deposit is ${MIN_MOMO_USDT} USDT (~${minFiat.toLocaleString()} ${region.fiatLabel}).`,
           });
         }
 
@@ -165,6 +159,11 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
 
         const user = await getUserById(req.userId);
         const cryptoAmount = usdtFromFiat(fiatAmount, regionDef);
+        if (!Number.isFinite(cryptoAmount) || cryptoAmount < MIN_MOMO_USDT) {
+          return res.status(400).json({
+            message: `Minimum deposit is ${MIN_MOMO_USDT} USDT (~${minFiat.toLocaleString()} ${region.fiatLabel}).`,
+          });
+        }
         const orderId = newId();
         const reference = orderId;
 
@@ -260,16 +259,18 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
         }
 
         const cryptoAmount = Number(req.body.cryptoAmount);
-        if (!Number.isFinite(cryptoAmount) || cryptoAmount <= 0) {
-          return res.status(400).json({ message: 'Enter a valid USDT amount.' });
+        if (!Number.isFinite(cryptoAmount) || cryptoAmount < MIN_MOMO_USDT) {
+          return res.status(400).json({
+            message: `Minimum withdrawal is ${MIN_MOMO_USDT} USDT.`,
+          });
         }
 
         const balances = await getCryptoBalancesByUserId(req.userId);
-        const available = usdtAvailable(balances);
+        const available = totalUsdtFamilyAvailable(balances);
         const maxW = maxWithdrawableUsdt(available);
         if (cryptoAmount > maxW) {
           return res.status(400).json({
-            message: `Insufficient balance. Maximum withdrawable (after fee reserve): ${maxW.toFixed(6)} USDT.`,
+            message: `Insufficient balance. Maximum withdrawable (after fee reserve): ${Math.floor(maxW)} USDT.`,
           });
         }
 
@@ -300,14 +301,14 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
           provider_reference: orderId,
         });
 
-        await insertCryptoLedgerEntry({
-          id: newId(),
-          user_id: req.userId,
-          asset: 'usdt',
-          direction: 'out',
+        await debitUsdtFamily({
+          userId: req.userId,
           amount: cryptoAmount,
           source: 'local_withdraw',
-          source_id: orderId,
+          sourceId: orderId,
+          insertCryptoLedgerEntry,
+          getCryptoBalancesByUserId,
+          newId,
         });
         order = await updateLocalMoneyOrder(orderId, { ledger_posted: true });
 

@@ -13,6 +13,7 @@ import { useTransactionFeed } from '../hooks/useTransactionFeed';
 import { useTradingStore } from '../store/useTradingStore';
 import { palette } from '../theme/colors';
 import { navigateToTransactionDetail, navigateToTransactionHistory } from '../utils/navigationHelpers';
+import { aggregateBalancesForDisplay } from '../utils/walletDisplay';
 import { filterActivityToday } from '../utils/walletActivity';
 
 const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v2';
@@ -100,12 +101,14 @@ export function HomeScreen() {
         <Card style={styles.cryptoHero}>
           <Text style={styles.cryptoHeroLabel}>Crypto wallet</Text>
           {cryptoError ? <Text style={styles.warn}>{cryptoError}</Text> : null}
-          {npSummary?.balances?.length ? (
-            npSummary.balances.map((b) => (
+          {npSummary?.balances?.length || (npSummary?.cashWalletUsd ?? 0) > 0 ? (
+            aggregateBalancesForDisplay(npSummary?.balances, npSummary?.cashWalletUsd).map((b) => (
               <View key={b.asset} style={styles.balanceRow}>
                 <Text style={styles.assetCode}>{b.asset.toUpperCase()}</Text>
                 <Text style={styles.balanceValue}>{b.available}</Text>
-                {Number(b.reserved) > 0 ? <Text style={styles.reserved}>Reserved: {b.reserved}</Text> : null}
+                {b.reserved && Number(b.reserved) > 0 ? (
+                  <Text style={styles.reserved}>Reserved: {b.reserved}</Text>
+                ) : null}
               </View>
             ))
           ) : npSummary && !cryptoError ? (

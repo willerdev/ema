@@ -26,6 +26,7 @@ export type RootStackParamList = {
   TransactionHistory: { initialTab?: TransactionHistoryTab } | undefined;
   TransactionDetail: { row: WalletActivityRow };
   CryptoDepositPayment: { deposit: NowpaymentsCreateDepositResponse };
+  Support: { category?: 'withdraw' | 'deposit' | 'daily_earning' | 'transfer' } | undefined;
 };
 
 export interface NotificationPreferences {

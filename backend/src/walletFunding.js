@@ -8,6 +8,7 @@ const {
   getCryptoLedgerEntryBySource,
 } = require('./db');
 const { normalizeCurrency } = require('./currencyNormalize');
+const { isUsdtFamilyAsset, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
 const GAS_RESERVE_PERCENT = 0.05;
 
@@ -25,6 +26,9 @@ function isCashFundableAsset(asset) {
 
 function cryptoAvailableForAsset(balances, asset) {
   const normalized = normalizeCurrency(asset);
+  if (isUsdtFamilyAsset(normalized) || isUsdtFamilyAsset(asset)) {
+    return totalUsdtFamilyAvailable(balances);
+  }
   const row = balances.find((b) => b.asset === normalized);
   return row ? Math.max(0, Number(row.available) || 0) : 0;
 }

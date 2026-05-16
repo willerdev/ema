@@ -9,6 +9,7 @@ import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { TransactionHistoryScreen } from '../screens/TransactionHistoryScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { CryptoDepositPaymentScreen } from '../screens/CryptoDepositPaymentScreen';
+import { SupportScreen } from '../screens/SupportScreen';
 import { AuthScreen } from '../screens/AuthScreen';
 import { useAuth } from '../context/AuthContext';
 import { palette } from '../theme/colors';
@@ -62,6 +63,7 @@ export function RootNavigator() {
         component={CryptoDepositPaymentScreen}
         options={{ title: 'Complete payment' }}
       />
+      <Stack.Screen name='Support' component={SupportScreen} options={{ title: 'Help & support' }} />
     </Stack.Navigator>
   );
 }
