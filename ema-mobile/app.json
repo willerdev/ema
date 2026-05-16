@@ -13,8 +13,10 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.willer256.emamobile",
       "supportsTablet": true,
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSLocationWhenInUseUsageDescription": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money."
       }
     },
