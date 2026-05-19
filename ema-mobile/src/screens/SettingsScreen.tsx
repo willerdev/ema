@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
-import { CompositeNavigationProp, useNavigation } from '@react-navigation/native';
+import { CompositeNavigationProp, RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -10,6 +10,12 @@ import { FormModal } from '../components/FormModal';
 import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useAuth } from '../context/AuthContext';
+import { useAppLock } from '../context/AppLockContext';
+import { PinPad } from '../components/PinPad';
+import { authStorage } from '../services/storage';
+import { securityStorage } from '../services/securityStorage';
+import { canUseBiometrics } from '../utils/biometrics';
+import { generatePinSalt, hashPin } from '../utils/pin';
 import { usePolling } from '../hooks/usePolling';
 import { authService, TotpStatus } from '../services/authService';
 import { alpacaService } from '../services/alpacaService';
@@ -74,15 +80,22 @@ type SettingsNav = CompositeNavigationProp<
   NativeStackNavigationProp<RootStackParamList>
 >;
 
+type SettingsRoute = RouteProp<ExtraStackParamList, 'Settings'>;
+
 export function SettingsScreen() {
   const navigation = useNavigation<SettingsNav>();
+  const route = useRoute<SettingsRoute>();
   const { user, logout } = useAuth();
   const { showToast } = useToast();
+  const { suspendLock, refreshSecurityPrefs, pinEnabled, biometricLoginEnabled, biometricAvailable } = useAppLock();
   const [aboutModal, setAboutModal] = useState<AboutSectionKey | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
   const [darkMode, setDarkMode] = useState(true);
-  const [biometric, setBiometric] = useState(false);
+  const [pinModalOpen, setPinModalOpen] = useState(false);
+  const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
+  const [pinSetupError, setPinSetupError] = useState<string | null>(null);
+  const pendingPinRef = useRef<string | null>(null);
   const [profile, setProfile] = useState<{ username: string; accountStatus: string } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -211,9 +224,16 @@ export function SettingsScreen() {
       loadCompliance(),
       loadWhitelistedWallets(),
       loadAlertPrefs(),
+      refreshSecurityPrefs(),
     ]);
     setInitialLoading(false);
-  }, [loadProfile, loadTotpStatus, loadCompliance, loadWhitelistedWallets, loadAlertPrefs]);
+  }, [loadProfile, loadTotpStatus, loadCompliance, loadWhitelistedWallets, loadAlertPrefs, refreshSecurityPrefs]);
+
+  useEffect(() => {
+    if (route.params?.openSecurity) {
+      setSecurityModalOpen(true);
+    }
+  }, [route.params?.openSecurity]);
 
   const saveAlertPrefs = async (patch: {
     premiumAlertsEnabled?: boolean;
@@ -436,10 +456,86 @@ export function SettingsScreen() {
       : 'Add up to 3 withdrawal addresses';
 
   const securitySummary = totpEnabled
-    ? '2FA on · biometrics ' + (biometric ? 'on' : 'off')
+    ? `2FA on · PIN ${pinEnabled ? 'on' : 'off'} · biometrics ${biometricLoginEnabled ? 'on' : 'off'}`
     : totpSetupPending
       ? '2FA setup in progress'
-      : '2FA off';
+      : `2FA off · PIN ${pinEnabled ? 'on' : 'off'}`;
+
+  const openPinSetup = () => {
+    suspendLock(true);
+    pendingPinRef.current = null;
+    setPinStep('enter');
+    setPinSetupError(null);
+    setPinModalOpen(true);
+  };
+
+  const closePinSetup = () => {
+    setPinModalOpen(false);
+    suspendLock(false);
+    pendingPinRef.current = null;
+    setPinSetupError(null);
+  };
+
+  const onPinPadComplete = async (pin: string) => {
+    if (pinStep === 'enter') {
+      pendingPinRef.current = pin;
+      setPinStep('confirm');
+      setPinSetupError(null);
+      return;
+    }
+    if (pendingPinRef.current !== pin) {
+      setPinSetupError('PINs do not match. Try again.');
+      setPinStep('enter');
+      pendingPinRef.current = null;
+      return;
+    }
+    const salt = generatePinSalt();
+    const hash = await hashPin(pin, salt);
+    await securityStorage.setPin(hash, salt);
+    await refreshSecurityPrefs();
+    closePinSetup();
+    showToast('App PIN enabled');
+  };
+
+  const removePin = () => {
+    Alert.alert('Remove app PIN', 'The app will no longer lock after 5 minutes of inactivity.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            await securityStorage.clearPin();
+            await refreshSecurityPrefs();
+            showToast('App PIN removed');
+          })();
+        },
+      },
+    ]);
+  };
+
+  const onBiometricToggle = async (next: boolean) => {
+    if (next) {
+      const hw = await canUseBiometrics();
+      if (!hw) {
+        Alert.alert('Unavailable', 'Set up fingerprint or Face ID on this device first.');
+        return;
+      }
+      const token = await authStorage.getToken();
+      if (!token) {
+        Alert.alert('Sign in required', 'Sign in with your password before enabling biometrics.');
+        return;
+      }
+      await securityStorage.setBiometricLoginEnabled(true);
+      await securityStorage.setSecureAuthToken(token);
+      await refreshSecurityPrefs();
+      showToast('Biometric sign-in enabled');
+      return;
+    }
+    await securityStorage.setBiometricLoginEnabled(false);
+    await refreshSecurityPrefs();
+    showToast('Biometric sign-in disabled');
+  };
 
   const alertsSummary = alertPrefs?.premiumAlertsEnabled
     ? `$2/week · ${[alertPrefs.notifySms && 'SMS', alertPrefs.notifyEmail && 'Email'].filter(Boolean).join(' + ') || 'no channels'}`
@@ -786,13 +882,36 @@ export function SettingsScreen() {
           />
         }
       >
-        <View style={styles.rowBetween}>
-          <Text style={styles.value}>Enable biometrics</Text>
-          <Switch value={biometric} onValueChange={setBiometric} thumbColor={biometric ? palette.primary : '#ccc'} />
-        </View>
-        <Text style={styles.modalHint}>Face ID / fingerprint login (when supported).</Text>
+        <Text style={[styles.label, { marginTop: 4 }]}>App PIN lock</Text>
+        <Text style={styles.modalHint}>
+          Optional 4-digit PIN. When set, the app locks after 5 minutes without activity.
+        </Text>
+        {pinEnabled ? (
+          <View style={styles.buttonRow}>
+            <PrimaryButton compact label='Change PIN' onPress={openPinSetup} style={{ flex: 1 }} />
+            <PrimaryButton compact label='Remove PIN' onPress={removePin} variant='danger' style={{ flex: 1 }} />
+          </View>
+        ) : (
+          <PrimaryButton compact label='Set up app PIN' onPress={openPinSetup} style={{ marginTop: 8 }} />
+        )}
 
-        <Text style={[styles.label, { marginTop: 16 }]}>Authenticator app</Text>
+        <View style={[styles.rowBetween, { marginTop: 16 }]}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.value}>Biometric sign-in</Text>
+            <Text style={styles.modalHint}>Quick sign-in with fingerprint or Face ID on this device.</Text>
+          </View>
+          <Switch
+            value={biometricLoginEnabled}
+            onValueChange={(v) => void onBiometricToggle(v)}
+            disabled={!biometricAvailable}
+            thumbColor={biometricLoginEnabled ? palette.primary : '#ccc'}
+          />
+        </View>
+        {!biometricAvailable ? (
+          <Text style={styles.modalHint}>Biometrics are not available on this device.</Text>
+        ) : null}
+
+        <Text style={[styles.label, { marginTop: 16 }]}>Authenticator app (2FA)</Text>
         {totpEnabled ? (
           <>
             <Text style={styles.value}>Two-factor authentication is on.</Text>
@@ -888,6 +1007,22 @@ export function SettingsScreen() {
             <PrimaryButton compact label={totpBusy ? '…' : 'Set up 2FA'} onPress={() => void startTotpSetup()} disabled={totpBusy} />
           </>
         )}
+      </FormModal>
+
+      <FormModal
+        visible={pinModalOpen}
+        title={pinStep === 'enter' ? 'Create app PIN' : 'Confirm app PIN'}
+        onClose={closePinSetup}
+        footer={<PrimaryButton label='Cancel' onPress={closePinSetup} style={{ marginTop: 12 }} />}
+      >
+        <PinPad
+          mode={pinStep === 'enter' ? 'setup' : 'confirm'}
+          title=''
+          subtitle={pinStep === 'enter' ? 'Choose a 4-digit PIN' : 'Enter the same PIN again'}
+          error={pinSetupError}
+          onComplete={(pin) => void onPinPadComplete(pin)}
+          onCancel={closePinSetup}
+        />
       </FormModal>
 
       <FormModal

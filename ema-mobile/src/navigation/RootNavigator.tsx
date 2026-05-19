@@ -11,6 +11,7 @@ import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
 import { CryptoDepositPaymentScreen } from '../screens/CryptoDepositPaymentScreen';
 import { SupportScreen } from '../screens/SupportScreen';
 import { AuthScreen } from '../screens/AuthScreen';
+import { ActivityTracker } from '../components/ActivityTracker';
 import { useAuth } from '../context/AuthContext';
 import { palette } from '../theme/colors';
 import { RootStackParamList } from '../types';
@@ -31,6 +32,7 @@ export function RootNavigator() {
   if (!user) return <AuthScreen />;
 
   return (
+    <ActivityTracker>
     <Stack.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: palette.surface },
@@ -65,5 +67,6 @@ export function RootNavigator() {
       />
       <Stack.Screen name='Support' component={SupportScreen} options={{ title: 'Help & support' }} />
     </Stack.Navigator>
+    </ActivityTracker>
   );
 }

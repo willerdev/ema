@@ -7,6 +7,7 @@ import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
+import { TwoFactorReminderCard } from '../components/TwoFactorReminderCard';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { useTransactionFeed } from '../hooks/useTransactionFeed';
@@ -65,6 +66,8 @@ export function HomeScreen() {
     >
       <Text style={styles.greeting}>Hello, {user?.email?.split('@')[0]}</Text>
       <Text style={styles.sub}>Wallet overview</Text>
+
+      <TwoFactorReminderCard />
 
       {noticeVisible ? (
         <Card style={styles.disclaimerCard}>

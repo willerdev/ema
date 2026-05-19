@@ -89,6 +89,8 @@ export function ExpertAutoTradingScreen() {
   const [swingTrades, setSwingTrades] = useState(false);
 
   const [disclaimerModalOpen, setDisclaimerModalOpen] = useState(false);
+  const [riskModalOpen, setRiskModalOpen] = useState(false);
+  const [fundsModalOpen, setFundsModalOpen] = useState(false);
   const [disclaimerAccepted, setDisclaimerAccepted] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -209,6 +211,7 @@ export function ExpertAutoTradingScreen() {
   const onPressSave = () => {
     const parsed = validateForm();
     if (!parsed) return;
+    setRiskModalOpen(false);
     setDisclaimerModalOpen(true);
     setDisclaimerAccepted(false);
   };
@@ -232,6 +235,7 @@ export function ExpertAutoTradingScreen() {
         swing: swingTrades,
       });
       setDisclaimerModalOpen(false);
+      setRiskModalOpen(false);
       showToast('Expert Account Manager settings saved');
       Alert.alert('Risk disclosure', DISCLAIMER_TEXT, [{ text: 'I understand' }]);
     } finally {
@@ -269,6 +273,7 @@ export function ExpertAutoTradingScreen() {
       setExpertBalance(summary.expertBalance);
       if (summary.marketGroup) setMarketGroup(summary.marketGroup);
       setFundAmount('');
+      setFundsModalOpen(false);
       showToast('Funds allocated for expert trading');
     } catch (e: any) {
       Alert.alert('Allocation failed', e?.message || 'Could not allocate funds.');
@@ -293,6 +298,7 @@ export function ExpertAutoTradingScreen() {
       setCashWallet(summary.cashWallet);
       setExpertBalance(summary.expertBalance);
       setReturnAmount('');
+      setFundsModalOpen(false);
       showToast('Funds returned to cash wallet');
     } catch (e: any) {
       Alert.alert('Return failed', e?.message || 'Could not return funds.');
@@ -359,159 +365,42 @@ export function ExpertAutoTradingScreen() {
 
         {prefsLoaded ? (
           <>
-            <Card>
-              <Text style={styles.cardTitle}>Risk parameters</Text>
-              <Text style={styles.meta}>All values are required before saving.</Text>
-
-              <Text style={styles.fieldLabel}>Risk per trade (%)</Text>
-              <TextInput
-                style={inputStyle}
-                value={riskPerTrade}
-                onChangeText={setRiskPerTrade}
-                placeholder='e.g. 1'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-
-              <Text style={styles.fieldLabel}>Max drawdown (%)</Text>
-              <TextInput
-                style={inputStyle}
-                value={maxDrawdown}
-                onChangeText={setMaxDrawdown}
-                placeholder='e.g. 20'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-
-              <Text style={styles.fieldLabel}>Max daily drawdown (%)</Text>
-              <TextInput
-                style={inputStyle}
-                value={maxDailyDrawdown}
-                onChangeText={setMaxDailyDrawdown}
-                placeholder='e.g. 5'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-
-              <Text style={styles.fieldLabel}>Risk to reward (default 1:2)</Text>
-              <TextInput
-                style={inputStyle}
-                value={riskReward}
-                onChangeText={setRiskReward}
-                placeholder={DEFAULT_RISK_REWARD}
-                placeholderTextColor={palette.textSecondary}
-                autoCapitalize='none'
-              />
-
-              <View style={styles.row}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={styles.rowLabel}>Trade around news events</Text>
-                  <Text style={styles.rowHint}>Allow trading during high-impact news</Text>
+            <Card style={styles.heroCard}>
+              <Text style={styles.cardTitle}>Expert dashboard</Text>
+              <Text style={styles.meta}>
+                {eaActive ? 'Active' : 'Inactive'} · {marketGroup === 'derived' ? 'Derived' : marketGroup === 'metals' ? 'Metals' : 'No market selected'}
+              </Text>
+              <View style={styles.grid}>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Cash wallet</Text>
+                  <Text style={styles.statValue}>${Math.floor(cashWallet).toLocaleString()}</Text>
                 </View>
-                <Switch
-                  value={tradingNews}
-                  onValueChange={setTradingNews}
-                  trackColor={{ false: palette.border, true: palette.primary }}
-                  thumbColor='#f4f4f5'
-                />
-              </View>
-
-              <View style={styles.row}>
-                <View style={{ flex: 1, paddingRight: 12 }}>
-                  <Text style={styles.rowLabel}>Swing trades</Text>
-                  <Text style={styles.rowHint}>Hold positions over multiple sessions</Text>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Expert balance</Text>
+                  <Text style={styles.statValue}>${Math.floor(expertBalance).toLocaleString()}</Text>
                 </View>
-                <Switch
-                  value={swingTrades}
-                  onValueChange={setSwingTrades}
-                  trackColor={{ false: palette.border, true: palette.primary }}
-                  thumbColor='#f4f4f5'
-                />
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Risk / trade</Text>
+                  <Text style={styles.statValue}>{configSaved ? `${riskPerTrade}%` : 'Set'}</Text>
+                </View>
+                <View style={styles.statBox}>
+                  <Text style={styles.statLabel}>Max DD</Text>
+                  <Text style={styles.statValue}>{configSaved ? `${maxDrawdown}%` : 'Set'}</Text>
+                </View>
               </View>
-
-              <PrimaryButton label='Save risk settings' onPress={onPressSave} style={{ marginTop: 8 }} />
-              {configSaved ? (
-                <Text style={[styles.meta, { marginTop: 10, color: palette.success }]}>
-                  Saved · Risk {riskPerTrade}% · Max DD {maxDrawdown}% · Daily {maxDailyDrawdown}% · R:R {riskReward}
-                  {tradingNews ? ' · News on' : ' · News off'}
-                  {swingTrades ? ' · Swing on' : ' · Swing off'}
-                </Text>
-              ) : null}
             </Card>
 
             <Card>
-              <Text style={styles.cardTitle}>Platform pairs</Text>
-              <Text style={styles.meta}>
-                Trade with Ema&apos;s default derived pairs or metals. Pick one, then allocate cash from your wallet.
-              </Text>
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>Derived</Text>
-                <Switch
-                  value={marketGroup === 'derived'}
-                  onValueChange={(v) => {
-                    if (v) void selectMarketGroup('derived');
-                    else if (marketGroup === 'derived') {
-                      setMarketGroup(null);
-                      void AsyncStorage.removeItem(STORAGE_MARKET);
-                    }
-                  }}
-                  trackColor={{ false: palette.border, true: palette.primary }}
-                  thumbColor='#f4f4f5'
-                />
+              <Text style={styles.cardTitle}>Setup</Text>
+              <View style={styles.actionRow}>
+                <PrimaryButton label='Risk settings' onPress={() => setRiskModalOpen(true)} compact style={styles.actionButton} />
+                <PrimaryButton label='Funds & market' onPress={() => setFundsModalOpen(true)} compact style={styles.actionButton} />
               </View>
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>Metals</Text>
-                <Switch
-                  value={marketGroup === 'metals'}
-                  onValueChange={(v) => {
-                    if (v) void selectMarketGroup('metals');
-                    else if (marketGroup === 'metals') {
-                      setMarketGroup(null);
-                      void AsyncStorage.removeItem(STORAGE_MARKET);
-                    }
-                  }}
-                  trackColor={{ false: palette.border, true: palette.primary }}
-                  thumbColor='#f4f4f5'
-                />
-              </View>
-              <Text style={[styles.meta, { marginTop: 12 }]}>
-                Cash wallet: ${Math.floor(cashWallet)} · Expert balance: ${Math.floor(expertBalance)}
-                {marketGroup ? ` · ${marketGroup === 'derived' ? 'Derived' : 'Metals'}` : ''}
+              <Text style={[styles.meta, { marginTop: 10 }]}>
+                {configSaved
+                  ? `Saved · R:R ${riskReward}${tradingNews ? ' · News on' : ''}${swingTrades ? ' · Swing on' : ''}`
+                  : 'Save risk settings before enabling expert management.'}
               </Text>
-              <Text style={styles.fieldLabel}>Amount to allocate (USD)</Text>
-              <TextInput
-                style={inputStyle}
-                value={fundAmount}
-                onChangeText={setFundAmount}
-                placeholder='e.g. 100'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-              <PrimaryButton
-                label={fundingBusy ? 'Working…' : 'Allocate from cash wallet'}
-                onPress={() => void onFundExpert()}
-                disabled={fundingBusy}
-                style={{ marginTop: 8 }}
-              />
-              {expertBalance > 0 ? (
-                <>
-                  <Text style={styles.fieldLabel}>Return to cash wallet (USD)</Text>
-                  <TextInput
-                    style={inputStyle}
-                    value={returnAmount}
-                    onChangeText={setReturnAmount}
-                    placeholder='e.g. 50'
-                    placeholderTextColor={palette.textSecondary}
-                    keyboardType='decimal-pad'
-                  />
-                  <PrimaryButton
-                    label={fundingBusy ? 'Working…' : 'Return to cash wallet'}
-                    onPress={() => void onReturnToCash()}
-                    disabled={fundingBusy}
-                    style={{ marginTop: 8 }}
-                  />
-                </>
-              ) : null}
             </Card>
 
             <Card>
@@ -546,6 +435,172 @@ export function ExpertAutoTradingScreen() {
           </>
         ) : null}
       </ScrollView>
+
+      <FormModal
+        visible={riskModalOpen}
+        title='Risk settings'
+        onClose={() => setRiskModalOpen(false)}
+        footer={
+          <View style={{ gap: 8, marginTop: 12 }}>
+            <PrimaryButton label='Review and save' onPress={onPressSave} />
+            <PrimaryButton label='Cancel' onPress={() => setRiskModalOpen(false)} variant='danger' />
+          </View>
+        }
+      >
+        <Text style={styles.meta}>All values are required before enabling expert management.</Text>
+
+        <Text style={styles.fieldLabel}>Risk per trade (%)</Text>
+        <TextInput
+          style={inputStyle}
+          value={riskPerTrade}
+          onChangeText={setRiskPerTrade}
+          placeholder='e.g. 1'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='decimal-pad'
+        />
+
+        <Text style={styles.fieldLabel}>Max drawdown (%)</Text>
+        <TextInput
+          style={inputStyle}
+          value={maxDrawdown}
+          onChangeText={setMaxDrawdown}
+          placeholder='e.g. 20'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='decimal-pad'
+        />
+
+        <Text style={styles.fieldLabel}>Max daily drawdown (%)</Text>
+        <TextInput
+          style={inputStyle}
+          value={maxDailyDrawdown}
+          onChangeText={setMaxDailyDrawdown}
+          placeholder='e.g. 5'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='decimal-pad'
+        />
+
+        <Text style={styles.fieldLabel}>Risk to reward</Text>
+        <TextInput
+          style={inputStyle}
+          value={riskReward}
+          onChangeText={setRiskReward}
+          placeholder={DEFAULT_RISK_REWARD}
+          placeholderTextColor={palette.textSecondary}
+          autoCapitalize='none'
+        />
+
+        <View style={styles.row}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.rowLabel}>Trade around news events</Text>
+            <Text style={styles.rowHint}>Allow trading during high-impact news</Text>
+          </View>
+          <Switch
+            value={tradingNews}
+            onValueChange={setTradingNews}
+            trackColor={{ false: palette.border, true: palette.primary }}
+            thumbColor='#f4f4f5'
+          />
+        </View>
+
+        <View style={styles.row}>
+          <View style={{ flex: 1, paddingRight: 12 }}>
+            <Text style={styles.rowLabel}>Swing trades</Text>
+            <Text style={styles.rowHint}>Hold positions over multiple sessions</Text>
+          </View>
+          <Switch
+            value={swingTrades}
+            onValueChange={setSwingTrades}
+            trackColor={{ false: palette.border, true: palette.primary }}
+            thumbColor='#f4f4f5'
+          />
+        </View>
+      </FormModal>
+
+      <FormModal
+        visible={fundsModalOpen}
+        title='Funds and market'
+        onClose={() => setFundsModalOpen(false)}
+        footer={<PrimaryButton label='Close' onPress={() => setFundsModalOpen(false)} style={{ marginTop: 12 }} />}
+      >
+        <Text style={styles.meta}>Choose one market group, then allocate cash for expert trading.</Text>
+        <View style={styles.modalStats}>
+          <View style={styles.statBox}>
+            <Text style={styles.statLabel}>Cash wallet</Text>
+            <Text style={styles.statValue}>${Math.floor(cashWallet).toLocaleString()}</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Text style={styles.statLabel}>Expert balance</Text>
+            <Text style={styles.statValue}>${Math.floor(expertBalance).toLocaleString()}</Text>
+          </View>
+        </View>
+
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Derived</Text>
+          <Switch
+            value={marketGroup === 'derived'}
+            onValueChange={(v) => {
+              if (v) void selectMarketGroup('derived');
+              else if (marketGroup === 'derived') {
+                setMarketGroup(null);
+                void AsyncStorage.removeItem(STORAGE_MARKET);
+              }
+            }}
+            trackColor={{ false: palette.border, true: palette.primary }}
+            thumbColor='#f4f4f5'
+          />
+        </View>
+        <View style={styles.row}>
+          <Text style={styles.rowLabel}>Metals</Text>
+          <Switch
+            value={marketGroup === 'metals'}
+            onValueChange={(v) => {
+              if (v) void selectMarketGroup('metals');
+              else if (marketGroup === 'metals') {
+                setMarketGroup(null);
+                void AsyncStorage.removeItem(STORAGE_MARKET);
+              }
+            }}
+            trackColor={{ false: palette.border, true: palette.primary }}
+            thumbColor='#f4f4f5'
+          />
+        </View>
+
+        <Text style={styles.fieldLabel}>Amount to allocate (USD)</Text>
+        <TextInput
+          style={inputStyle}
+          value={fundAmount}
+          onChangeText={setFundAmount}
+          placeholder='e.g. 100'
+          placeholderTextColor={palette.textSecondary}
+          keyboardType='decimal-pad'
+        />
+        <PrimaryButton
+          label={fundingBusy ? 'Working…' : 'Allocate from cash wallet'}
+          onPress={() => void onFundExpert()}
+          disabled={fundingBusy}
+          style={{ marginTop: 8 }}
+        />
+
+        {expertBalance > 0 ? (
+          <>
+            <Text style={styles.fieldLabel}>Return to cash wallet (USD)</Text>
+            <TextInput
+              style={inputStyle}
+              value={returnAmount}
+              onChangeText={setReturnAmount}
+              placeholder='e.g. 50'
+              placeholderTextColor={palette.textSecondary}
+              keyboardType='decimal-pad'
+            />
+            <PrimaryButton
+              label={fundingBusy ? 'Working…' : 'Return to cash wallet'}
+              onPress={() => void onReturnToCash()}
+              disabled={fundingBusy}
+              style={{ marginTop: 8 }}
+            />
+          </>
+        ) : null}
+      </FormModal>
 
       <FormModal
         visible={disclaimerModalOpen}
@@ -588,6 +643,21 @@ const styles = StyleSheet.create({
   cardTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 6 },
   meta: { color: palette.textSecondary, lineHeight: 20 },
   checkingMeta: { color: palette.textSecondary, fontSize: 12, marginBottom: 10 },
+  heroCard: { borderLeftWidth: 3, borderLeftColor: palette.primary },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  statBox: {
+    width: '48%',
+    backgroundColor: palette.surfaceElevated,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.border,
+    padding: 12,
+  },
+  statLabel: { color: palette.textSecondary, fontSize: 11, fontWeight: '700', marginBottom: 6 },
+  statValue: { color: palette.textPrimary, fontSize: 20, fontWeight: '800' },
+  actionRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
+  actionButton: { flex: 1 },
+  modalStats: { flexDirection: 'row', gap: 10, marginTop: 12, marginBottom: 4 },
   fieldLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 10, marginBottom: 4, fontWeight: '600' },
   input: {
     backgroundColor: palette.surfaceElevated,

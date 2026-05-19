@@ -185,7 +185,14 @@ export function AirfarmingTradeScreen() {
       setStatus((prev) => (prev ? { ...prev, autoFundEnabled } : prev));
       await load();
     } catch (e: any) {
-      Alert.alert('Auto-fund', e?.message || 'Could not update auto-fund setting');
+      const statusCode = Number(e?.status);
+      const message =
+        statusCode === 404
+          ? 'This feature is still updating on the server. Try again in a few minutes.'
+          : statusCode === 503
+            ? 'Airfarming is being updated. Try again shortly.'
+            : e?.message || 'Could not update auto-fund setting';
+      Alert.alert('Auto-fund', message);
     } finally {
       setAutoFundSaving(false);
     }
@@ -235,20 +242,24 @@ export function AirfarmingTradeScreen() {
 
         {status ? (
           <>
-            <Card>
-              <Text style={styles.section}>Balances</Text>
-              <Text style={styles.balanceLine}>
-                <Text style={styles.meta}>Cash wallet: </Text>
-                <Text style={styles.balanceValue}>${status.cashWallet.toFixed(2)}</Text>
-              </Text>
-              <Text style={styles.balanceLine}>
-                <Text style={styles.meta}>In airfarming: </Text>
-                <Text style={styles.balanceValue}>${status.airfarmingBalance.toFixed(2)}</Text>
-              </Text>
-              <Text style={[styles.meta, { marginTop: 8 }]}>
-                Use the menu button (bottom right) to activate or return funds.
-              </Text>
-            </Card>
+            <View style={styles.grid}>
+              <Card style={styles.statCard}>
+                <Text style={styles.statLabel}>Cash wallet</Text>
+                <Text style={styles.statValue}>${Math.floor(status.cashWallet).toLocaleString()}</Text>
+              </Card>
+              <Card style={styles.statCard}>
+                <Text style={styles.statLabel}>Airfarming</Text>
+                <Text style={styles.statValue}>${Math.floor(status.airfarmingBalance).toLocaleString()}</Text>
+              </Card>
+              <Card style={styles.statCard}>
+                <Text style={styles.statLabel}>Paid drops</Text>
+                <Text style={styles.statValue}>{status.dropsPaid ?? 0}</Text>
+              </Card>
+              <Card style={styles.statCard}>
+                <Text style={styles.statLabel}>Missed</Text>
+                <Text style={styles.statValue}>{status.dropsMissed ?? 0}</Text>
+              </Card>
+            </View>
 
             <Card>
               <View style={styles.settingRow}>
@@ -301,16 +312,23 @@ export function AirfarmingTradeScreen() {
                     </Text>
                   </>
                 ) : (
-                  <Text style={styles.meta}>No upcoming drop this week. Check back after the week resets.</Text>
+                  <>
+                    <Text style={styles.emptyDropTitle}>No active drop scheduled yet</Text>
+                    <Text style={styles.meta}>
+                      Pull to refresh or try again shortly. If this stays empty, the server is still finishing the
+                      Airfarming update.
+                    </Text>
+                    <PrimaryButton label='Refresh schedule' onPress={() => void load()} style={{ marginTop: 12 }} />
+                  </>
                 )}
               </Card>
             </Animated.View>
 
             <Card>
-              <Text style={styles.section}>This week</Text>
+              <Text style={styles.section}>Week summary</Text>
               <Text style={styles.meta}>
-                Paid: {status.dropsPaid ?? 0} · Missed: {status.dropsMissed ?? 0} · Week starts {status.weekStart}{' '}
-                (UTC)
+                Week starts {status.weekStart} (UTC). Drops are scheduled every 2–5 hours while the backend has an
+                active current-week schedule.
               </Text>
             </Card>
 
@@ -514,8 +532,13 @@ const styles = StyleSheet.create({
   eligibleYes: { backgroundColor: 'rgba(0,200,5,0.15)' },
   eligibleNo: { backgroundColor: 'rgba(245,158,11,0.15)' },
   eligibilityText: { color: palette.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  emptyDropTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 8, textAlign: 'center' },
   section: { color: palette.textSecondary, marginBottom: 8, fontWeight: '700' },
   meta: { color: palette.textSecondary, marginBottom: 4 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
+  statCard: { width: '48%', marginBottom: 0, padding: 14 },
+  statLabel: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 },
+  statValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '800' },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   autoFundNote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8 },
   balanceLine: { marginBottom: 6 },

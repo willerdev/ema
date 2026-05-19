@@ -17,7 +17,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money."
+        "NSLocationWhenInUseUsageDescription": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money.",
+        "NSFaceIDUsageDescription": "AirFarmerPro uses Face ID to sign in quickly and unlock the app after inactivity."
       }
     },
     "android": {
@@ -50,6 +51,13 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money in your country."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow AirFarmerPro to use Face ID for quick sign-in and app unlock."
         }
       ]
     ],

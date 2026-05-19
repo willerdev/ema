@@ -1,16 +1,31 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { securityStorage } from '../services/securityStorage';
+import { canUseBiometrics, biometricLabel } from '../utils/biometrics';
 import { palette } from '../theme/colors';
 import { PrimaryButton } from '../components/PrimaryButton';
 
 export function AuthScreen() {
-  const { login, register, completeTotpLogin } = useAuth();
+  const { login, register, completeTotpLogin, loginWithBiometric } = useAuth();
   const [isRegister, setIsRegister] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [totpPreAuthToken, setTotpPreAuthToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
+  const [showBiometricLogin, setShowBiometricLogin] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const [enabled, token, hardware] = await Promise.all([
+        securityStorage.isBiometricLoginEnabled(),
+        securityStorage.getSecureAuthToken(),
+        canUseBiometrics(),
+      ]);
+      setShowBiometricLogin(Boolean(enabled && token && hardware));
+    })();
+  }, []);
 
   const submit = async () => {
     try {
@@ -30,6 +45,18 @@ export function AuthScreen() {
       }
     } catch (error: any) {
       Alert.alert('Auth Error', error.message);
+    }
+  };
+
+  const submitBiometric = async () => {
+    setBioBusy(true);
+    try {
+      const ok = await loginWithBiometric();
+      if (!ok) {
+        Alert.alert('Sign in failed', 'Biometric sign-in could not be completed. Use your email and password.');
+      }
+    } finally {
+      setBioBusy(false);
     }
   };
 
@@ -80,6 +107,16 @@ export function AuthScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>EMA</Text>
       <Text style={styles.subtitle}>{isRegister ? 'Create account' : 'Sign in'}</Text>
+      {showBiometricLogin && !isRegister ? (
+        <>
+          <PrimaryButton
+            label={bioBusy ? 'Checking…' : `Sign in with ${biometricLabel()}`}
+            onPress={() => void submitBiometric()}
+            disabled={bioBusy}
+          />
+          <Text style={styles.or}>or use email</Text>
+        </>
+      ) : null}
       <TextInput
         style={styles.input}
         placeholder='Email'
@@ -109,6 +146,7 @@ const styles = StyleSheet.create({
   title: { color: palette.primary, fontSize: 32, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: palette.textPrimary, fontSize: 18, textAlign: 'center', marginBottom: 10 },
   hint: { color: palette.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 4 },
+  or: { color: palette.textSecondary, textAlign: 'center', fontSize: 13 },
   input: {
     backgroundColor: palette.surface,
     borderColor: palette.border,

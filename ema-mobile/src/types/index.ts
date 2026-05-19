@@ -5,7 +5,7 @@ export type ExtraStackParamList = {
   P2P: undefined;
   SendById: undefined;
   LocalMoney: undefined;
-  Settings: undefined;
+  Settings: { openSecurity?: boolean } | undefined;
 };
 
 export type RootTabParamList = {
