@@ -207,7 +207,7 @@ export function WalletScreen() {
       setWithdrawTotpCode('');
       setWithdrawModalOpen(false);
       await refreshNowpayments();
-      showToast('Withdrawal submitted');
+      showToast('Withdrawal in progress');
     } catch (e: any) {
       if (isComplianceRequiredError(e)) alertComplianceRequired();
       else Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));

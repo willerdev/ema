@@ -269,8 +269,10 @@ export function formatActivityStatus(status: string): string {
   const s = String(status || '').toLowerCase();
   if (s === 'completed' || s === 'finished') return 'Completed';
   if (s.startsWith('completed')) return 'Completed';
-  if (s === 'awaiting_verify') return 'Awaiting verification';
-  if (s === 'processing' || s === 'sending' || s === 'confirming') return 'Processing';
+  if (s === 'in_progress') return 'In progress';
+  if (s === 'awaiting_verify') return 'In progress';
+  if (s === 'processing' || s === 'sending' || s === 'confirming' || s === 'pending' || s === 'creating' || s === 'waiting')
+    return 'In progress';
   if (s === 'waiting') return 'Waiting';
   if (s === 'failed' || s === 'rejected' || s === 'expired') return 'Failed';
   if (s === 'partially_paid') return 'Partial';

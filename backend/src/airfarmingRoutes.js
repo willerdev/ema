@@ -10,8 +10,8 @@ const AIRFARMING_PLATFORM_HIGHLIGHT = AIRFARMING_PLATFORM_HIGHLIGHTS[0] ?? null;
 const {
   getAirfarmingStateByUserId,
   upsertAirfarmingState,
-  insertAirfarmingEvent,
-  listAirfarmingEventsByUserId,
+  updateAirfarmingAutoFundSetting,
+  listAirfarmingDropsForWeek,
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
   insertAirfarmingTransfer,
@@ -19,64 +19,30 @@ const {
   setWalletBalance,
   isMissingTableError,
 } = require('./db');
+const { buildDropStatus, dropToHistoryRow } = require('./airfarmingDrops');
 
 function newId() {
   return crypto.randomUUID();
 }
 
-function hash32(input) {
-  let h = 2166136261;
-  const s = String(input);
-  for (let i = 0; i < s.length; i += 1) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
 function mondayUtcYmd(now = new Date()) {
   const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const dow = d.getUTCDay(); // 0 Sun .. 6 Sat
-  const offset = (dow + 6) % 7; // Monday -> 0
+  const dow = d.getUTCDay();
+  const offset = (dow + 6) % 7;
   d.setUTCDate(d.getUTCDate() - offset);
   return d.toISOString().slice(0, 10);
-}
-
-function ymdToUtcMs(ymd) {
-  const [y, m, d] = ymd.split('-').map(Number);
-  return Date.UTC(y, m - 1, d);
-}
-
-function buildFourOffsets(seed) {
-  const set = new Set();
-  let x = seed >>> 0;
-  let guard = 0;
-  while (set.size < 4 && guard < 50) {
-    guard += 1;
-    x = (Math.imul(1664525, x) + 1013904223) >>> 0;
-    const hr = 6 + (x % 90); // 6..95 hours from Monday UTC — simulated fires sooner than legacy 28–147h
-    set.add(hr);
-  }
-  return [...set].sort((a, b) => a - b);
-}
-
-function weeklyTargetFromSeed(seed) {
-  return 2 + (seed % 3); // 2..4
 }
 
 async function ensureWeekState(userId) {
   const weekYmd = mondayUtcYmd();
   let row = await getAirfarmingStateByUserId(userId);
   if (!row || row.week_start !== weekYmd) {
-    const seed = hash32(`${userId}:${weekYmd}`);
-    const weekly_event_target = weeklyTargetFromSeed(seed);
-    const event_offsets_hours = buildFourOffsets(seed ^ 0x9e3779b9);
     row = await upsertAirfarmingState({
       user_id: userId,
       week_start: weekYmd,
-      weekly_event_target,
+      weekly_event_target: 2,
       weekly_events_used: 0,
-      event_offsets_hours,
+      event_offsets_hours: [],
       last_event_at: null,
       updated_at: new Date().toISOString(),
     });
@@ -84,66 +50,8 @@ async function ensureWeekState(userId) {
   return row;
 }
 
-/** Simulated weekly event return (%), pseudo-random in [minPct, maxPct] inclusive, stable per user/week/slot. */
-function simulatedReturnPercent(userId, weekStart, eventIndex, lastEventAt) {
-  const minPct = 20;
-  const maxPct = 85;
-  const span = maxPct - minPct + 1;
-  const h = hash32(`${userId}:${weekStart}:${eventIndex}:${lastEventAt || 0}:airfarmingReturn`);
-  return minPct + (h % span);
-}
-
-async function maybeFireEvents(userId, row) {
-  const weekStartMs = ymdToUtcMs(row.week_start);
-  let rawOffsets = row.event_offsets_hours;
-  if (typeof rawOffsets === 'string') {
-    try {
-      rawOffsets = JSON.parse(rawOffsets);
-    } catch {
-      rawOffsets = [];
-    }
-  }
-  const offsets = Array.isArray(rawOffsets) ? rawOffsets.map(Number) : [];
-  let used = Number(row.weekly_events_used || 0);
-  const target = Number(row.weekly_event_target || 2);
-  const now = Date.now();
-  let lastAt = row.last_event_at;
-
-  while (used < target && used < offsets.length) {
-    const due = weekStartMs + offsets[used] * 3600 * 1000;
-    if (now < due) break;
-    const pct = simulatedReturnPercent(userId, row.week_start, used, lastAt);
-    await insertAirfarmingEvent({
-      id: newId(),
-      user_id: userId,
-      percent: Number(pct.toFixed(2)),
-    });
-    used += 1;
-    lastAt = new Date().toISOString();
-  }
-
-  if (used !== Number(row.weekly_events_used || 0) || lastAt !== row.last_event_at) {
-    await upsertAirfarmingState({
-      user_id: userId,
-      week_start: row.week_start,
-      weekly_event_target: row.weekly_event_target,
-      weekly_events_used: used,
-      event_offsets_hours: row.event_offsets_hours,
-      last_event_at: lastAt,
-      updated_at: new Date().toISOString(),
-    });
-    row = await getAirfarmingStateByUserId(userId);
-  }
-  return row;
-}
-
-function mergeAirfarmingHistory(dbEvents, highlights, limit = 25) {
-  const rows = (dbEvents || []).map((e) => ({
-    id: String(e.id),
-    percent: Number(e.percent),
-    createdAt: e.created_at,
-    source: 'schedule',
-  }));
+function mergeAirfarmingHistory(dropRows, highlights, limit = 25) {
+  const rows = (dropRows || []).map((d) => dropToHistoryRow(d));
   for (const h of highlights) {
     const date = String(h?.date ?? '').trim();
     const pct = Number(h?.percent);
@@ -156,14 +64,12 @@ function mergeAirfarmingHistory(dbEvents, highlights, limit = 25) {
     });
   }
   rows.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  return rows.slice(0, limit).map(({ id, percent, createdAt, source }) =>
-    source === 'platform' ? { id, percent, createdAt, source: 'platform' } : { id, percent, createdAt }
-  );
+  return rows.slice(0, limit);
 }
 
 function registerAirfarmingRoutes(app, { authMiddleware }) {
   const schemaMsg =
-    'Airfarming schema missing. Run backend/sql/schema.sql in Supabase (airfarming_state, airfarming_events, airfarming_wallets, airfarming_transfers).';
+    'Airfarming schema missing. Run backend/sql/migrations/20260525_airfarming_drops.sql and airfarming wallet migrations in Supabase.';
 
   async function balancesForUser(userId) {
     const wallet = await ensureWalletForUser(userId);
@@ -175,25 +81,50 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
 
   app.get('/airfarming/status', authMiddleware, async (req, res) => {
     try {
-      let state = await ensureWeekState(req.userId);
-      state = await maybeFireEvents(req.userId, state);
-      const dbHistory = await listAirfarmingEventsByUserId(req.userId, 50);
-      const history = mergeAirfarmingHistory(dbHistory, AIRFARMING_PLATFORM_HIGHLIGHTS, 25);
-      const { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
+      const state = await ensureWeekState(req.userId);
+      let { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
+      const autoFundEnabled = Boolean(state.auto_fund_enabled);
+      const { nextDrop } = await buildDropStatus(req.userId, state.week_start, airfarmingBalance, {
+        autoFundEnabled,
+      });
+      ({ cashWallet, airfarmingBalance } = await balancesForUser(req.userId));
+      const settled = await listAirfarmingDropsForWeek(req.userId, state.week_start, 50);
+      const paidCount = settled.filter((d) => d.status === 'paid').length;
+      const missedCount = settled.filter((d) => d.status === 'missed').length;
+      const history = mergeAirfarmingHistory(settled, AIRFARMING_PLATFORM_HIGHLIGHTS, 25);
+      const dropHistory = settled.map((d) => dropToHistoryRow(d));
+
       return res.json({
         cashWallet,
         airfarmingBalance,
         weekStart: state.week_start,
-        weeklyTarget: state.weekly_event_target,
-        weeklyUsed: state.weekly_events_used,
-        scheduleHours: state.event_offsets_hours,
-        lastEventAt: state.last_event_at,
+        weeklyTarget: nextDrop ? 1 : 0,
+        weeklyUsed: paidCount + missedCount,
+        dropsPaid: paidCount,
+        dropsMissed: missedCount,
+        scheduleHours: [],
+        lastEventAt: settled[0]?.paid_at || settled[0]?.due_at || null,
+        autoFundEnabled,
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
+        nextDrop,
         history,
+        dropHistory,
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e?.message || 'Airfarming status failed' });
+    }
+  });
+
+  app.post('/airfarming/auto-fund', authMiddleware, async (req, res) => {
+    try {
+      await ensureWeekState(req.userId);
+      const enabled = Boolean(req.body?.enabled);
+      const state = await updateAirfarmingAutoFundSetting(req.userId, enabled);
+      return res.json({ autoFundEnabled: Boolean(state.auto_fund_enabled) });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e?.message || 'Auto-fund update failed' });
     }
   });
 

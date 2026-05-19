@@ -259,13 +259,13 @@ function toPublicPayoutError(error) {
     return 'Withdrawals are temporarily unavailable. Please try again later.';
   }
   if (code === 'PAYOUT_VERIFY_NOT_CONFIGURED' || code === 'PAYOUT_VERIFY_FAILED') {
-    return 'Withdrawal was created but could not be confirmed with the payment provider. Contact support if funds do not arrive.';
+    return 'Withdrawal is in progress. You will be notified when it completes.';
   }
   if (msg.includes('payout_description') || msg.includes('is not allowed')) {
     return 'Withdrawal was rejected by the payment provider. Please try again in a few minutes.';
   }
   if (msg.includes('verif')) {
-    return error.message && error.message.length < 160 ? error.message : 'Payout verification failed. Try again or contact support.';
+    return 'Withdrawal is in progress. You will be notified when it completes.';
   }
   if (msg.includes('insufficient') || msg.includes('balance')) {
     return error.message;

@@ -503,6 +503,20 @@ async function upsertAirfarmingState(row) {
   return data;
 }
 
+async function updateAirfarmingAutoFundSetting(userId, enabled) {
+  const { data, error } = await supabase
+    .from('airfarming_state')
+    .update({
+      auto_fund_enabled: Boolean(enabled),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function insertAirfarmingEvent(row) {
   const { data, error } = await supabase.from('airfarming_events').insert(row).select('*').single();
   if (error) throw error;
@@ -515,6 +529,82 @@ async function listAirfarmingEventsByUserId(userId, limit = 30) {
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function getScheduledAirfarmingDrop(userId, weekStart) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .eq('status', 'scheduled')
+    .order('due_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getMaxAirfarmingDropIndex(userId, weekStart) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('drop_index')
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .order('drop_index', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.drop_index != null ? Number(data.drop_index) : -1;
+}
+
+async function getLastAirfarmingDropForWeek(userId, weekStart) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .order('drop_index', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function insertAirfarmingDrop(row) {
+  const { data, error } = await supabase.from('airfarming_drops').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateAirfarmingDrop(id, patch) {
+  const { data, error } = await supabase.from('airfarming_drops').update(patch).eq('id', id).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listAirfarmingDropsByUserId(userId, limit = 40) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('*')
+    .eq('user_id', userId)
+    .order('due_at', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+async function listAirfarmingDropsForWeek(userId, weekStart, limit = 50) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .in('status', ['paid', 'missed'])
+    .order('due_at', { ascending: false })
     .limit(limit);
   if (error) throw error;
   return data || [];
@@ -571,6 +661,32 @@ async function listContractWalletsWithPositiveBalance() {
   const { data, error } = await supabase.from('contract_wallets').select('*').gt('balance', 0);
   if (error) throw error;
   return data || [];
+}
+
+async function getExpertTradingWalletByUserId(userId) {
+  const { data, error } = await supabase
+    .from('expert_trading_wallets')
+    .select('*')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertExpertTradingWalletRow(row) {
+  const { data, error } = await supabase
+    .from('expert_trading_wallets')
+    .upsert(row, { onConflict: 'user_id' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function insertExpertTradingTransfer(row) {
+  const { data, error } = await supabase.from('expert_trading_transfers').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
 }
 
 // --- NOWPayments crypto ledger ---
@@ -716,6 +832,7 @@ async function listPendingNowpaymentsPayoutsByUserId(userId) {
       'sending',
       'waiting',
       'awaiting_verify',
+      'in_progress',
     ]);
   if (error) throw error;
   return data || [];
@@ -1187,8 +1304,16 @@ module.exports = {
   isMissingTableError,
   getAirfarmingStateByUserId,
   upsertAirfarmingState,
+  updateAirfarmingAutoFundSetting,
   insertAirfarmingEvent,
   listAirfarmingEventsByUserId,
+  getScheduledAirfarmingDrop,
+  getMaxAirfarmingDropIndex,
+  getLastAirfarmingDropForWeek,
+  insertAirfarmingDrop,
+  updateAirfarmingDrop,
+  listAirfarmingDropsByUserId,
+  listAirfarmingDropsForWeek,
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
   insertAirfarmingTransfer,
@@ -1197,6 +1322,9 @@ module.exports = {
   getContractAccrualForUserDay,
   insertContractAccrual,
   listContractWalletsWithPositiveBalance,
+  getExpertTradingWalletByUserId,
+  upsertExpertTradingWalletRow,
+  insertExpertTradingTransfer,
   insertNowpaymentsPayment,
   getNowpaymentsPaymentById,
   getNowpaymentsPaymentByOrderId,

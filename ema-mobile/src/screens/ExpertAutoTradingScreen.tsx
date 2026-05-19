@@ -18,14 +18,14 @@ import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { useToast } from '../hooks/useToast';
+import { expertService, type ExpertMarketGroup } from '../services/expertService';
 import { mt5Service } from '../services/mt5Service';
 import type { RootStackParamList } from '../types';
 import { palette } from '../theme/colors';
 import { withTimeout } from '../utils/withTimeout';
 
 const STORAGE_ACTIVE = 'ema_expert_ea_active';
-const STORAGE_DERIVED = 'ema_expert_ea_derived';
-const STORAGE_FOREX = 'ema_expert_ea_forex';
+const STORAGE_MARKET = 'ema_expert_market_group';
 const STORAGE_RISK_PER_TRADE = 'ema_expert_risk_per_trade';
 const STORAGE_MAX_DRAWDOWN = 'ema_expert_max_drawdown';
 const STORAGE_MAX_DAILY_DRAWDOWN = 'ema_expert_max_daily_drawdown';
@@ -74,8 +74,12 @@ export function ExpertAutoTradingScreen() {
   const [configSaved, setConfigSaved] = useState(false);
 
   const [eaActive, setEaActive] = useState(false);
-  const [derivedMarkets, setDerivedMarkets] = useState(false);
-  const [forexMarket, setForexMarket] = useState(false);
+  const [marketGroup, setMarketGroup] = useState<ExpertMarketGroup | null>(null);
+  const [cashWallet, setCashWallet] = useState(0);
+  const [expertBalance, setExpertBalance] = useState(0);
+  const [fundAmount, setFundAmount] = useState('');
+  const [returnAmount, setReturnAmount] = useState('');
+  const [fundingBusy, setFundingBusy] = useState(false);
 
   const [riskPerTrade, setRiskPerTrade] = useState('');
   const [maxDrawdown, setMaxDrawdown] = useState('');
@@ -91,8 +95,7 @@ export function ExpertAutoTradingScreen() {
   const loadPrefs = useCallback(async () => {
     const keys = [
       STORAGE_ACTIVE,
-      STORAGE_DERIVED,
-      STORAGE_FOREX,
+      STORAGE_MARKET,
       STORAGE_RISK_PER_TRADE,
       STORAGE_MAX_DRAWDOWN,
       STORAGE_MAX_DAILY_DRAWDOWN,
@@ -105,8 +108,10 @@ export function ExpertAutoTradingScreen() {
     const values = await AsyncStorage.multiGet(keys);
     const map = Object.fromEntries(values);
     setEaActive(map[STORAGE_ACTIVE] === '1');
-    setDerivedMarkets(map[STORAGE_DERIVED] === '1');
-    setForexMarket(map[STORAGE_FOREX] === '1');
+    const storedMarket = map[STORAGE_MARKET];
+    if (storedMarket === 'derived' || storedMarket === 'metals') {
+      setMarketGroup(storedMarket);
+    }
     setRiskPerTrade(map[STORAGE_RISK_PER_TRADE] || '');
     setMaxDrawdown(map[STORAGE_MAX_DRAWDOWN] || '');
     setMaxDailyDrawdown(map[STORAGE_MAX_DAILY_DRAWDOWN] || '');
@@ -116,6 +121,20 @@ export function ExpertAutoTradingScreen() {
     setDisclaimerAccepted(map[STORAGE_DISCLAIMER_ACCEPTED] === '1');
     setConfigSaved(map[STORAGE_CONFIG_SAVED] === '1');
     setPrefsLoaded(true);
+  }, []);
+
+  const loadExpertSummary = useCallback(async () => {
+    try {
+      const summary = await withTimeout(expertService.getSummary(), 8000, 'Expert summary');
+      setCashWallet(summary.cashWallet);
+      setExpertBalance(summary.expertBalance);
+      if (summary.marketGroup) {
+        setMarketGroup(summary.marketGroup);
+        await AsyncStorage.setItem(STORAGE_MARKET, summary.marketGroup);
+      }
+    } catch {
+      // keep last local values
+    }
   }, []);
 
   const checkMt5 = useCallback(async () => {
@@ -135,14 +154,15 @@ export function ExpertAutoTradingScreen() {
     useCallback(() => {
       void loadPrefs();
       void checkMt5();
-    }, [loadPrefs, checkMt5])
+      void loadExpertSummary();
+    }, [loadPrefs, checkMt5, loadExpertSummary])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([checkMt5(), loadPrefs()]);
+    await Promise.all([checkMt5(), loadPrefs(), loadExpertSummary()]);
     setRefreshing(false);
-  }, [checkMt5, loadPrefs]);
+  }, [checkMt5, loadPrefs, loadExpertSummary]);
 
   const persistBool = async (key: string, value: boolean) => {
     await AsyncStorage.setItem(key, value ? '1' : '0');
@@ -219,36 +239,84 @@ export function ExpertAutoTradingScreen() {
     }
   };
 
+  const selectMarketGroup = async (group: ExpertMarketGroup) => {
+    if (expertBalance > 0 && marketGroup && marketGroup !== group) {
+      Alert.alert('Switch market', 'Return expert funds to your cash wallet before changing market type.');
+      return;
+    }
+    setMarketGroup(group);
+    await AsyncStorage.setItem(STORAGE_MARKET, group);
+  };
+
+  const onFundExpert = async () => {
+    if (!marketGroup) {
+      Alert.alert('Market', 'Choose Derived or Metals before allocating funds.');
+      return;
+    }
+    const amount = Number(String(fundAmount).trim());
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Amount', 'Enter a valid amount to allocate.');
+      return;
+    }
+    if (amount > cashWallet) {
+      Alert.alert('Insufficient balance', 'You do not have enough cash wallet balance for this allocation.');
+      return;
+    }
+    setFundingBusy(true);
+    try {
+      const summary = await expertService.fund(amount, marketGroup);
+      setCashWallet(summary.cashWallet);
+      setExpertBalance(summary.expertBalance);
+      if (summary.marketGroup) setMarketGroup(summary.marketGroup);
+      setFundAmount('');
+      showToast('Funds allocated for expert trading');
+    } catch (e: any) {
+      Alert.alert('Allocation failed', e?.message || 'Could not allocate funds.');
+    } finally {
+      setFundingBusy(false);
+    }
+  };
+
+  const onReturnToCash = async () => {
+    const amount = Number(String(returnAmount).trim());
+    if (!Number.isFinite(amount) || amount <= 0) {
+      Alert.alert('Amount', 'Enter a valid amount to return.');
+      return;
+    }
+    if (amount > expertBalance) {
+      Alert.alert('Insufficient balance', 'Amount exceeds your expert trading balance.');
+      return;
+    }
+    setFundingBusy(true);
+    try {
+      const summary = await expertService.returnToCash(amount);
+      setCashWallet(summary.cashWallet);
+      setExpertBalance(summary.expertBalance);
+      setReturnAmount('');
+      showToast('Funds returned to cash wallet');
+    } catch (e: any) {
+      Alert.alert('Return failed', e?.message || 'Could not return funds.');
+    } finally {
+      setFundingBusy(false);
+    }
+  };
+
   const setEaActiveSafe = async (next: boolean) => {
     if (!configSaved) {
       Alert.alert('Save settings first', 'Configure risk parameters and save before enabling expert management.');
       return;
     }
-    if (next && !derivedMarkets && !forexMarket) {
-      Alert.alert('Markets', 'Choose at least one: Derived markets and/or Forex market.');
+    if (next && !marketGroup) {
+      Alert.alert('Market', 'Choose Derived or Metals platform pairs before enabling.');
+      return;
+    }
+    if (next && expertBalance <= 0) {
+      Alert.alert('Allocate funds', 'Move funds from your cash wallet into expert trading before enabling.');
       return;
     }
     setEaActive(next);
     await persistBool(STORAGE_ACTIVE, next);
     if (next) showToast('Expert Account Manager enabled');
-  };
-
-  const setDerived = async (next: boolean) => {
-    setDerivedMarkets(next);
-    await persistBool(STORAGE_DERIVED, next);
-    if (eaActive && !next && !forexMarket) {
-      setEaActive(false);
-      await persistBool(STORAGE_ACTIVE, false);
-    }
-  };
-
-  const setForex = async (next: boolean) => {
-    setForexMarket(next);
-    await persistBool(STORAGE_FOREX, next);
-    if (eaActive && !next && !derivedMarkets) {
-      setEaActive(false);
-      await persistBool(STORAGE_ACTIVE, false);
-    }
   };
 
   const goMt5 = () => {
@@ -372,26 +440,78 @@ export function ExpertAutoTradingScreen() {
             </Card>
 
             <Card>
-              <Text style={styles.cardTitle}>Markets</Text>
-              <Text style={styles.meta}>Select where the expert may operate. At least one is required to enable.</Text>
+              <Text style={styles.cardTitle}>Platform pairs</Text>
+              <Text style={styles.meta}>
+                Trade with Ema&apos;s default derived pairs or metals. Pick one, then allocate cash from your wallet.
+              </Text>
               <View style={styles.row}>
-                <Text style={styles.rowLabel}>Derived markets</Text>
+                <Text style={styles.rowLabel}>Derived</Text>
                 <Switch
-                  value={derivedMarkets}
-                  onValueChange={(v) => void setDerived(v)}
+                  value={marketGroup === 'derived'}
+                  onValueChange={(v) => {
+                    if (v) void selectMarketGroup('derived');
+                    else if (marketGroup === 'derived') {
+                      setMarketGroup(null);
+                      void AsyncStorage.removeItem(STORAGE_MARKET);
+                    }
+                  }}
                   trackColor={{ false: palette.border, true: palette.primary }}
                   thumbColor='#f4f4f5'
                 />
               </View>
               <View style={styles.row}>
-                <Text style={styles.rowLabel}>Forex market</Text>
+                <Text style={styles.rowLabel}>Metals</Text>
                 <Switch
-                  value={forexMarket}
-                  onValueChange={(v) => void setForex(v)}
+                  value={marketGroup === 'metals'}
+                  onValueChange={(v) => {
+                    if (v) void selectMarketGroup('metals');
+                    else if (marketGroup === 'metals') {
+                      setMarketGroup(null);
+                      void AsyncStorage.removeItem(STORAGE_MARKET);
+                    }
+                  }}
                   trackColor={{ false: palette.border, true: palette.primary }}
                   thumbColor='#f4f4f5'
                 />
               </View>
+              <Text style={[styles.meta, { marginTop: 12 }]}>
+                Cash wallet: ${Math.floor(cashWallet)} · Expert balance: ${Math.floor(expertBalance)}
+                {marketGroup ? ` · ${marketGroup === 'derived' ? 'Derived' : 'Metals'}` : ''}
+              </Text>
+              <Text style={styles.fieldLabel}>Amount to allocate (USD)</Text>
+              <TextInput
+                style={inputStyle}
+                value={fundAmount}
+                onChangeText={setFundAmount}
+                placeholder='e.g. 100'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='decimal-pad'
+              />
+              <PrimaryButton
+                label={fundingBusy ? 'Working…' : 'Allocate from cash wallet'}
+                onPress={() => void onFundExpert()}
+                disabled={fundingBusy}
+                style={{ marginTop: 8 }}
+              />
+              {expertBalance > 0 ? (
+                <>
+                  <Text style={styles.fieldLabel}>Return to cash wallet (USD)</Text>
+                  <TextInput
+                    style={inputStyle}
+                    value={returnAmount}
+                    onChangeText={setReturnAmount}
+                    placeholder='e.g. 50'
+                    placeholderTextColor={palette.textSecondary}
+                    keyboardType='decimal-pad'
+                  />
+                  <PrimaryButton
+                    label={fundingBusy ? 'Working…' : 'Return to cash wallet'}
+                    onPress={() => void onReturnToCash()}
+                    disabled={fundingBusy}
+                    style={{ marginTop: 8 }}
+                  />
+                </>
+              ) : null}
             </Card>
 
             <Card>
@@ -418,7 +538,8 @@ export function ExpertAutoTradingScreen() {
                   Active · {riskPerTrade}% / trade · Max DD {maxDrawdown}% · Daily {maxDailyDrawdown}% · R:R {riskReward}
                 </Text>
                 <Text style={styles.meta}>
-                  Markets: {[derivedMarkets && 'Derived', forexMarket && 'Forex'].filter(Boolean).join(' · ') || '—'}
+                  {marketGroup === 'derived' ? 'Derived' : marketGroup === 'metals' ? 'Metals' : '—'} · $
+                  {Math.floor(expertBalance)} allocated
                 </Text>
               </Card>
             ) : null}

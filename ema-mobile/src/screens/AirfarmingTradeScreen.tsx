@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
@@ -9,17 +10,35 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withSequence, withTiming } from 'react-native-reanimated';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { airfarmingService, type AirfarmingStatus } from '../services/airfarmingService';
+import {
+  airfarmingService,
+  formatDropCountdown,
+  type AirfarmingStatus,
+} from '../services/airfarmingService';
 import { palette } from '../theme/colors';
+
+const POLL_MS = 45_000;
+
+function formatUsd(n: number): string {
+  if (n >= 1000) return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+  return `$${n.toFixed(2)}`;
+}
 
 export function AirfarmingTradeScreen() {
   const insets = useSafeAreaInsets();
@@ -31,24 +50,56 @@ export function AirfarmingTradeScreen() {
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
   const [activateModalOpen, setActivateModalOpen] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
+  const [autoFundSaving, setAutoFundSaving] = useState(false);
+  const [countdownSec, setCountdownSec] = useState(0);
   const pulse = useSharedValue(1);
+  const urgentPulse = useSharedValue(1);
+  const dueAtRef = useRef<string | null>(null);
 
   const fabBottom = Math.max(insets.bottom, 12) + 16;
   const keyboardOffset = Platform.OS === 'ios' ? insets.top + 56 : 0;
 
   useEffect(() => {
-    pulse.value = withRepeat(withSequence(withTiming(1.04, { duration: 900 }), withTiming(1, { duration: 900 })), -1, true);
+    pulse.value = withRepeat(
+      withSequence(withTiming(1.04, { duration: 900 }), withTiming(1, { duration: 900 })),
+      -1,
+      true
+    );
   }, [pulse]);
 
   const ringStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
   }));
 
+  const urgentRingStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: urgentPulse.value }],
+    opacity: countdownSec <= 120 ? 1 : 0.85,
+  }));
+
+  useEffect(() => {
+    if (countdownSec > 0 && countdownSec <= 120) {
+      urgentPulse.value = withRepeat(
+        withSequence(withTiming(1.08, { duration: 400 }), withTiming(1, { duration: 400 })),
+        -1,
+        true
+      );
+    } else {
+      urgentPulse.value = 1;
+    }
+  }, [countdownSec, urgentPulse]);
+
   const load = useCallback(async () => {
     setError(null);
     try {
       const s = await airfarmingService.getStatus();
       setStatus(s);
+      if (s.nextDrop?.dueAt) {
+        dueAtRef.current = s.nextDrop.dueAt;
+        setCountdownSec(s.nextDrop.secondsRemaining);
+      } else {
+        dueAtRef.current = null;
+        setCountdownSec(0);
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load airfarming');
       setStatus(null);
@@ -63,6 +114,29 @@ export function AirfarmingTradeScreen() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const id = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(id);
+  }, [load]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void load();
+    });
+    return () => sub.remove();
+  }, [load]);
+
+  useEffect(() => {
+    const tick = setInterval(() => {
+      if (dueAtRef.current) {
+        const rem = Math.max(0, Math.floor((new Date(dueAtRef.current).getTime() - Date.now()) / 1000));
+        setCountdownSec(rem);
+        if (rem === 0) void load();
+      }
+    }, 1000);
+    return () => clearInterval(tick);
   }, [load]);
 
   const closeFabMenu = () => setFabMenuOpen(false);
@@ -103,6 +177,23 @@ export function AirfarmingTradeScreen() {
     }
   };
 
+  const onToggleAutoFund = async (enabled: boolean) => {
+    if (autoFundSaving) return;
+    setAutoFundSaving(true);
+    try {
+      const autoFundEnabled = await airfarmingService.updateAutoFund(enabled);
+      setStatus((prev) => (prev ? { ...prev, autoFundEnabled } : prev));
+      await load();
+    } catch (e: any) {
+      Alert.alert('Auto-fund', e?.message || 'Could not update auto-fund setting');
+    } finally {
+      setAutoFundSaving(false);
+    }
+  };
+
+  const nextDrop = status?.nextDrop;
+  const nearDrop = countdownSec > 0 && countdownSec <= 120;
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -112,8 +203,8 @@ export function AirfarmingTradeScreen() {
       >
         <Text style={styles.title}>Airfarming</Text>
         <Text style={styles.disclaimer}>
-          Funds in airfarming are separate from your cash wallet. Move them back to cash here before using wallet withdraw.
-          Weekly % events are for engagement; not a bank product; not on-chain; not financial advice.
+          Funds in airfarming are separate from your cash wallet. At each drop, keep your balance within the required
+          range to earn the shown percentage as profit (credited to airfarming). Not financial advice.
         </Text>
 
         {status?.platformHighlight ? (
@@ -159,33 +250,95 @@ export function AirfarmingTradeScreen() {
               </Text>
             </Card>
 
-            <Animated.View style={[styles.heroRing, ringStyle]}>
-              <Card style={styles.heroCard}>
-                <Text style={styles.heroLabel}>This week</Text>
-                <Text style={styles.heroBig}>
-                  {status.weeklyUsed} / {status.weeklyTarget} events
-                </Text>
-                <Text style={styles.meta}>Week starts {status.weekStart} (UTC)</Text>
-                {status.lastEventAt ? <Text style={styles.meta}>Last event: {new Date(status.lastEventAt).toLocaleString()}</Text> : null}
+            <Card>
+              <View style={styles.settingRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.section}>Auto-fund drops</Text>
+                  <Text style={styles.meta}>
+                    When enabled, Ema can move only the missing amount into airfarming at drop time, using cash first
+                    or available USDT crypto if cash cannot cover it.
+                  </Text>
+                </View>
+                <Switch
+                  value={Boolean(status.autoFundEnabled)}
+                  onValueChange={(v) => void onToggleAutoFund(v)}
+                  disabled={autoFundSaving}
+                  trackColor={{ false: palette.border, true: palette.primary }}
+                  thumbColor={status.autoFundEnabled ? '#0B1220' : palette.textSecondary}
+                />
+              </View>
+              <Text style={styles.autoFundNote}>
+                Auto-fund only runs if your current airfarming balance is below the required minimum and your wallet has
+                enough cash/USDT to reach it. It does not reduce balances above the max range.
+              </Text>
+            </Card>
+
+            <Animated.View style={[styles.heroRing, nearDrop ? urgentRingStyle : ringStyle]}>
+              <Card style={nearDrop ? { ...styles.heroCard, ...styles.heroCardUrgent } : styles.heroCard}>
+                <Text style={styles.heroLabel}>Next drop</Text>
+                {nextDrop ? (
+                  <>
+                    <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
+                    <Text style={styles.meta}>until eligibility check</Text>
+                    <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
+                    <Text style={styles.rangeLine}>
+                      Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
+                    </Text>
+                    <View
+                      style={[
+                        styles.eligibilityPill,
+                        nextDrop.eligibleNow ? styles.eligibleYes : styles.eligibleNo,
+                      ]}
+                    >
+                      <Text style={styles.eligibilityText}>
+                        {nextDrop.eligibleNow
+                          ? `Eligible now · est. +$${nextDrop.projectedProfit.toFixed(2)}`
+                          : 'Not in range — adjust balance before drop'}
+                      </Text>
+                    </View>
+                    <Text style={[styles.meta, { marginTop: 8 }]}>
+                      Drops every 2–5 hours (UTC week). Profit only if balance is inside the range at drop time.
+                    </Text>
+                  </>
+                ) : (
+                  <Text style={styles.meta}>No upcoming drop this week. Check back after the week resets.</Text>
+                )}
               </Card>
             </Animated.View>
 
             <Card>
-              <Text style={styles.section}>Schedule (hours from week start)</Text>
-              <Text style={styles.meta}>{(status.scheduleHours || []).join(', ') || '—'}</Text>
+              <Text style={styles.section}>This week</Text>
+              <Text style={styles.meta}>
+                Paid: {status.dropsPaid ?? 0} · Missed: {status.dropsMissed ?? 0} · Week starts {status.weekStart}{' '}
+                (UTC)
+              </Text>
             </Card>
 
             <Card>
-              <Text style={styles.section}>Recent events</Text>
-              <Text style={[styles.meta, { marginBottom: 8 }]}>
-                Scheduled rows unlock when their hour passes (UTC week). Platform rows are fixed-date milestones.
-              </Text>
-              {!status.history.length && <Text style={styles.meta}>Nothing to show yet.</Text>}
+              <Text style={styles.section}>Drop history</Text>
+              {!status.history.length && <Text style={styles.meta}>No drops yet this week.</Text>}
               {status.history.map((h) => (
-                <Text key={h.id || String(h.createdAt)} style={styles.row}>
-                  {h.source === 'platform' ? 'Platform · ' : ''}+{Number(h.percent ?? 0).toFixed(2)}% —{' '}
-                  {h.createdAt ? new Date(h.createdAt).toLocaleString() : '—'}
-                </Text>
+                <View key={h.id || String(h.createdAt)} style={styles.historyRow}>
+                  <Text style={styles.row}>
+                    {h.source === 'platform' ? 'Platform · ' : ''}
+                    {h.status === 'paid'
+                      ? `Paid +$${(h.profitAmount ?? 0).toFixed(2)}`
+                      : h.status === 'missed'
+                        ? 'Missed'
+                        : ''}{' '}
+                    · {h.percent.toFixed(0)}%
+                    {h.minBalance != null && h.maxBalance != null
+                      ? ` · ${formatUsd(h.minBalance)}–${formatUsd(h.maxBalance)}`
+                      : ''}
+                  </Text>
+                  <Text style={styles.meta}>
+                    {h.createdAt ? new Date(h.createdAt).toLocaleString() : '—'}
+                    {h.eligibleBalance != null ? ` · balance $${h.eligibleBalance.toFixed(2)}` : ''}
+                    {(h.autoFundedCash ?? 0) > 0 || (h.autoFundedCrypto ?? 0) > 0
+                      ? ` · auto-funded $${((h.autoFundedCash ?? 0) + (h.autoFundedCrypto ?? 0)).toFixed(2)}`
+                      : ''}
+                  </Text>
+                </View>
               ))}
             </Card>
           </>
@@ -258,31 +411,31 @@ export function AirfarmingTradeScreen() {
               }}
             />
             <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'flex-end' }]}>
-            <View style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
-              <Text style={styles.formTitle}>Activate</Text>
-              <Text style={styles.formSubtitle}>Move amount from your cash wallet into airfarming.</Text>
-              <TextInput
-                style={styles.input}
-                value={activateAmount}
-                onChangeText={setActivateAmount}
-                placeholder='Amount (USD)'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-              <View style={styles.buttonRow}>
-                <PrimaryButton label='Confirm' onPress={() => void onActivate()} style={{ flex: 1 }} />
-                <View style={{ width: 8 }} />
-                <PrimaryButton
-                  label='Cancel'
-                  onPress={() => {
-                    setActivateModalOpen(false);
-                    setActivateAmount('');
-                  }}
-                  variant='danger'
-                  style={{ flex: 1 }}
+              <View style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
+                <Text style={styles.formTitle}>Activate</Text>
+                <Text style={styles.formSubtitle}>Move amount from your cash wallet into airfarming.</Text>
+                <TextInput
+                  style={styles.input}
+                  value={activateAmount}
+                  onChangeText={setActivateAmount}
+                  placeholder='Amount (USD)'
+                  placeholderTextColor={palette.textSecondary}
+                  keyboardType='decimal-pad'
                 />
+                <View style={styles.buttonRow}>
+                  <PrimaryButton label='Confirm' onPress={() => void onActivate()} style={{ flex: 1 }} />
+                  <View style={{ width: 8 }} />
+                  <PrimaryButton
+                    label='Cancel'
+                    onPress={() => {
+                      setActivateModalOpen(false);
+                      setActivateAmount('');
+                    }}
+                    variant='danger'
+                    style={{ flex: 1 }}
+                  />
+                </View>
               </View>
-            </View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -312,31 +465,31 @@ export function AirfarmingTradeScreen() {
               }}
             />
             <View pointerEvents='box-none' style={[StyleSheet.absoluteFillObject, { justifyContent: 'flex-end' }]}>
-            <View style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
-              <Text style={styles.formTitle}>Return to cash</Text>
-              <Text style={styles.formSubtitle}>Move funds from airfarming back to your internal cash balance.</Text>
-              <TextInput
-                style={styles.input}
-                value={returnAmount}
-                onChangeText={setReturnAmount}
-                placeholder='Amount (USD)'
-                placeholderTextColor={palette.textSecondary}
-                keyboardType='decimal-pad'
-              />
-              <View style={styles.buttonRow}>
-                <PrimaryButton label='Confirm' onPress={() => void onReturnToCash()} style={{ flex: 1 }} />
-                <View style={{ width: 8 }} />
-                <PrimaryButton
-                  label='Cancel'
-                  onPress={() => {
-                    setReturnModalOpen(false);
-                    setReturnAmount('');
-                  }}
-                  variant='danger'
-                  style={{ flex: 1 }}
+              <View style={[styles.formSheet, { paddingBottom: Math.max(insets.bottom, 16) + 16 }]}>
+                <Text style={styles.formTitle}>Return to cash</Text>
+                <Text style={styles.formSubtitle}>Move funds from airfarming back to your internal cash balance.</Text>
+                <TextInput
+                  style={styles.input}
+                  value={returnAmount}
+                  onChangeText={setReturnAmount}
+                  placeholder='Amount (USD)'
+                  placeholderTextColor={palette.textSecondary}
+                  keyboardType='decimal-pad'
                 />
+                <View style={styles.buttonRow}>
+                  <PrimaryButton label='Confirm' onPress={() => void onReturnToCash()} style={{ flex: 1 }} />
+                  <View style={{ width: 8 }} />
+                  <PrimaryButton
+                    label='Cancel'
+                    onPress={() => {
+                      setReturnModalOpen(false);
+                      setReturnAmount('');
+                    }}
+                    variant='danger'
+                    style={{ flex: 1 }}
+                  />
+                </View>
               </View>
-            </View>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -352,10 +505,19 @@ const styles = StyleSheet.create({
   disclaimer: { color: palette.textSecondary, marginBottom: 14, lineHeight: 20 },
   heroRing: { marginBottom: 12 },
   heroCard: { alignItems: 'center' },
-  heroLabel: { color: palette.textSecondary, marginBottom: 4 },
-  heroBig: { color: palette.primary, fontSize: 28, fontWeight: '800' },
+  heroCardUrgent: { borderColor: palette.primary, borderWidth: 1 },
+  heroLabel: { color: palette.textSecondary, marginBottom: 4, fontWeight: '700', textTransform: 'uppercase', fontSize: 11 },
+  countdown: { color: palette.textPrimary, fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  heroBig: { color: palette.primary, fontSize: 36, fontWeight: '800', marginTop: 8 },
+  rangeLine: { color: palette.textPrimary, fontSize: 15, fontWeight: '600', marginTop: 10, textAlign: 'center' },
+  eligibilityPill: { marginTop: 12, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  eligibleYes: { backgroundColor: 'rgba(0,200,5,0.15)' },
+  eligibleNo: { backgroundColor: 'rgba(245,158,11,0.15)' },
+  eligibilityText: { color: palette.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' },
   section: { color: palette.textSecondary, marginBottom: 8, fontWeight: '700' },
   meta: { color: palette.textSecondary, marginBottom: 4 },
+  settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  autoFundNote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8 },
   balanceLine: { marginBottom: 6 },
   balanceValue: { color: palette.textPrimary, fontWeight: '700', fontSize: 18 },
   buttonRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
@@ -368,7 +530,8 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 10,
   },
-  row: { color: palette.textPrimary, marginBottom: 6 },
+  row: { color: palette.textPrimary, marginBottom: 2, fontWeight: '600' },
+  historyRow: { marginBottom: 10 },
   error: { color: palette.danger, marginBottom: 8 },
   fab: {
     position: 'absolute',
@@ -389,7 +552,13 @@ const styles = StyleSheet.create({
   modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.45)' },
   fabMenuCard: { position: 'absolute', zIndex: 2, minWidth: 220 },
   fabMenuInner: { marginBottom: 0, paddingVertical: 8 },
-  fabMenuTitle: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase' },
+  fabMenuTitle: {
+    color: palette.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
   fabMenuItem: {
     paddingVertical: 12,
     paddingHorizontal: 4,

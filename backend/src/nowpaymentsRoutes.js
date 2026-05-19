@@ -202,6 +202,21 @@ async function syncUncreditedPaymentsForUser(userId, limit = 15) {
 
 const TERMINAL_PAYOUT_STATUSES = ['finished', ...FAILED_PAYOUT_STATUSES];
 
+/** User-facing payout status (no provider verification / admin steps exposed). */
+function publicPayoutStatus(internal) {
+  const s = String(internal || '').toLowerCase();
+  if (s === 'finished') return 'finished';
+  if (FAILED_PAYOUT_STATUSES.includes(s)) return 'failed';
+  return 'in_progress';
+}
+
+function normalizeStoredPayoutStatus(status) {
+  const s = String(status || '').toLowerCase();
+  if (s === 'finished') return 'finished';
+  if (FAILED_PAYOUT_STATUSES.includes(s)) return s;
+  return 'in_progress';
+}
+
 async function syncPayoutFromProvider(row) {
   if (!np.configured() || !row?.payout_id) return row;
   try {
@@ -302,7 +317,7 @@ async function applyPayoutIpn(body) {
 }
 
 async function applyPayoutStatusToRow(row, status, rawBody) {
-  const st = String(status || row.status).toLowerCase();
+  const st = normalizeStoredPayoutStatus(status || row.status);
   const patch = { status: st, raw_last_ipn: rawBody };
   if (rawBody.payout_id) patch.payout_id = String(rawBody.payout_id);
   const updated = await updateNowpaymentsPayout(row.id, patch);
@@ -379,7 +394,8 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
       const payments = await listNowpaymentsPaymentsByUserId(req.userId, 20);
       const payouts = await listNowpaymentsPayoutsByUserId(req.userId, 20);
       const ledger = await listCryptoLedgerEntriesByUserId(req.userId, 40);
-      const activity = buildWalletActivity({ ledger, payments, payouts });
+      const payoutsForActivity = payouts.map((p) => ({ ...p, status: publicPayoutStatus(p.status) }));
+      const activity = buildWalletActivity({ ledger, payments, payouts: payoutsForActivity });
       return res.json({
         balances,
         cashWalletUsd,
@@ -403,7 +419,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
           id: p.id,
           payoutId: p.payout_id,
           batchPayoutId: p.batch_payout_id,
-          status: p.status,
+          status: publicPayoutStatus(p.status),
           currency: p.currency,
           address: p.address,
           amount: p.amount,
@@ -673,17 +689,19 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      let status = String(npResult.status || 'processing').toLowerCase();
+      const npStatus = String(npResult.status || 'processing').toLowerCase();
+      let status = npStatus === 'finished' ? 'finished' : 'in_progress';
       let verifyRaw = null;
 
-      if (np.payoutVerifyConfigured()) {
+      if (process.env.NOWPAYMENTS_AUTO_VERIFY_PAYOUT === '1' && np.payoutVerifyConfigured()) {
         try {
           const verificationCode = np.generatePayoutVerificationCode();
           verifyRaw = await np.verifyPayout(withdrawalId, verificationCode);
-          status = String(verifyRaw?.status || 'processing').toLowerCase();
+          const verifiedStatus = String(verifyRaw?.status || npStatus).toLowerCase();
+          status = verifiedStatus === 'finished' ? 'finished' : 'in_progress';
         } catch (verifyErr) {
-          console.warn('Payout auto-verify failed; payout may stay awaiting_verify', verifyErr.message);
-          status = 'awaiting_verify';
+          console.warn('Payout auto-verify failed; payout queued for provider processing', verifyErr.message);
+          status = 'in_progress';
         }
       }
 
@@ -698,12 +716,12 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         id: updated.id,
         payoutId: updated.payout_id,
         batchPayoutId: updated.batch_payout_id,
-        status: updated.status,
+        status: publicPayoutStatus(updated.status),
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
         cashFunded: Number(updated.cash_funded_amount || 0),
-        verified: Boolean(verifyRaw),
+        message: 'Withdrawal is in progress',
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });
@@ -750,7 +768,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      const status = String(verifyRaw?.status || 'processing').toLowerCase();
+      const status = normalizeStoredPayoutStatus(verifyRaw?.status || 'processing');
       const updated = await updateNowpaymentsPayout(row.id, {
         status,
         raw_last_ipn: { ...(row.raw_last_ipn || {}), verify: verifyRaw },
@@ -759,7 +777,7 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
       return res.json({
         id: updated.id,
         payoutId: updated.payout_id,
-        status: updated.status,
+        status: publicPayoutStatus(updated.status),
         currency: updated.currency,
         address: updated.address,
         amount: updated.amount,
