@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, Modal, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppLock } from '../context/AppLockContext';
+import { useAuth } from '../context/AuthContext';
 import { PinPad } from './PinPad';
 import { PrimaryButton } from './PrimaryButton';
 import { biometricLabel } from '../utils/biometrics';
@@ -9,9 +10,18 @@ import { palette } from '../theme/colors';
 
 export function AppLockOverlay() {
   const insets = useSafeAreaInsets();
+  const { logout } = useAuth();
   const { locked, biometricLoginEnabled, biometricAvailable, unlockWithPin, unlockWithBiometric } = useAppLock();
   const [error, setError] = useState<string | null>(null);
   const [bioBusy, setBioBusy] = useState(false);
+  const [pinAttempts, setPinAttempts] = useState(0);
+
+  useEffect(() => {
+    if (!locked) {
+      setPinAttempts(0);
+      setError(null);
+    }
+  }, [locked]);
 
   if (!locked) return null;
 
@@ -26,7 +36,18 @@ export function AppLockOverlay() {
   const onPinComplete = async (pin: string) => {
     setError(null);
     const ok = await unlockWithPin(pin);
-    if (!ok) setError('Incorrect PIN. Try again.');
+    if (ok) {
+      setPinAttempts(0);
+      return;
+    }
+    const nextAttempts = pinAttempts + 1;
+    setPinAttempts(nextAttempts);
+    if (nextAttempts >= 3) {
+      await logout();
+      Alert.alert('Session ended', 'Too many incorrect PIN attempts. Please sign in with your password.');
+      return;
+    }
+    setError(`Incorrect PIN. ${3 - nextAttempts} attempt${3 - nextAttempts === 1 ? '' : 's'} left.`);
   };
 
   return (

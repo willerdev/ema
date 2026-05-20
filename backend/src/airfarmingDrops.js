@@ -162,16 +162,40 @@ async function ensureNextScheduledDrop(userId, weekStart) {
   });
 }
 
-async function autoFundToMinimum(userId, drop, currentBalance) {
+async function autoAdjustToRange(userId, drop, currentBalance) {
   const minBalance = Number(drop.min_balance);
   const maxBalance = Number(drop.max_balance);
   const balance = Number(currentBalance) || 0;
-  if (balance >= minBalance || balance > maxBalance) {
-    return { balance, cash: 0, crypto: 0 };
+  const now = new Date().toISOString();
+
+  if (balance > maxBalance) {
+    const excess = roundMoney(balance - maxBalance);
+    if (excess <= 0) return { balance, cash: 0, crypto: 0, returnedCash: 0 };
+
+    const wallet = await ensureWalletForUser(userId);
+    const cashAvailable = Math.max(0, Number.parseFloat(String(wallet.balance ?? 0)) || 0);
+    await setWalletBalance(userId, roundMoney(cashAvailable + excess));
+    await upsertAirfarmingWalletRow({
+      user_id: userId,
+      balance: roundMoney(balance - excess),
+      updated_at: now,
+    });
+    await insertAirfarmingTransfer({
+      id: newId(),
+      user_id: userId,
+      direction: 'to_cash',
+      amount: excess,
+      created_at: now,
+    });
+    return { balance: roundMoney(balance - excess), cash: 0, crypto: 0, returnedCash: excess };
+  }
+
+  if (balance >= minBalance) {
+    return { balance, cash: 0, crypto: 0, returnedCash: 0 };
   }
 
   const needed = roundMoney(minBalance - balance);
-  if (needed <= 0) return { balance, cash: 0, crypto: 0 };
+  if (needed <= 0) return { balance, cash: 0, crypto: 0, returnedCash: 0 };
 
   const [wallet, cryptoBalances] = await Promise.all([
     ensureWalletForUser(userId),
@@ -179,15 +203,13 @@ async function autoFundToMinimum(userId, drop, currentBalance) {
   ]);
   const cashAvailable = Math.max(0, Number.parseFloat(String(wallet.balance ?? 0)) || 0);
   const cryptoAvailable = totalUsdtFamilyAvailable(cryptoBalances);
-  const useCash = cashAvailable >= needed;
-  const useCrypto = !useCash && cryptoAvailable >= needed;
-  if (!useCash && !useCrypto) {
-    return { balance, cash: 0, crypto: 0 };
+  const totalAvailable = roundMoney(cashAvailable + cryptoAvailable);
+  if (totalAvailable < needed) {
+    return { balance, cash: 0, crypto: 0, returnedCash: 0 };
   }
 
-  const cashTake = useCash ? needed : 0;
-  const cryptoTake = useCrypto ? needed : 0;
-  const now = new Date().toISOString();
+  const cashTake = roundMoney(Math.min(cashAvailable, needed));
+  const cryptoTake = roundMoney(needed - cashTake);
 
   if (cashTake > 0) {
     await setWalletBalance(userId, roundMoney(cashAvailable - cashTake));
@@ -226,7 +248,7 @@ async function autoFundToMinimum(userId, drop, currentBalance) {
     updated_at: now,
   });
 
-  return { balance: nextBalance, cash: cashTake, crypto: cryptoTake };
+  return { balance: nextBalance, cash: cashTake, crypto: cryptoTake, returnedCash: 0 };
 }
 
 async function settleDrop(userId, drop, options = {}) {
@@ -235,8 +257,9 @@ async function settleDrop(userId, drop, options = {}) {
   const now = new Date().toISOString();
   let autoFunded = { cash: 0, crypto: 0 };
   if (!isEligible(balance, drop.min_balance, drop.max_balance) && options.autoFundEnabled) {
-    autoFunded = await autoFundToMinimum(userId, drop, balance);
-    balance = autoFunded.balance;
+    const adjusted = await autoAdjustToRange(userId, drop, balance);
+    autoFunded = { cash: adjusted.cash, crypto: adjusted.crypto };
+    balance = adjusted.balance;
   }
   const eligible = isEligible(balance, drop.min_balance, drop.max_balance);
 
@@ -304,7 +327,7 @@ module.exports = {
   generateDropSpec,
   isEligible,
   computeProfit,
-  autoFundToMinimum,
+  autoAdjustToRange,
   toPublicNextDrop,
   ensureNextScheduledDrop,
   settleDrop,

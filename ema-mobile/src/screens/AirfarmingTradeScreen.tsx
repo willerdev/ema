@@ -200,6 +200,12 @@ export function AirfarmingTradeScreen() {
 
   const nextDrop = status?.nextDrop;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
+  const showRangeInfo = () => {
+    Alert.alert(
+      'How the required range works',
+      'Each drop uses a dynamically engineered balance window designed to distribute ROI and platform revenue fairly across users.\n\nRanges are calculated from approximately $100 up to $2,000,000. This keeps payouts balanced and prevents concentration in only one account size tier.\n\nAuto-fund can adjust your Airfarming balance at drop time: it can add missing funds from cash/USDT balances, or move excess back to cash when your balance is above the allowed maximum.\n\nIf your available balances are still not enough to enter the required range, the system keeps the standard status and the drop can be missed.\n\nBecause windows rotate by account and schedule, some users may receive eligible ROI within hours while others can take up to 3 days, but not longer under the active weekly schedule.'
+    );
+  };
 
   return (
     <View style={styles.root}>
@@ -279,8 +285,9 @@ export function AirfarmingTradeScreen() {
                 />
               </View>
               <Text style={styles.autoFundNote}>
-                Auto-fund only runs if your current airfarming balance is below the required minimum and your wallet has
-                enough cash/USDT to reach it. It does not reduce balances above the max range.
+                Auto-adjust runs at drop time. If your balance is low, it tops up from cash and then USDT balances. If
+                your balance is above the allowed maximum, it moves excess back to cash. If total funds still cannot fit
+                the required range, the standard not-in-range status is shown.
               </Text>
             </Card>
 
@@ -292,9 +299,14 @@ export function AirfarmingTradeScreen() {
                     <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
                     <Text style={styles.meta}>until eligibility check</Text>
                     <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
-                    <Text style={styles.rangeLine}>
-                      Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
-                    </Text>
+                    <View style={styles.rangeRow}>
+                      <Text style={styles.rangeLine}>
+                        Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
+                      </Text>
+                      <Pressable onPress={showRangeInfo} hitSlop={10} accessibilityRole='button' accessibilityLabel='Explain required balance range'>
+                        <Ionicons name='information-circle-outline' size={20} color={palette.textSecondary} />
+                      </Pressable>
+                    </View>
                     <View
                       style={[
                         styles.eligibilityPill,
@@ -304,7 +316,7 @@ export function AirfarmingTradeScreen() {
                       <Text style={styles.eligibilityText}>
                         {nextDrop.eligibleNow
                           ? `Eligible now · est. +$${nextDrop.projectedProfit.toFixed(2)}`
-                          : 'Not in range — adjust balance before drop'}
+                          : 'Not in range — auto-adjust could not place your balance inside the required window'}
                       </Text>
                     </View>
                     <Text style={[styles.meta, { marginTop: 8 }]}>
@@ -527,7 +539,14 @@ const styles = StyleSheet.create({
   heroLabel: { color: palette.textSecondary, marginBottom: 4, fontWeight: '700', textTransform: 'uppercase', fontSize: 11 },
   countdown: { color: palette.textPrimary, fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
   heroBig: { color: palette.primary, fontSize: 36, fontWeight: '800', marginTop: 8 },
-  rangeLine: { color: palette.textPrimary, fontSize: 15, fontWeight: '600', marginTop: 10, textAlign: 'center' },
+  rangeRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  rangeLine: { color: palette.textPrimary, fontSize: 15, fontWeight: '600', textAlign: 'center' },
   eligibilityPill: { marginTop: 12, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   eligibleYes: { backgroundColor: 'rgba(0,200,5,0.15)' },
   eligibleNo: { backgroundColor: 'rgba(245,158,11,0.15)' },
