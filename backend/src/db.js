@@ -96,6 +96,45 @@ async function clearTotp(userId) {
   if (error) throw error;
 }
 
+async function updateUserPasswordHash(userId, passwordHash) {
+  const { error } = await supabase.from('users').update({ password_hash: passwordHash }).eq('id', userId);
+  if (error) throw error;
+}
+
+async function replacePasswordResetCode({ userId, codeHash, expiresAt }) {
+  await supabase.from('password_reset_codes').delete().eq('user_id', userId);
+  const { error } = await supabase.from('password_reset_codes').insert({
+    id: id(),
+    user_id: userId,
+    code_hash: codeHash,
+    expires_at: expiresAt,
+  });
+  if (error) throw error;
+}
+
+/** Returns true if a matching unused, unexpired code was consumed. */
+async function consumePasswordResetCode({ userId, codeHash }) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('password_reset_codes')
+    .select('id')
+    .eq('user_id', userId)
+    .eq('code_hash', codeHash)
+    .is('used_at', null)
+    .gt('expires_at', now)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.id) return false;
+  const { error: usedErr } = await supabase
+    .from('password_reset_codes')
+    .update({ used_at: now })
+    .eq('id', data.id);
+  if (usedErr) throw usedErr;
+  return true;
+}
+
 async function getWalletByUserId(userId) {
   const { data, error } = await supabase.from('wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
@@ -1287,6 +1326,9 @@ async function upsertNotificationPreferences(userId, patch) {
 module.exports = {
   getUserByEmail,
   getUserById,
+  updateUserPasswordHash,
+  replacePasswordResetCode,
+  consumePasswordResetCode,
   createUser,
   updateAlpacaKeys,
   updateUserTotpSecretEnc,

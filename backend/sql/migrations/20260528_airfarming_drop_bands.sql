@@ -5,7 +5,7 @@ create table if not exists public.airfarming_drop_bands (
   band_index integer primary key check (band_index >= 0 and band_index <= 3),
   label text not null,
   balance_hint text not null,
-  percent numeric(10, 2) not null check (percent >= 0.01 and percent <= 100),
+  percent numeric(10, 2) not null check (percent >= 0.01 and percent <= 57.9),
   active boolean not null default true,
   updated_at timestamptz not null default now()
 );

@@ -74,6 +74,7 @@ function listPublicRegions() {
   return Object.values(REGIONS).map((r) => ({
     countryCode: r.countryCode,
     countryName: r.countryName,
+    dialCode: r.dialCode,
     fiatCurrency: r.fiatCurrency,
     fiatLabel: r.fiatLabel,
     usdtToFiatRate: r.usdtToFiatRate,

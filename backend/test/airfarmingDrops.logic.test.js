@@ -15,10 +15,18 @@ function hash32(input) {
   return h >>> 0;
 }
 
+const MAX_AIRFARMING_PERCENT = 57.9;
+
+function clampAirfarmingPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(MAX_AIRFARMING_PERCENT, Math.max(0.01, Math.round(n * 100) / 100));
+}
+
 function generateDropSpec(userId, weekStart, dropIndex) {
   const h = hash32(`${userId}:${weekStart}:${dropIndex}:dropSpec`);
   const h2 = hash32(`${userId}:${weekStart}:${dropIndex}:range`);
-  const percent = 1 + (h % 100);
+  const percent = clampAirfarmingPercent(1 + (h % 100));
   const band = h2 % 4;
   let minBalance;
   let maxBalance;
@@ -65,4 +73,12 @@ test('eligibility requires exact range', () => {
 test('profit is percent of balance capped at 5000', () => {
   assert.equal(computeProfit(1000, 10), 100);
   assert.equal(computeProfit(100000, 100), 5000);
+});
+
+test('drop percent never exceeds 57.9', () => {
+  for (let i = 0; i < 50; i += 1) {
+    const spec = generateDropSpec(`u-${i}`, '2026-05-19', i);
+    assert.ok(spec.percent <= MAX_AIRFARMING_PERCENT);
+    assert.ok(spec.percent >= 0.01);
+  }
 });

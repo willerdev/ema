@@ -17,6 +17,14 @@ const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
 const INTERVAL_HOURS = [2, 3, 5];
 const MAX_PROFIT_PER_DROP = 5000;
+/** Maximum airfarming drop interest % (platform cap). */
+const MAX_AIRFARMING_PERCENT = 57.9;
+
+function clampAirfarmingPercent(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(MAX_AIRFARMING_PERCENT, Math.max(0.01, Math.round(n * 100) / 100));
+}
 
 function newId() {
   return crypto.randomUUID();
@@ -91,11 +99,11 @@ function generateDropSpec(userId, weekStart, dropIndex) {
 async function resolvePercentForBand(bandIndex, fallbackPercent) {
   try {
     const row = await getAirfarmingDropBandByIndex(bandIndex);
-    if (row && row.percent != null) return Number(Number(row.percent).toFixed(2));
+    if (row && row.percent != null) return clampAirfarmingPercent(row.percent);
   } catch {
     /* bands table may be missing until migration runs */
   }
-  return Number(Number(fallbackPercent).toFixed(2));
+  return clampAirfarmingPercent(fallbackPercent);
 }
 
 /** Apply DB tier percent to a scheduled drop (skipped when percent_locked). */
@@ -383,4 +391,6 @@ module.exports = {
   buildDropStatus,
   dropToHistoryRow,
   MAX_PROFIT_PER_DROP,
+  MAX_AIRFARMING_PERCENT,
+  clampAirfarmingPercent,
 };

@@ -13,18 +13,23 @@ function twilioConfigured() {
   );
 }
 
-/** E.164 (+250...) */
+/**
+ * Twilio requires E.164 on the wire (+256...).
+ * App/storage format: international digits only, e.g. 256766532251 (no +, no leading 0).
+ */
 function toE164(phoneDigits) {
   const d = String(phoneDigits || '').replace(/\D/g, '');
   if (!d) return null;
-  return d.startsWith('+') ? d : `+${d}`;
+  if (d.startsWith('+')) return d;
+  return `+${d}`;
 }
 
 async function sendSms(toPhoneDigits, body) {
   if (!smsEnabled() || !twilioConfigured()) {
     return { sent: false, skipped: true };
   }
-  const to = toE164(toPhoneDigits);
+  const normalized = String(toPhoneDigits || '').replace(/\D/g, '');
+  const to = toE164(normalized);
   const from = process.env.TWILIO_FROM_NUMBER || process.env.PHONE_NUMBER;
   if (!to || !from) return { sent: false, skipped: true };
 

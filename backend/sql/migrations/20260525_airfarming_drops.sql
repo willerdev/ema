@@ -6,7 +6,7 @@ create table if not exists public.airfarming_drops (
   week_start date not null,
   drop_index integer not null check (drop_index >= 0),
   due_at timestamptz not null,
-  percent numeric(10, 2) not null check (percent >= 1 and percent <= 100),
+  percent numeric(10, 2) not null check (percent >= 0.01 and percent <= 57.9),
   min_balance numeric(18, 2) not null check (min_balance >= 0),
   max_balance numeric(18, 2) not null check (max_balance >= min_balance),
   status text not null default 'scheduled'

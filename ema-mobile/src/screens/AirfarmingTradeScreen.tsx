@@ -210,7 +210,7 @@ export function AirfarmingTradeScreen() {
   const showPercentInfo = () => {
     Alert.alert(
       'Drop percentage',
-      'The percentage shown for each drop is set when the drop is scheduled and is an estimate until settlement.\n\nIt may be revised before or at drop time if economic conditions change — for example shifts in interest rates, inflation, FX volatility, commodity prices, or broader market stress — or when platform risk and liquidity controls require adjustment.\n\nRevisions are applied to keep payout distribution sustainable across all participants. The displayed rate is not a fixed guarantee of returns.'
+      'The percentage shown for each drop is set when the drop is scheduled and is an estimate until settlement. Platform interest on a single drop is capped at 57.9%.\n\nIt may be revised before or at drop time if economic conditions change — for example shifts in interest rates, inflation, FX volatility, commodity prices, or broader market stress — or when platform risk and liquidity controls require adjustment.\n\nRevisions are applied to keep payout distribution sustainable across all participants. The displayed rate is not a fixed guarantee of returns.'
     );
   };
 

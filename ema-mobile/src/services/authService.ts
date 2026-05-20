@@ -51,4 +51,24 @@ export const authService = {
 
   disableTotp: (password: string, code: string) =>
     api.post<{ success: boolean }>('/auth/totp/disable', { password, code }),
+
+  getPasswordResetRegions: () =>
+    api.get<{
+      regions: Array<{
+        countryCode: string;
+        countryName: string;
+        dialCode: string;
+      }>;
+    }>('/auth/password-reset/regions'),
+
+  requestPasswordReset: (body: { email: string; countryCode: string; phone: string }) =>
+    api.post<{ message: string }>('/auth/forgot-password', body),
+
+  resetPassword: (body: {
+    email: string;
+    countryCode: string;
+    phone: string;
+    code: string;
+    password: string;
+  }) => api.post<{ message: string }>('/auth/reset-password', body),
 };

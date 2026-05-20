@@ -51,6 +51,7 @@ const {
 const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
 const { registerNowpaymentsRoutes, handlePaymentWebhook, handlePayoutWebhook } = require('./nowpaymentsRoutes');
 const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
+const { registerPasswordResetRoutes } = require('./passwordReset');
 const { registerContractRoutes } = require('./contractRoutes');
 const { registerExpertRoutes } = require('./expertRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
@@ -411,6 +412,8 @@ app.get('/auth/me', authMiddleware, async (req, res) => {
   if (!user) return res.status(404).json({ message: 'User not found' });
   return res.json({ user: { id: user.id, email: user.email } });
 });
+
+registerPasswordResetRoutes(app);
 
 app.get('/profile', authMiddleware, async (req, res) => {
   const user = await currentUser(req);
