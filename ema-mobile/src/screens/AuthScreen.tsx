@@ -7,9 +7,12 @@ import { palette } from '../theme/colors';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { authService } from '../services/authService';
 
-type AuthMode = 'signin' | 'register' | 'forgot' | 'reset';
+type AuthMode = 'signin' | 'register' | 'recover';
 
-type ResetRegion = { countryCode: string; countryName: string; dialCode: string };
+const RECOVER_REGIONS = [
+  { countryCode: 'UG', countryName: 'Uganda', dialCode: '256' },
+  { countryCode: 'RW', countryName: 'Rwanda', dialCode: '250' },
+] as const;
 
 export function AuthScreen() {
   const { login, register, completeTotpLogin, loginWithBiometric } = useAuth();
@@ -17,19 +20,17 @@ export function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [countryCode, setCountryCode] = useState('UG');
-  const [regions, setRegions] = useState<ResetRegion[]>([]);
-  const [resetCode, setResetCode] = useState('');
+  const [countryCode, setCountryCode] = useState<'UG' | 'RW'>('UG');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [totpPreAuthToken, setTotpPreAuthToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [showBiometricLogin, setShowBiometricLogin] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
-  const [resetBusy, setResetBusy] = useState(false);
+  const [recoverBusy, setRecoverBusy] = useState(false);
 
   const selectedRegion = useMemo(
-    () => regions.find((r) => r.countryCode === countryCode) ?? null,
-    [regions, countryCode]
+    () => RECOVER_REGIONS.find((r) => r.countryCode === countryCode) ?? RECOVER_REGIONS[0],
+    [countryCode]
   );
 
   useEffect(() => {
@@ -42,25 +43,6 @@ export function AuthScreen() {
       setShowBiometricLogin(Boolean(enabled && token && hardware));
     })();
   }, []);
-
-  useEffect(() => {
-    if (mode !== 'forgot' && mode !== 'reset') return;
-    (async () => {
-      try {
-        const res = await authService.getPasswordResetRegions();
-        const list = res.regions ?? [];
-        setRegions(list);
-        if (list.length && !list.some((r) => r.countryCode === countryCode)) {
-          setCountryCode(list[0].countryCode);
-        }
-      } catch {
-        setRegions([
-          { countryCode: 'UG', countryName: 'Uganda', dialCode: '256' },
-          { countryCode: 'RW', countryName: 'Rwanda', dialCode: '250' },
-        ]);
-      }
-    })();
-  }, [mode]);
 
   const submit = async () => {
     try {
@@ -114,78 +96,47 @@ export function AuthScreen() {
     setTotpCode('');
   };
 
-  const submitForgot = async () => {
+  const submitRecover = async () => {
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes('@')) {
       Alert.alert('Validation', 'Enter the email for your account.');
       return;
     }
     if (!phone.trim()) {
-      Alert.alert('Validation', 'Enter the mobile number on your Ema profile.');
-      return;
-    }
-    setResetBusy(true);
-    try {
-      const res = await authService.requestPasswordReset({
-        email: trimmed,
-        countryCode,
-        phone: phone.trim(),
-      });
-      Alert.alert('Check your phone', res.message);
-      setMode('reset');
-      setResetCode('');
-      setPassword('');
-      setConfirmPassword('');
-    } catch (error: any) {
-      Alert.alert('Reset request failed', error.message);
-    } finally {
-      setResetBusy(false);
-    }
-  };
-
-  const submitReset = async () => {
-    const trimmed = email.trim();
-    const code = resetCode.replace(/\s/g, '');
-    if (!trimmed || code.length < 6) {
-      Alert.alert('Validation', 'Enter your email and the 6-digit SMS code.');
-      return;
-    }
-    if (!phone.trim()) {
-      Alert.alert('Validation', 'Enter the same mobile number you used to request the code.');
+      Alert.alert('Validation', 'Enter the mobile number saved on your Ema profile.');
       return;
     }
     if (password.length < 6) {
-      Alert.alert('Validation', 'Password must be at least 6 characters.');
+      Alert.alert('Validation', 'New password must be at least 6 characters.');
       return;
     }
     if (password !== confirmPassword) {
       Alert.alert('Validation', 'Passwords do not match.');
       return;
     }
-    setResetBusy(true);
+    setRecoverBusy(true);
     try {
-      const res = await authService.resetPassword({
+      const res = await authService.recoverPassword({
         email: trimmed,
         countryCode,
         phone: phone.trim(),
-        code,
         password,
       });
       Alert.alert('Password updated', res.message);
       setMode('signin');
-      setResetCode('');
       setPassword('');
       setConfirmPassword('');
+      setPhone('');
     } catch (error: any) {
-      Alert.alert('Reset failed', error.message);
+      Alert.alert('Recovery failed', error.message);
     } finally {
-      setResetBusy(false);
+      setRecoverBusy(false);
     }
   };
 
   const countryPicker = (
     <View style={styles.countryRow}>
-      {regions.map((r) => {
+      {RECOVER_REGIONS.map((r) => {
         const active = r.countryCode === countryCode;
         return (
           <Pressable
@@ -202,9 +153,7 @@ export function AuthScreen() {
     </View>
   );
 
-  const phoneHint = selectedRegion
-    ? `Mobile number without + or 0 — we send SMS as ${selectedRegion.dialCode}XXXXXXXXX`
-    : 'Mobile number without + or leading 0';
+  const phoneHint = `Number without + or 0 — saved as ${selectedRegion.dialCode}… (e.g. ${selectedRegion.dialCode}766532251)`;
 
   if (totpPreAuthToken) {
     return (
@@ -230,14 +179,17 @@ export function AuthScreen() {
     );
   }
 
-  if (mode === 'forgot') {
+  if (mode === 'recover') {
     return (
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
         <Text style={styles.title}>EMA</Text>
-        <Text style={styles.subtitle}>Forgot password</Text>
+        <Text style={styles.subtitle}>Recover account</Text>
         <Text style={styles.hint}>
-          Enter your account email and the mobile number saved on your profile. We text a 6-digit code (not email).
+          Enter your account email and the mobile number on your profile, then choose a new password. No SMS or email
+          code is required.
         </Text>
+        <Text style={styles.sectionLabel}>Country</Text>
+        {countryPicker}
         <TextInput
           style={styles.input}
           placeholder='Email'
@@ -247,61 +199,15 @@ export function AuthScreen() {
           autoCapitalize='none'
           keyboardType='email-address'
         />
-        {countryPicker}
         <TextInput
           style={styles.input}
-          placeholder={selectedRegion?.dialCode === '256' ? '766532251' : '788123456'}
+          placeholder={countryCode === 'UG' ? '766532251' : '788123456'}
           placeholderTextColor={palette.textSecondary}
           value={phone}
           onChangeText={setPhone}
           keyboardType='phone-pad'
         />
         <Text style={styles.phoneHint}>{phoneHint}</Text>
-        <PrimaryButton
-          label={resetBusy ? 'Sending SMS…' : 'Send reset code'}
-          onPress={() => void submitForgot()}
-          disabled={resetBusy}
-        />
-        <Text style={styles.switch} onPress={() => setMode('signin')}>
-          Back to sign in
-        </Text>
-      </ScrollView>
-    );
-  }
-
-  if (mode === 'reset') {
-    return (
-      <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
-        <Text style={styles.title}>EMA</Text>
-        <Text style={styles.subtitle}>Set new password</Text>
-        <Text style={styles.hint}>Enter the SMS code and choose a new password.</Text>
-        <TextInput
-          style={styles.input}
-          placeholder='Email'
-          placeholderTextColor={palette.textSecondary}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize='none'
-          keyboardType='email-address'
-        />
-        {countryPicker}
-        <TextInput
-          style={styles.input}
-          placeholder='Mobile number'
-          placeholderTextColor={palette.textSecondary}
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType='phone-pad'
-        />
-        <TextInput
-          style={styles.input}
-          placeholder='SMS reset code'
-          placeholderTextColor={palette.textSecondary}
-          value={resetCode}
-          onChangeText={setResetCode}
-          keyboardType='number-pad'
-          maxLength={8}
-        />
         <TextInput
           style={styles.input}
           placeholder='New password'
@@ -312,20 +218,17 @@ export function AuthScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder='Confirm password'
+          placeholder='Confirm new password'
           placeholderTextColor={palette.textSecondary}
           secureTextEntry
           value={confirmPassword}
           onChangeText={setConfirmPassword}
         />
         <PrimaryButton
-          label={resetBusy ? 'Updating…' : 'Update password'}
-          onPress={() => void submitReset()}
-          disabled={resetBusy}
+          label={recoverBusy ? 'Updating…' : 'Reset password'}
+          onPress={() => void submitRecover()}
+          disabled={recoverBusy}
         />
-        <Text style={styles.switch} onPress={() => setMode('forgot')}>
-          Resend code
-        </Text>
         <Text style={styles.switch} onPress={() => setMode('signin')}>
           Back to sign in
         </Text>
@@ -365,7 +268,7 @@ export function AuthScreen() {
       />
       <PrimaryButton label={mode === 'register' ? 'Create Account' : 'Login'} onPress={submit} />
       {mode === 'signin' ? (
-        <Text style={styles.switch} onPress={() => setMode('forgot')}>
+        <Text style={styles.switch} onPress={() => setMode('recover')}>
           Forgot password?
         </Text>
       ) : null}
@@ -374,6 +277,7 @@ export function AuthScreen() {
         onPress={() => {
           setMode(mode === 'register' ? 'signin' : 'register');
           setPassword('');
+          setConfirmPassword('');
         }}
       >
         {mode === 'register' ? 'Already registered? Sign in' : 'Need an account? Register'}
@@ -393,7 +297,14 @@ const styles = StyleSheet.create({
   },
   title: { color: palette.primary, fontSize: 32, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: palette.textPrimary, fontSize: 18, textAlign: 'center', marginBottom: 10 },
-  hint: { color: palette.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 4 },
+  hint: { color: palette.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 4, lineHeight: 20 },
+  sectionLabel: {
+    color: palette.textSecondary,
+    fontSize: 12,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    textAlign: 'center',
+  },
   phoneHint: { color: palette.textSecondary, fontSize: 12, textAlign: 'center', marginTop: -4 },
   or: { color: palette.textSecondary, textAlign: 'center', fontSize: 13 },
   countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
