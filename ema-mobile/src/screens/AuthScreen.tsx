@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { securityStorage } from '../services/securityStorage';
 import { canUseBiometrics, biometricLabel } from '../utils/biometrics';
@@ -9,29 +9,18 @@ import { authService } from '../services/authService';
 
 type AuthMode = 'signin' | 'register' | 'recover';
 
-const RECOVER_REGIONS = [
-  { countryCode: 'UG', countryName: 'Uganda', dialCode: '256' },
-  { countryCode: 'RW', countryName: 'Rwanda', dialCode: '250' },
-] as const;
-
 export function AuthScreen() {
   const { login, register, completeTotpLogin, loginWithBiometric } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [countryCode, setCountryCode] = useState<'UG' | 'RW'>('UG');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [totpPreAuthToken, setTotpPreAuthToken] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
   const [showBiometricLogin, setShowBiometricLogin] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [recoverBusy, setRecoverBusy] = useState(false);
-
-  const selectedRegion = useMemo(
-    () => RECOVER_REGIONS.find((r) => r.countryCode === countryCode) ?? RECOVER_REGIONS[0],
-    [countryCode]
-  );
 
   useEffect(() => {
     (async () => {
@@ -118,7 +107,6 @@ export function AuthScreen() {
     try {
       const res = await authService.recoverPassword({
         email: trimmed,
-        countryCode,
         phone: phone.trim(),
         password,
       });
@@ -133,27 +121,6 @@ export function AuthScreen() {
       setRecoverBusy(false);
     }
   };
-
-  const countryPicker = (
-    <View style={styles.countryRow}>
-      {RECOVER_REGIONS.map((r) => {
-        const active = r.countryCode === countryCode;
-        return (
-          <Pressable
-            key={r.countryCode}
-            style={[styles.countryChip, active && styles.countryChipActive]}
-            onPress={() => setCountryCode(r.countryCode)}
-          >
-            <Text style={[styles.countryChipText, active && styles.countryChipTextActive]}>
-              {r.countryName} (+{r.dialCode})
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
-
-  const phoneHint = `Number without + or 0 — saved as ${selectedRegion.dialCode}… (e.g. ${selectedRegion.dialCode}766532251)`;
 
   if (totpPreAuthToken) {
     return (
@@ -185,11 +152,8 @@ export function AuthScreen() {
         <Text style={styles.title}>EMA</Text>
         <Text style={styles.subtitle}>Recover account</Text>
         <Text style={styles.hint}>
-          Enter your account email and the mobile number on your profile, then choose a new password. No SMS or email
-          code is required.
+          Enter your account email and mobile number from your profile, then choose a new password.
         </Text>
-        <Text style={styles.sectionLabel}>Country</Text>
-        {countryPicker}
         <TextInput
           style={styles.input}
           placeholder='Email'
@@ -201,13 +165,13 @@ export function AuthScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder={countryCode === 'UG' ? '766532251' : '788123456'}
+          placeholder='Mobile number'
           placeholderTextColor={palette.textSecondary}
           value={phone}
           onChangeText={setPhone}
           keyboardType='phone-pad'
         />
-        <Text style={styles.phoneHint}>{phoneHint}</Text>
+        <Text style={styles.phoneHint}>Use the number saved in Settings (e.g. 766532251 or 256766532251).</Text>
         <TextInput
           style={styles.input}
           placeholder='New password'
@@ -298,27 +262,8 @@ const styles = StyleSheet.create({
   title: { color: palette.primary, fontSize: 32, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: palette.textPrimary, fontSize: 18, textAlign: 'center', marginBottom: 10 },
   hint: { color: palette.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 4, lineHeight: 20 },
-  sectionLabel: {
-    color: palette.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    textAlign: 'center',
-  },
   phoneHint: { color: palette.textSecondary, fontSize: 12, textAlign: 'center', marginTop: -4 },
   or: { color: palette.textSecondary, textAlign: 'center', fontSize: 13 },
-  countryRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
-  countryChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: palette.border,
-    backgroundColor: palette.surface,
-  },
-  countryChipActive: { borderColor: palette.primary, backgroundColor: 'rgba(0,200,5,0.12)' },
-  countryChipText: { color: palette.textSecondary, fontSize: 13, fontWeight: '600' },
-  countryChipTextActive: { color: palette.primary },
   input: {
     backgroundColor: palette.surface,
     borderColor: palette.border,

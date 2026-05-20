@@ -52,10 +52,6 @@ export const authService = {
   disableTotp: (password: string, code: string) =>
     api.post<{ success: boolean }>('/auth/totp/disable', { password, code }),
 
-  recoverPassword: (body: {
-    email: string;
-    countryCode: 'UG' | 'RW';
-    phone: string;
-    password: string;
-  }) => api.post<{ message: string }>('/auth/recover-password', body),
+  recoverPassword: (body: { email: string; phone: string; password: string }) =>
+    api.post<{ message: string }>('/auth/recover-password', body),
 };
