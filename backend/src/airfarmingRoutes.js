@@ -69,7 +69,7 @@ function mergeAirfarmingHistory(dropRows, highlights, limit = 25) {
 
 function registerAirfarmingRoutes(app, { authMiddleware }) {
   const schemaMsg =
-    'Airfarming schema missing. Run backend/sql/migrations/20260525_airfarming_drops.sql and airfarming wallet migrations in Supabase.';
+    'Airfarming schema missing. Run backend/sql/migrations/20260525_airfarming_drops.sql, 20260526_airfarming_auto_fund.sql, and 20260528_airfarming_drop_bands.sql in Supabase.';
 
   async function balancesForUser(userId) {
     const wallet = await ensureWalletForUser(userId);

@@ -207,6 +207,13 @@ export function AirfarmingTradeScreen() {
     );
   };
 
+  const showPercentInfo = () => {
+    Alert.alert(
+      'Drop percentage',
+      'The percentage shown for each drop is set when the drop is scheduled and is an estimate until settlement.\n\nIt may be revised before or at drop time if economic conditions change — for example shifts in interest rates, inflation, FX volatility, commodity prices, or broader market stress — or when platform risk and liquidity controls require adjustment.\n\nRevisions are applied to keep payout distribution sustainable across all participants. The displayed rate is not a fixed guarantee of returns.'
+    );
+  };
+
   return (
     <View style={styles.root}>
       <ScrollView
@@ -298,7 +305,17 @@ export function AirfarmingTradeScreen() {
                   <>
                     <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
                     <Text style={styles.meta}>until eligibility check</Text>
-                    <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
+                    <View style={styles.percentRow}>
+                      <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
+                      <Pressable
+                        onPress={showPercentInfo}
+                        hitSlop={10}
+                        accessibilityRole='button'
+                        accessibilityLabel='Explain drop percentage and economic adjustments'
+                      >
+                        <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
+                      </Pressable>
+                    </View>
                     <View style={styles.rangeRow}>
                       <Text style={styles.rangeLine}>
                         Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
@@ -538,7 +555,14 @@ const styles = StyleSheet.create({
   heroCardUrgent: { borderColor: palette.primary, borderWidth: 1 },
   heroLabel: { color: palette.textSecondary, marginBottom: 4, fontWeight: '700', textTransform: 'uppercase', fontSize: 11 },
   countdown: { color: palette.textPrimary, fontSize: 32, fontWeight: '800', fontVariant: ['tabular-nums'] },
-  heroBig: { color: palette.primary, fontSize: 36, fontWeight: '800', marginTop: 8 },
+  percentRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroBig: { color: palette.primary, fontSize: 36, fontWeight: '800' },
   rangeRow: {
     marginTop: 10,
     flexDirection: 'row',

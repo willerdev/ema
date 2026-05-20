@@ -11,6 +11,7 @@ const {
   insertCryptoLedgerEntry,
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
+  getAirfarmingDropBandByIndex,
 } = require('./db');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
@@ -45,11 +46,22 @@ function pickIntervalHours(userId, weekStart, dropIndex) {
   return INTERVAL_HOURS[h % INTERVAL_HOURS.length];
 }
 
-/** Seeded percent 1..100 and balance band for a drop slot. */
+/** Infer balance tier from scheduled min/max (for legacy rows missing band_index). */
+function inferBandIndex(minBalance, maxBalance) {
+  const min = Number(minBalance);
+  const max = Number(maxBalance);
+  if (min >= 10000) return 3;
+  if (min >= 1000) return 2;
+  if (min >= 100 && max <= 112) return 1;
+  if (min >= 100) return 0;
+  return 0;
+}
+
+/** Seeded balance window for a drop slot; percent comes from airfarming_drop_bands. */
 function generateDropSpec(userId, weekStart, dropIndex) {
   const h = hash32(`${userId}:${weekStart}:${dropIndex}:dropSpec`);
   const h2 = hash32(`${userId}:${weekStart}:${dropIndex}:range`);
-  const percent = 1 + (h % 100);
+  const fallbackPercent = 1 + (h % 100);
 
   const band = h2 % 4;
   let minBalance;
@@ -69,10 +81,36 @@ function generateDropSpec(userId, weekStart, dropIndex) {
   }
 
   return {
-    percent: Number(percent.toFixed(2)),
+    band_index: band,
+    percent: Number(fallbackPercent.toFixed(2)),
     min_balance: Number(minBalance.toFixed(2)),
     max_balance: Number(maxBalance.toFixed(2)),
   };
+}
+
+async function resolvePercentForBand(bandIndex, fallbackPercent) {
+  try {
+    const row = await getAirfarmingDropBandByIndex(bandIndex);
+    if (row && row.percent != null) return Number(Number(row.percent).toFixed(2));
+  } catch {
+    /* bands table may be missing until migration runs */
+  }
+  return Number(Number(fallbackPercent).toFixed(2));
+}
+
+/** Apply DB tier percent to a scheduled drop (skipped when percent_locked). */
+async function syncScheduledDropPercent(drop) {
+  if (!drop || drop.status !== 'scheduled') return drop;
+  if (drop.percent_locked) return drop;
+
+  const bandIndex =
+    drop.band_index != null ? Number(drop.band_index) : inferBandIndex(drop.min_balance, drop.max_balance);
+  const percent = await resolvePercentForBand(bandIndex, drop.percent);
+  const patch = {};
+  if (drop.band_index == null) patch.band_index = bandIndex;
+  if (Math.abs(percent - Number(drop.percent)) >= 0.005) patch.percent = percent;
+  if (Object.keys(patch).length === 0) return drop;
+  return updateAirfarmingDrop(drop.id, patch);
 }
 
 function isEligible(balance, minBalance, maxBalance) {
@@ -138,6 +176,7 @@ async function ensureNextScheduledDrop(userId, weekStart) {
   const dropIndex = last ? Number(last.drop_index) + 1 : 0;
   const intervalH = pickIntervalHours(userId, weekStart, dropIndex);
   const spec = generateDropSpec(userId, weekStart, dropIndex);
+  const percent = await resolvePercentForBand(spec.band_index, spec.percent);
 
   let dueMs;
   if (!last) {
@@ -154,7 +193,8 @@ async function ensureNextScheduledDrop(userId, weekStart) {
     week_start: weekStart,
     drop_index: dropIndex,
     due_at: new Date(dueMs).toISOString(),
-    percent: spec.percent,
+    band_index: spec.band_index,
+    percent,
     min_balance: spec.min_balance,
     max_balance: spec.max_balance,
     status: 'scheduled',
@@ -252,6 +292,7 @@ async function autoAdjustToRange(userId, drop, currentBalance) {
 }
 
 async function settleDrop(userId, drop, options = {}) {
+  drop = await syncScheduledDropPercent(drop);
   const af = await getAirfarmingWalletByUserId(userId);
   let balance = Number.parseFloat(String(af?.balance ?? 0)) || 0;
   const now = new Date().toISOString();
@@ -304,6 +345,7 @@ async function processDueDrops(userId, weekStart, options = {}) {
     const dueMs = new Date(scheduled.due_at).getTime();
     if (Date.now() < dueMs) break;
 
+    scheduled = await syncScheduledDropPercent(scheduled);
     await settleDrop(userId, scheduled, options);
     processed += 1;
     await ensureNextScheduledDrop(userId, weekStart);
@@ -317,6 +359,9 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
   if (!scheduled) {
     scheduled = await ensureNextScheduledDrop(userId, weekStart);
   }
+  if (scheduled) {
+    scheduled = await syncScheduledDropPercent(scheduled);
+  }
   const af = await getAirfarmingWalletByUserId(userId);
   const latestBalance = Number.parseFloat(String(af?.balance ?? airfarmingBalance ?? 0)) || 0;
   const nextDrop = toPublicNextDrop(scheduled, latestBalance);
@@ -325,6 +370,9 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
 
 module.exports = {
   generateDropSpec,
+  inferBandIndex,
+  resolvePercentForBand,
+  syncScheduledDropPercent,
   isEligible,
   computeProfit,
   autoAdjustToRange,

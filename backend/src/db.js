@@ -610,6 +610,27 @@ async function listAirfarmingDropsForWeek(userId, weekStart, limit = 50) {
   return data || [];
 }
 
+async function listAirfarmingDropBands() {
+  const { data, error } = await supabase
+    .from('airfarming_drop_bands')
+    .select('*')
+    .eq('active', true)
+    .order('band_index', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+async function getAirfarmingDropBandByIndex(bandIndex) {
+  const { data, error } = await supabase
+    .from('airfarming_drop_bands')
+    .select('*')
+    .eq('band_index', bandIndex)
+    .eq('active', true)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function getAirfarmingWalletByUserId(userId) {
   const { data, error } = await supabase.from('airfarming_wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
@@ -1314,6 +1335,8 @@ module.exports = {
   updateAirfarmingDrop,
   listAirfarmingDropsByUserId,
   listAirfarmingDropsForWeek,
+  listAirfarmingDropBands,
+  getAirfarmingDropBandByIndex,
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
   insertAirfarmingTransfer,
