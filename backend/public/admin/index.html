@@ -261,8 +261,30 @@
       z-index: 200;
       overflow-y: auto;
     }
-    .modal { max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; }
+    .modal { max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; position: relative; }
     .modal-wide { max-width: 720px; }
+    .modal-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .modal-header h2 { margin: 0; flex: 1; }
+    .modal-close {
+      flex-shrink: 0;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--muted);
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0;
+    }
+    .modal-close:hover { color: var(--text); border-color: var(--gold); }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
     .menu-toggle {
       display: none;
@@ -500,11 +522,21 @@
     </div>
   </div>
 
-  <div id="userModal" class="modal-backdrop hidden">
+  <div id="userModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal modal-wide">
-      <h2 id="userModalTitle" style="margin:0 0 8px;font-size:1.1rem;">User</h2>
+      <div class="modal-header">
+        <h2 id="userModalTitle">User</h2>
+        <button type="button" class="modal-close" data-close-modal="userModal" aria-label="Close">×</button>
+      </div>
       <p id="userModalMeta" class="hint"></p>
       <div class="stat-grid" id="userStatsGrid"></div>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Reset password</h3>
+      <label>New password (min 6 characters)</label>
+      <input id="userNewPassword" type="password" autocomplete="new-password" placeholder="New password" />
+      <label>Confirm password</label>
+      <input id="userNewPasswordConfirm" type="password" autocomplete="new-password" placeholder="Confirm password" />
+      <button type="button" class="btn-primary" id="saveUserPasswordBtn" style="width:auto;margin-bottom:16px;">Update password</button>
+      <p id="userPasswordOk" class="hint hidden" style="color:var(--ok);"></p>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Drop pause (this user)</h3>
       <p id="userPauseStatus" class="hint" style="margin-bottom:10px;"></p>
       <div class="row">
@@ -558,9 +590,12 @@
     </div>
   </div>
 
-  <div id="ticketModal" class="modal-backdrop hidden">
+  <div id="ticketModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal modal-wide">
-      <h2 id="ticketModalTitle" style="margin:0 0 8px;font-size:1.1rem;">Support ticket</h2>
+      <div class="modal-header">
+        <h2 id="ticketModalTitle">Support ticket</h2>
+        <button type="button" class="modal-close" data-close-modal="ticketModal" aria-label="Close">×</button>
+      </div>
       <p id="ticketModalMeta" class="hint"></p>
       <label>Status</label>
       <select id="ticketStatusEdit">
@@ -579,9 +614,12 @@
     </div>
   </div>
 
-  <div id="editModal" class="modal-backdrop hidden">
+  <div id="editModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal">
-      <h2 style="margin:0 0 8px;font-size:1.1rem;">Edit drop</h2>
+      <div class="modal-header">
+        <h2>Edit drop</h2>
+        <button type="button" class="modal-close" data-close-modal="editModal" aria-label="Close">×</button>
+      </div>
       <p id="editMeta" class="hint"></p>
       <label>Percent (max <span id="maxPct">57.9</span>%)</label>
       <input id="editPercent" type="number" step="0.01" min="0.01" />
@@ -799,8 +837,61 @@
       }
     }
 
+    function closeModal(id) {
+      const el = document.getElementById(id);
+      if (el) el.classList.add('hidden');
+    }
+
+    function setupDismissibleModals() {
+      document.querySelectorAll('[data-modal]').forEach((backdrop) => {
+        backdrop.addEventListener('click', (e) => {
+          if (e.target === backdrop) closeModal(backdrop.id);
+        });
+      });
+      document.querySelectorAll('[data-close-modal]').forEach((btn) => {
+        btn.addEventListener('click', () => closeModal(btn.getAttribute('data-close-modal')));
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key !== 'Escape') return;
+        document.querySelectorAll('[data-modal]:not(.hidden)').forEach((m) => closeModal(m.id));
+      });
+    }
+
+    async function saveUserPassword() {
+      document.getElementById('userModalErr').classList.add('hidden');
+      document.getElementById('userPasswordOk').classList.add('hidden');
+      const password = document.getElementById('userNewPassword').value;
+      const confirm = document.getElementById('userNewPasswordConfirm').value;
+      if (password.length < 6) {
+        document.getElementById('userModalErr').textContent = 'Password must be at least 6 characters';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      if (password !== confirm) {
+        document.getElementById('userModalErr').textContent = 'Passwords do not match';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      try {
+        const res = await api('/admin/api/users/' + viewingUserId + '/password', {
+          method: 'POST',
+          body: JSON.stringify({ password, confirmPassword: confirm }),
+        });
+        document.getElementById('userNewPassword').value = '';
+        document.getElementById('userNewPasswordConfirm').value = '';
+        document.getElementById('userPasswordOk').textContent = res.message || 'Password updated';
+        document.getElementById('userPasswordOk').classList.remove('hidden');
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
     async function openUser(id) {
       document.getElementById('userModalErr').classList.add('hidden');
+      document.getElementById('userPasswordOk').classList.add('hidden');
+      document.getElementById('userNewPassword').value = '';
+      document.getElementById('userNewPasswordConfirm').value = '';
       viewingUserId = id;
       const d = await api('/admin/api/users/' + id);
       renderUserDetail(d);
@@ -1124,7 +1215,7 @@
         const idx = drops.findIndex((x) => x.id === editingId);
         if (idx >= 0) drops[idx] = data.drop;
         renderDropsTable();
-        document.getElementById('editModal').classList.add('hidden');
+        closeModal('editModal');
         editingId = null;
       } catch (e) {
         document.getElementById('editErr').textContent = e.message;
@@ -1197,8 +1288,9 @@
     document.getElementById('ticketSearch').onkeydown = (e) => { if (e.key === 'Enter') loadTickets().catch(showTicketsErr); };
     document.getElementById('upcomingOnly').onchange = () => loadDrops().catch(showDropsErr);
     document.getElementById('saveBtn').onclick = () => saveEdit();
-    document.getElementById('cancelBtn').onclick = () => document.getElementById('editModal').classList.add('hidden');
-    document.getElementById('closeUserBtn').onclick = () => document.getElementById('userModal').classList.add('hidden');
+    setupDismissibleModals();
+    document.getElementById('cancelBtn').onclick = () => closeModal('editModal');
+    document.getElementById('closeUserBtn').onclick = () => closeModal('userModal');
     document.getElementById('saveUserPauseBtn').onclick = () => saveUserScheduledPause();
     document.getElementById('pauseDropsBtn').onclick = () => setDropsPausedIndefinite();
     document.getElementById('clearUserPauseBtn').onclick = () => clearUserPause();
@@ -1206,7 +1298,8 @@
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
-    document.getElementById('closeTicketBtn').onclick = () => document.getElementById('ticketModal').classList.add('hidden');
+    document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
+    document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
 
     const token = localStorage.getItem(TOKEN_KEY);
     if (token) {

@@ -1,9 +1,12 @@
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 const {
   listScheduledAirfarmingDropsAdmin,
   getAirfarmingDropById,
   updateAirfarmingDrop,
   getUsersByIds,
+  getUserById,
+  updateUserPasswordHash,
   listUsersAdmin,
   getAdminUserDetail,
   updateAirfarmingUserDropPause,
@@ -142,6 +145,29 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/users/:id]', e);
       return res.status(500).json({ message: 'Failed to load user' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/password', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+
+      const password = String(req.body?.password || '');
+      const confirm = String(req.body?.confirmPassword || req.body?.passwordConfirm || '');
+      if (password.length < 6) {
+        return res.status(400).json({ message: 'Password must be at least 6 characters' });
+      }
+      if (confirm && password !== confirm) {
+        return res.status(400).json({ message: 'Passwords do not match' });
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10);
+      await updateUserPasswordHash(user.id, passwordHash);
+      return res.json({ ok: true, message: 'Password updated for ' + user.email });
+    } catch (e) {
+      console.error('[admin/users/password]', e);
+      return res.status(500).json({ message: e.message || 'Failed to update password' });
     }
   });
 
