@@ -122,7 +122,7 @@ function registerAdminRoutes(app) {
       return res.json({ users, count: users.length });
     } catch (e) {
       console.error('[admin/users]', e);
-      return res.status(500).json({ message: 'Failed to load users' });
+      return res.status(500).json({ message: e.message || 'Failed to load users' });
     }
   });
 
@@ -199,10 +199,14 @@ function registerAdminRoutes(app) {
       return res.json({ tickets, count: tickets.length });
     } catch (e) {
       if (isMissingTableError(e)) {
-        return res.status(503).json({ message: 'Support schema not ready. Run migrations.' });
+        return res.json({
+          tickets: [],
+          count: 0,
+          schemaNote: 'Support tickets table missing. Run 20260524_support_tickets.sql in Supabase.',
+        });
       }
       console.error('[admin/support/tickets]', e);
-      return res.status(500).json({ message: 'Failed to load support tickets' });
+      return res.status(500).json({ message: e.message || 'Failed to load support tickets' });
     }
   });
 
@@ -248,13 +252,22 @@ function registerAdminRoutes(app) {
       const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
       const pausedByUserId = await getAirfarmingDropsPausedByUserIds(userIds);
       const drops = rows.map((r) => dropToAdminRow(r, emailByUserId, pausedByUserId));
-      return res.json({ drops, count: drops.length, maxPercent: MAX_AIRFARMING_PERCENT });
+      const schemaNote =
+        rows.length === 0
+          ? 'No scheduled drops. If you expect data, run airfarming migrations in Supabase.'
+          : undefined;
+      return res.json({ drops, count: drops.length, maxPercent: MAX_AIRFARMING_PERCENT, schemaNote });
     } catch (e) {
       if (isMissingTableError(e)) {
-        return res.status(503).json({ message: 'Airfarming drops schema not ready. Run Supabase migrations.' });
+        return res.json({
+          drops: [],
+          count: 0,
+          maxPercent: MAX_AIRFARMING_PERCENT,
+          schemaNote: 'Airfarming drops table missing. Run backend/sql/migrations for airfarming_drops in Supabase.',
+        });
       }
       console.error('[admin/airfarming/drops]', e);
-      return res.status(500).json({ message: 'Failed to load drops' });
+      return res.status(500).json({ message: e.message || 'Failed to load drops' });
     }
   });
 

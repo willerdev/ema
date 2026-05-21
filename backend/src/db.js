@@ -16,6 +16,14 @@ function isMissingTableError(error) {
   return error?.code === 'PGRST205';
 }
 
+function isSchemaError(error) {
+  if (!error) return false;
+  if (isMissingTableError(error)) return true;
+  if (error.code === 'PGRST204' || error.code === '42703') return true;
+  const msg = String(error.message || error.details || '');
+  return /does not exist|Could not find the/i.test(msg);
+}
+
 function id() {
   return crypto.randomUUID();
 }
@@ -607,24 +615,49 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
     .limit(limit);
   const term = String(search || '').trim();
   if (term) query = query.ilike('email', `%${term}%`);
-  const { data, error } = await query;
+  let { data, error } = await query;
+  if (error && isSchemaError(error)) {
+    query = supabase
+      .from('users')
+      .select('id, email, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    if (term) query = query.ilike('email', `%${term}%`);
+    ({ data, error } = await query);
+  }
   if (error) throw error;
   const users = data || [];
   const ids = users.map((u) => u.id);
-  if (!ids.length) return [];
 
-  const [walletsRes, afRes, stateRes] = await Promise.all([
-    supabase.from('wallets').select('user_id, balance').in('user_id', ids),
-    supabase.from('airfarming_wallets').select('user_id, balance').in('user_id', ids),
-    supabase.from('airfarming_state').select('user_id, drops_paused, auto_fund_enabled, week_start').in('user_id', ids),
-  ]);
-  if (walletsRes.error) throw walletsRes.error;
-  if (afRes.error) throw afRes.error;
-  if (stateRes.error) throw stateRes.error;
+  const cashByUser = new Map();
+  const afByUser = new Map();
+  const stateByUser = new Map();
 
-  const cashByUser = new Map((walletsRes.data || []).map((w) => [w.user_id, Number(w.balance)]));
-  const afByUser = new Map((afRes.data || []).map((w) => [w.user_id, Number(w.balance)]));
-  const stateByUser = new Map((stateRes.data || []).map((s) => [s.user_id, s]));
+  if (ids.length) {
+    const walletsRes = await supabase.from('wallets').select('user_id, balance').in('user_id', ids);
+    if (!walletsRes.error) {
+      for (const w of walletsRes.data || []) cashByUser.set(w.user_id, Number(w.balance));
+    } else if (!isSchemaError(walletsRes.error)) throw walletsRes.error;
+
+    const afRes = await supabase.from('airfarming_wallets').select('user_id, balance').in('user_id', ids);
+    if (!afRes.error) {
+      for (const w of afRes.data || []) afByUser.set(w.user_id, Number(w.balance));
+    } else if (!isSchemaError(afRes.error)) throw afRes.error;
+
+    let stateRes = await supabase
+      .from('airfarming_state')
+      .select('user_id, drops_paused, auto_fund_enabled, week_start')
+      .in('user_id', ids);
+    if (stateRes.error && isSchemaError(stateRes.error)) {
+      stateRes = await supabase
+        .from('airfarming_state')
+        .select('user_id, auto_fund_enabled, week_start')
+        .in('user_id', ids);
+    }
+    if (!stateRes.error) {
+      for (const s of stateRes.data || []) stateByUser.set(s.user_id, s);
+    } else if (!isSchemaError(stateRes.error)) throw stateRes.error;
+  }
 
   return users.map((u) => {
     const st = stateByUser.get(u.id);
@@ -660,7 +693,7 @@ async function getAdminUserDetail(userId) {
       .limit(10),
   ]);
 
-  if (scheduledDrops.error) throw scheduledDrops.error;
+  if (scheduledDrops.error && !isSchemaError(scheduledDrops.error)) throw scheduledDrops.error;
 
   return {
     user: {
@@ -687,7 +720,7 @@ async function getAdminUserDetail(userId) {
       status: t.status,
       createdAt: t.created_at,
     })),
-    scheduledDrops: (scheduledDrops.data || []).map((d) => ({
+    scheduledDrops: (scheduledDrops.error ? [] : scheduledDrops.data || []).map((d) => ({
       id: d.id,
       dropIndex: Number(d.drop_index),
       dueAt: d.due_at,
@@ -702,10 +735,11 @@ async function getAdminUserDetail(userId) {
 async function getAirfarmingDropsPausedByUserIds(userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (!ids.length) return new Map();
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('airfarming_state')
     .select('user_id, drops_paused')
     .in('user_id', ids);
+  if (error && isSchemaError(error)) return new Map();
   if (error) throw error;
   return new Map((data || []).map((r) => [r.user_id, Boolean(r.drops_paused)]));
 }
@@ -796,6 +830,7 @@ async function listScheduledAirfarmingDropsAdmin({ upcomingOnly = false, limit =
     query = query.gte('due_at', new Date().toISOString());
   }
   const { data, error } = await query;
+  if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];
 }
@@ -1473,6 +1508,7 @@ async function listSupportTicketsAdmin({ limit = 200, status, category, search }
     query = query.in('user_id', ids);
   }
   const { data, error } = await query;
+  if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];
 }
@@ -1628,6 +1664,7 @@ module.exports = {
   listTatumOnchainTxsByUserId,
   getTrackedUsdtBalanceByUserId,
   isMissingTableError,
+  isSchemaError,
   getAirfarmingStateByUserId,
   upsertAirfarmingState,
   updateAirfarmingAutoFundSetting,

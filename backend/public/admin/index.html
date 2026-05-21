@@ -2,65 +2,230 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Ema Admin</title>
   <style>
     :root {
       --bg: #0b1220;
       --surface: #141c2b;
+      --surface2: #1a2436;
       --border: #2a3548;
       --text: #e8edf5;
       --muted: #8b9bb4;
       --gold: #c9a227;
-      --gold-dim: rgba(201, 162, 39, 0.15);
+      --gold-dim: rgba(201, 162, 39, 0.18);
       --danger: #f87171;
       --ok: #4ade80;
       --warn: #fbbf24;
+      --sidebar-w: 240px;
+      --radius: 14px;
+      --phone-w: 400px;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
       line-height: 1.45;
+      min-height: 100vh;
     }
-    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
-    h1 { color: var(--gold); font-size: 1.75rem; margin: 0 0 4px; }
-    .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
-    .card {
+    .hidden { display: none !important; }
+
+    /* Mobile-style login */
+    .login-screen {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(201, 162, 39, 0.12), transparent),
+        var(--bg);
+    }
+    .phone-card {
+      width: 100%;
+      max-width: var(--phone-w);
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 16px;
+      border-radius: 24px;
+      padding: 32px 24px 28px;
+      box-shadow: 0 24px 48px rgba(0, 0, 0, 0.35);
     }
-    label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
-    input, select {
+    .login-logo {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      background: var(--gold-dim);
+      border: 1px solid rgba(201, 162, 39, 0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: var(--gold);
+      margin: 0 auto 16px;
+    }
+    .login-title {
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: 800;
+      color: var(--text);
+      margin: 0 0 4px;
+    }
+    .login-sub {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.88rem;
+      margin: 0 0 28px;
+    }
+    label {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    input, select, textarea {
       width: 100%;
-      padding: 10px 12px;
-      border-radius: 8px;
+      padding: 14px 14px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       background: var(--bg);
       color: var(--text);
-      font-size: 0.95rem;
-      margin-bottom: 12px;
+      font-size: 1rem;
+      margin-bottom: 16px;
     }
+    input:focus, select:focus { outline: 2px solid var(--gold); outline-offset: 0; border-color: var(--gold); }
     button {
       cursor: pointer;
       border: none;
-      border-radius: 8px;
-      padding: 10px 16px;
+      border-radius: 12px;
+      padding: 14px 18px;
       font-weight: 700;
-      font-size: 0.9rem;
+      font-size: 1rem;
+      width: 100%;
     }
     .btn-primary { background: var(--gold); color: #0b1220; }
-    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
-    .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
-    .btn-warn { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
-    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .btn-ghost {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      width: auto;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      border-radius: 10px;
+    }
+    .btn-danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      width: auto;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      border-radius: 10px;
+    }
+    .btn-warn {
+      background: transparent;
+      color: var(--warn);
+      border: 1px solid var(--warn);
+      width: auto;
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      border-radius: 10px;
+    }
+    .btn-block-sm { width: 100%; margin-top: 8px; }
+    .err { color: var(--danger); font-size: 0.85rem; margin-top: 4px; }
+    .hint { color: var(--muted); font-size: 0.82rem; margin: 0 0 12px; }
+    .warn-box { color: var(--warn); font-size: 0.82rem; margin-bottom: 12px; padding: 10px; background: rgba(251, 191, 36, 0.08); border-radius: 8px; border: 1px solid rgba(251, 191, 36, 0.25); }
+
+    /* App shell + sidebar */
+    .app-shell { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 20px 12px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+    .sidebar-brand {
+      padding: 8px 12px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .sidebar-brand h1 {
+      margin: 0;
+      font-size: 1.15rem;
+      color: var(--gold);
+      font-weight: 800;
+    }
+    .sidebar-brand p { margin: 4px 0 0; font-size: 0.72rem; color: var(--muted); }
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      text-align: left;
+      padding: 12px 14px;
+      margin-bottom: 4px;
+      border-radius: 10px;
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.92rem;
+      cursor: pointer;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+    .nav-item.active {
+      background: var(--gold-dim);
+      color: var(--gold);
+      border: 1px solid rgba(201, 162, 39, 0.35);
+    }
+    .nav-icon { font-size: 1.1rem; width: 22px; text-align: center; }
+    .sidebar-foot {
+      margin-top: auto;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .main {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+    .topbar {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface2);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .topbar h2 { margin: 0; font-size: 1.25rem; font-weight: 700; }
+    .topbar-actions { display: flex; gap: 8px; }
+    .content { padding: 20px 24px 40px; flex: 1; overflow: auto; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
     .row > * { flex: 1; min-width: 140px; }
-    .hidden { display: none !important; }
     table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
     th, td {
       text-align: left;
@@ -68,7 +233,7 @@
       border-bottom: 1px solid var(--border);
       vertical-align: top;
     }
-    th { color: var(--muted); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; }
+    th { color: var(--muted); font-weight: 700; font-size: 0.7rem; text-transform: uppercase; }
     tr:hover td { background: rgba(255,255,255,0.03); }
     .pill {
       display: inline-block;
@@ -80,179 +245,223 @@
     }
     .pill-paused { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
     .pill-ok { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
-    .err { color: var(--danger); font-size: 0.85rem; margin-top: 8px; }
-    .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .stat { background: var(--bg); border-radius: 10px; padding: 12px; border: 1px solid var(--border); }
+    .stat .val { font-size: 1.15rem; font-weight: 700; color: var(--gold); }
+    .stat .lbl { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; }
+    .loading { color: var(--muted); font-size: 0.9rem; padding: 24px 0; text-align: center; }
     .modal-backdrop {
       position: fixed; inset: 0;
-      background: rgba(0,0,0,0.6);
+      background: rgba(0,0,0,0.65);
       display: flex; align-items: center; justify-content: center;
       padding: 16px;
-      z-index: 100;
+      z-index: 200;
       overflow-y: auto;
     }
     .modal { max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; }
     .modal-wide { max-width: 720px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
-    .tab {
-      padding: 8px 16px;
-      border-radius: 8px;
-      border: 1px solid var(--border);
+    .menu-toggle {
+      display: none;
       background: transparent;
-      color: var(--muted);
-      font-weight: 600;
+      border: 1px solid var(--border);
+      color: var(--text);
+      width: auto;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 1.2rem;
     }
-    .tab.active { background: var(--gold-dim); color: var(--gold); border-color: var(--gold); }
-    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
-    .stat { background: var(--bg); border-radius: 8px; padding: 12px; border: 1px solid var(--border); }
-    .stat .val { font-size: 1.25rem; font-weight: 700; color: var(--gold); }
-    .stat .lbl { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
-    @media (max-width: 720px) {
-      table { display: block; overflow-x: auto; }
+    @media (max-width: 860px) {
+      .app-shell { flex-direction: column; }
+      .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        z-index: 150;
+        height: 100vh;
+        transform: translateX(-100%);
+        transition: transform 0.2s ease;
+        box-shadow: 8px 0 24px rgba(0,0,0,0.4);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 140;
+      }
+      .sidebar-overlay.open { display: block; }
+      .menu-toggle { display: inline-block; }
+    }
+    @media (max-width: 600px) {
       .grid-2 { grid-template-columns: 1fr; }
+      .content { padding: 16px; }
     }
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>EMA Admin</h1>
-    <p class="sub">Users · Support · Drops — admin v2 (hard-refresh if tabs are missing)</p>
-
-    <div id="loginCard" class="card">
-      <h2 style="margin:0 0 12px;font-size:1.1rem;">Sign in</h2>
-      <div class="row">
-        <div>
-          <label>Username</label>
-          <input id="username" value="admin" autocomplete="username" />
-        </div>
-        <div>
-          <label>Password</label>
-          <input id="password" type="password" value="admin" autocomplete="current-password" />
-        </div>
-      </div>
-      <button class="btn-primary" id="loginBtn">Login</button>
+  <div id="loginScreen" class="login-screen">
+    <div class="phone-card">
+      <div class="login-logo">EMA</div>
+      <h1 class="login-title">Admin sign in</h1>
+      <p class="login-sub">Secure access to users, support, and drops</p>
+      <label for="username">Username</label>
+      <input id="username" value="admin" autocomplete="username" />
+      <label for="password">Password</label>
+      <input id="password" type="password" value="admin" autocomplete="current-password" />
+      <button type="button" class="btn-primary" id="loginBtn">Sign in</button>
       <p id="loginErr" class="err hidden"></p>
     </div>
+  </div>
 
-    <div id="dash" class="hidden">
-      <div class="toolbar">
-        <div class="tabs" id="navTabs">
-          <button type="button" class="tab active" data-tab="users">Users</button>
-          <button type="button" class="tab" data-tab="support">Support</button>
-          <button type="button" class="tab" data-tab="drops">Drops</button>
-        </div>
-        <div class="row" style="flex:0;">
-          <button class="btn-ghost" id="refreshBtn">Refresh</button>
-          <button class="btn-danger" id="logoutBtn">Logout</button>
-        </div>
+  <div id="appShell" class="app-shell hidden">
+    <div id="sidebarOverlay" class="sidebar-overlay"></div>
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <h1>EMA Admin</h1>
+        <p>Operations console</p>
       </div>
-
-      <div id="panelUsers">
-        <div class="card">
-          <div class="row">
-            <div style="flex:2;">
-              <label>Search by email</label>
-              <input id="userSearch" type="search" placeholder="user@example.com" />
-            </div>
-            <div style="flex:0;align-self:flex-end;">
-              <button class="btn-primary" id="searchUsersBtn" style="margin-bottom:12px;">Search</button>
-            </div>
-          </div>
-          <p id="userStats" class="sub" style="margin:0 0 12px;"></p>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>Email</th>
-                  <th>Cash</th>
-                  <th>Airfarming</th>
-                  <th>Drops</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="userRows"></tbody>
-            </table>
-          </div>
-          <p id="usersErr" class="err hidden"></p>
-        </div>
+      <nav>
+        <button type="button" class="nav-item active" data-tab="users">
+          <span class="nav-icon">👤</span> Users
+        </button>
+        <button type="button" class="nav-item" data-tab="support">
+          <span class="nav-icon">💬</span> Support
+        </button>
+        <button type="button" class="nav-item" data-tab="drops">
+          <span class="nav-icon">📉</span> Drops
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <button type="button" class="btn-ghost btn-block-sm" id="refreshBtn">Refresh</button>
+        <button type="button" class="btn-danger btn-block-sm" id="logoutBtn">Sign out</button>
       </div>
+    </aside>
 
-      <div id="panelSupport" class="hidden">
-        <div class="card">
-          <div class="row">
-            <div>
-              <label>Search user email</label>
-              <input id="ticketSearch" type="search" placeholder="user@example.com" />
-            </div>
-            <div>
-              <label>Status</label>
-              <select id="ticketStatus">
-                <option value="">All</option>
-                <option value="under_review">Under review</option>
-                <option value="in_progress">In progress</option>
-                <option value="resolved">Resolved</option>
-                <option value="closed">Closed</option>
-              </select>
-            </div>
-            <div>
-              <label>Category</label>
-              <select id="ticketCategory">
-                <option value="">All</option>
-                <option value="general">General</option>
-                <option value="withdraw">Withdraw</option>
-                <option value="deposit">Deposit</option>
-                <option value="daily_earning">Daily earning</option>
-                <option value="transfer">Transfer</option>
-              </select>
-            </div>
-            <div style="flex:0;align-self:flex-end;">
-              <button class="btn-primary" id="searchTicketsBtn" style="margin-bottom:12px;">Search</button>
-            </div>
-          </div>
-          <p id="ticketStats" class="sub" style="margin:0 0 12px;"></p>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Category</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="ticketRows"></tbody>
-            </table>
-          </div>
-          <p id="ticketsErr" class="err hidden"></p>
+    <div class="main">
+      <header class="topbar">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button type="button" class="menu-toggle" id="menuToggle" aria-label="Menu">☰</button>
+          <h2 id="pageTitle">Users</h2>
         </div>
-      </div>
+        <div class="topbar-actions">
+          <span id="adminUserLabel" style="color:var(--muted);font-size:0.85rem;"></span>
+        </div>
+      </header>
 
-      <div id="panelDrops" class="hidden">
-        <div class="card">
-          <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text);margin-bottom:12px;">
-            <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
-            Upcoming only (due in future)
-          </label>
-          <p id="stats" class="sub" style="margin:0 0 12px;"></p>
-          <div style="overflow-x:auto;">
-            <table>
-              <thead>
-                <tr>
-                  <th>User</th>
-                  <th>Due (UTC)</th>
-                  <th>Countdown</th>
-                  <th>%</th>
-                  <th>Min $</th>
-                  <th>Max $</th>
-                  <th>Band</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="dropRows"></tbody>
-            </table>
+      <div class="content">
+        <div id="panelUsers">
+          <div class="card">
+            <div class="row">
+              <div style="flex:2;">
+                <label>Search by email</label>
+                <input id="userSearch" type="search" placeholder="user@example.com" />
+              </div>
+              <div style="flex:0;">
+                <button type="button" class="btn-primary" id="searchUsersBtn" style="width:auto;margin-bottom:16px;">Search</button>
+              </div>
+            </div>
+            <p id="userStats" class="hint"></p>
+            <div id="usersLoading" class="loading hidden">Loading users…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Cash</th>
+                    <th>Airfarming</th>
+                    <th>Drops</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="userRows"></tbody>
+              </table>
+            </div>
+            <p id="usersErr" class="err hidden"></p>
           </div>
-          <p id="loadErr" class="err hidden"></p>
+        </div>
+
+        <div id="panelSupport" class="hidden">
+          <div class="card">
+            <div class="row">
+              <div>
+                <label>Search user email</label>
+                <input id="ticketSearch" type="search" placeholder="user@example.com" />
+              </div>
+              <div>
+                <label>Status</label>
+                <select id="ticketStatus">
+                  <option value="">All</option>
+                  <option value="under_review">Under review</option>
+                  <option value="in_progress">In progress</option>
+                  <option value="resolved">Resolved</option>
+                  <option value="closed">Closed</option>
+                </select>
+              </div>
+              <div>
+                <label>Category</label>
+                <select id="ticketCategory">
+                  <option value="">All</option>
+                  <option value="general">General</option>
+                  <option value="withdraw">Withdraw</option>
+                  <option value="deposit">Deposit</option>
+                  <option value="daily_earning">Daily earning</option>
+                  <option value="transfer">Transfer</option>
+                </select>
+              </div>
+              <div style="flex:0;">
+                <button type="button" class="btn-primary" id="searchTicketsBtn" style="width:auto;margin-bottom:16px;">Search</button>
+              </div>
+            </div>
+            <p id="ticketStats" class="hint"></p>
+            <div id="ticketsLoading" class="loading hidden">Loading tickets…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="ticketRows"></tbody>
+              </table>
+            </div>
+            <p id="ticketsErr" class="err hidden"></p>
+          </div>
+        </div>
+
+        <div id="panelDrops" class="hidden">
+          <div class="card">
+            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:0.9rem;color:var(--text);text-transform:none;letter-spacing:0;">
+              <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
+              Upcoming only (due in future)
+            </label>
+            <p id="stats" class="hint"></p>
+            <p id="dropsNote" class="warn-box hidden"></p>
+            <div id="dropsLoading" class="loading hidden">Loading drops…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Due (UTC)</th>
+                    <th>Countdown</th>
+                    <th>%</th>
+                    <th>Min $</th>
+                    <th>Max $</th>
+                    <th>Band</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="dropRows"></tbody>
+              </table>
+            </div>
+            <p id="loadErr" class="err hidden"></p>
+          </div>
         </div>
       </div>
     </div>
@@ -261,11 +470,11 @@
   <div id="userModal" class="modal-backdrop hidden">
     <div class="card modal modal-wide">
       <h2 id="userModalTitle" style="margin:0 0 8px;font-size:1.1rem;">User</h2>
-      <p id="userModalMeta" class="sub" style="margin:0 0 12px;"></p>
+      <p id="userModalMeta" class="hint"></p>
       <div class="stat-grid" id="userStatsGrid"></div>
       <div class="row" style="margin-bottom:16px;">
-        <button class="btn-warn" id="pauseDropsBtn">Pause drops</button>
-        <button class="btn-ghost hidden" id="resumeDropsBtn">Resume drops</button>
+        <button type="button" class="btn-warn" id="pauseDropsBtn">Pause drops</button>
+        <button type="button" class="btn-ghost hidden" id="resumeDropsBtn">Resume drops</button>
       </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Move cash → airfarming</h3>
       <div class="row" style="margin-bottom:16px;">
@@ -273,39 +482,33 @@
           <label>Amount (USD)</label>
           <input id="moveAmount" type="number" step="0.01" min="0.01" placeholder="0.00" />
         </div>
-        <div style="flex:0;align-self:flex-end;">
-          <button class="btn-primary" id="moveToAfBtn" style="margin-bottom:12px;">Move funds</button>
+        <div style="flex:0;">
+          <button type="button" class="btn-primary" id="moveToAfBtn" style="width:auto;margin-bottom:16px;">Move funds</button>
         </div>
       </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Transactions (latest 50)</h3>
       <div style="overflow-x:auto;max-height:220px;">
         <table>
-          <thead>
-            <tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr>
-          </thead>
+          <thead><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
           <tbody id="userTxRows"></tbody>
         </table>
       </div>
       <h3 style="font-size:0.95rem;margin:16px 0 8px;">Scheduled drops</h3>
       <div style="overflow-x:auto;">
         <table>
-          <thead>
-            <tr><th>#</th><th>Due</th><th>%</th><th>Range</th></tr>
-          </thead>
+          <thead><tr><th>#</th><th>Due</th><th>%</th><th>Range</th></tr></thead>
           <tbody id="userDropRows"></tbody>
         </table>
       </div>
       <p id="userModalErr" class="err hidden"></p>
-      <div style="margin-top:16px;">
-        <button class="btn-ghost" id="closeUserBtn">Close</button>
-      </div>
+      <button type="button" class="btn-ghost" id="closeUserBtn" style="margin-top:16px;width:auto;">Close</button>
     </div>
   </div>
 
   <div id="ticketModal" class="modal-backdrop hidden">
     <div class="card modal modal-wide">
       <h2 id="ticketModalTitle" style="margin:0 0 8px;font-size:1.1rem;">Support ticket</h2>
-      <p id="ticketModalMeta" class="sub" style="margin:0 0 12px;"></p>
+      <p id="ticketModalMeta" class="hint"></p>
       <label>Status</label>
       <select id="ticketStatusEdit">
         <option value="under_review">Under review</option>
@@ -317,8 +520,8 @@
       <pre id="ticketPayload" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:0.75rem;overflow:auto;max-height:280px;color:var(--text);white-space:pre-wrap;"></pre>
       <p id="ticketModalErr" class="err hidden"></p>
       <div class="row" style="margin-top:16px;">
-        <button class="btn-primary" id="saveTicketBtn">Update status</button>
-        <button class="btn-ghost" id="closeTicketBtn">Close</button>
+        <button type="button" class="btn-primary" id="saveTicketBtn" style="width:auto;">Update status</button>
+        <button type="button" class="btn-ghost" id="closeTicketBtn" style="width:auto;">Close</button>
       </div>
     </div>
   </div>
@@ -326,7 +529,7 @@
   <div id="editModal" class="modal-backdrop hidden">
     <div class="card modal">
       <h2 style="margin:0 0 8px;font-size:1.1rem;">Edit drop</h2>
-      <p id="editMeta" class="sub" style="margin:0 0 12px;"></p>
+      <p id="editMeta" class="hint"></p>
       <label>Percent (max <span id="maxPct">57.9</span>%)</label>
       <input id="editPercent" type="number" step="0.01" min="0.01" />
       <div class="grid-2">
@@ -339,15 +542,15 @@
           <input id="editMax" type="number" step="0.01" />
         </div>
       </div>
-      <label>Due at (local picker → stored UTC)</label>
+      <label>Due at (local → UTC)</label>
       <input id="editDue" type="datetime-local" />
-      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;">
         <input id="editLocked" type="checkbox" style="width:auto;margin:0;" checked />
-        Lock percent (admin override won’t be auto-synced)
+        Lock percent
       </label>
       <div class="row" style="margin-top:12px;">
-        <button class="btn-primary" id="saveBtn">Save</button>
-        <button class="btn-ghost" id="cancelBtn">Cancel</button>
+        <button type="button" class="btn-primary" id="saveBtn" style="width:auto;">Save</button>
+        <button type="button" class="btn-ghost" id="cancelBtn" style="width:auto;">Cancel</button>
       </div>
       <p id="editErr" class="err hidden"></p>
     </div>
@@ -355,6 +558,7 @@
 
   <script>
     const TOKEN_KEY = 'ema_admin_token';
+    const PAGE_TITLES = { users: 'Users', support: 'Support tickets', drops: 'Airfarming drops' };
     let drops = [];
     let users = [];
     let tickets = [];
@@ -364,7 +568,6 @@
     let viewingUserId = null;
     let viewingUserDetail = null;
     let viewingTicketId = null;
-    let viewingTicket = null;
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -372,9 +575,29 @@
       if (token) headers.Authorization = 'Bearer ' + token;
       return fetch(path, { ...opts, headers }).then(async (res) => {
         const data = await res.json().catch(() => ({}));
+        if (res.status === 401) {
+          localStorage.removeItem(TOKEN_KEY);
+          showLogin();
+          throw new Error(data.message || 'Session expired — sign in again');
+        }
         if (!res.ok) throw new Error(data.message || res.statusText);
         return data;
       });
+    }
+
+    function showLogin() {
+      document.getElementById('loginScreen').classList.remove('hidden');
+      document.getElementById('appShell').classList.add('hidden');
+    }
+
+    function showDash() {
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('appShell').classList.remove('hidden');
+    }
+
+    function closeSidebar() {
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebarOverlay').classList.remove('open');
     }
 
     function fmtMoney(n) {
@@ -400,17 +623,27 @@
 
     function setTab(tab) {
       activeTab = tab;
-      document.querySelectorAll('.tab').forEach((el) => {
+      document.querySelectorAll('.nav-item').forEach((el) => {
         el.classList.toggle('active', el.getAttribute('data-tab') === tab);
       });
       document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
       document.getElementById('panelSupport').classList.toggle('hidden', tab !== 'support');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
+      document.getElementById('pageTitle').textContent = PAGE_TITLES[tab] || 'Admin';
+      closeSidebar();
+      refreshActive().catch((e) => {
+        if (tab === 'users') showUsersErr(e);
+        else if (tab === 'support') showTicketsErr(e);
+        else showDropsErr(e);
+      });
     }
 
     function renderUsersTable() {
       const tbody = document.getElementById('userRows');
       tbody.innerHTML = '';
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No users found</td></tr>';
+      }
       users.forEach((u) => {
         const tr = document.createElement('tr');
         const pausePill = u.dropsPaused
@@ -421,7 +654,7 @@
           '<td>' + fmtMoney(u.cashBalance) + '</td>' +
           '<td>' + fmtMoney(u.airfarmingBalance) + '</td>' +
           '<td>' + pausePill + '</td>' +
-          '<td><button class="btn-ghost" data-user="' + u.id + '">View</button></td>';
+          '<td><button type="button" class="btn-ghost" data-user="' + u.id + '">View</button></td>';
         tbody.appendChild(tr);
       });
       tbody.querySelectorAll('button[data-user]').forEach((btn) => {
@@ -432,10 +665,15 @@
 
     async function loadUsers() {
       document.getElementById('usersErr').classList.add('hidden');
-      const q = document.getElementById('userSearch').value.trim();
-      const data = await api('/admin/api/users?q=' + encodeURIComponent(q));
-      users = data.users || [];
-      renderUsersTable();
+      document.getElementById('usersLoading').classList.remove('hidden');
+      try {
+        const q = document.getElementById('userSearch').value.trim();
+        const data = await api('/admin/api/users?q=' + encodeURIComponent(q));
+        users = data.users || [];
+        renderUsersTable();
+      } finally {
+        document.getElementById('usersLoading').classList.add('hidden');
+      }
     }
 
     function updatePauseButtons() {
@@ -452,36 +690,30 @@
         (d.user.transferCode ? ' · Transfer ' + d.user.transferCode : '');
       const af = d.airfarming;
       document.getElementById('userStatsGrid').innerHTML =
-        '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash wallet</div></div>' +
+        '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
         '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
         '<div class="stat"><div class="val">' + (af?.autoFundEnabled ? 'On' : 'Off') + '</div><div class="lbl">Auto-fund</div></div>';
       updatePauseButtons();
-
       const txBody = document.getElementById('userTxRows');
       txBody.innerHTML = '';
       (d.transactions || []).forEach((t) => {
         const tr = document.createElement('tr');
         tr.innerHTML =
-          '<td>' + escapeHtml(t.type) + '</td>' +
-          '<td>' + fmtMoney(t.amount) + '</td>' +
-          '<td>' + escapeHtml(t.status) + '</td>' +
-          '<td>' + new Date(t.createdAt).toLocaleString() + '</td>';
+          '<td>' + escapeHtml(t.type) + '</td><td>' + fmtMoney(t.amount) + '</td>' +
+          '<td>' + escapeHtml(t.status) + '</td><td>' + new Date(t.createdAt).toLocaleString() + '</td>';
         txBody.appendChild(tr);
       });
       if (!(d.transactions || []).length) {
         txBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No transactions</td></tr>';
       }
-
       const dropBody = document.getElementById('userDropRows');
       dropBody.innerHTML = '';
       (d.scheduledDrops || []).forEach((drop) => {
         const tr = document.createElement('tr');
         tr.innerHTML =
-          '<td>' + drop.dropIndex + '</td>' +
-          '<td>' + new Date(drop.dueAt).toLocaleString() + '</td>' +
-          '<td>' + drop.percent + '%</td>' +
-          '<td>$' + drop.minBalance + ' – $' + drop.maxBalance + '</td>';
+          '<td>' + drop.dropIndex + '</td><td>' + new Date(drop.dueAt).toLocaleString() + '</td>' +
+          '<td>' + drop.percent + '%</td><td>$' + drop.minBalance + ' – $' + drop.maxBalance + '</td>';
         dropBody.appendChild(tr);
       });
       if (!(d.scheduledDrops || []).length) {
@@ -528,14 +760,17 @@
     function renderTicketsTable() {
       const tbody = document.getElementById('ticketRows');
       tbody.innerHTML = '';
+      if (!tickets.length) {
+        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No tickets</td></tr>';
+      }
       tickets.forEach((t) => {
         const tr = document.createElement('tr');
         tr.innerHTML =
           '<td>' + escapeHtml(t.userEmail) + '</td>' +
-          '<td>' + escapeHtml(t.category.replace('_', ' ')) + '</td>' +
-          '<td><span class="pill">' + escapeHtml(t.status.replace('_', ' ')) + '</span></td>' +
+          '<td>' + escapeHtml(t.category.replace(/_/g, ' ')) + '</td>' +
+          '<td><span class="pill">' + escapeHtml(t.status.replace(/_/g, ' ')) + '</span></td>' +
           '<td>' + new Date(t.createdAt).toLocaleString() + '</td>' +
-          '<td><button class="btn-ghost" data-ticket="' + t.id + '">View</button></td>';
+          '<td><button type="button" class="btn-ghost" data-ticket="' + t.id + '">View</button></td>';
         tbody.appendChild(tr);
       });
       tbody.querySelectorAll('button[data-ticket]').forEach((btn) => {
@@ -546,24 +781,27 @@
 
     async function loadTickets() {
       document.getElementById('ticketsErr').classList.add('hidden');
-      const q = document.getElementById('ticketSearch').value.trim();
-      const status = document.getElementById('ticketStatus').value;
-      const category = document.getElementById('ticketCategory').value;
-      let url = '/admin/api/support/tickets?';
-      if (q) url += 'q=' + encodeURIComponent(q) + '&';
-      if (status) url += 'status=' + encodeURIComponent(status) + '&';
-      if (category) url += 'category=' + encodeURIComponent(category) + '&';
-      const data = await api(url);
-      tickets = data.tickets || [];
-      renderTicketsTable();
+      document.getElementById('ticketsLoading').classList.remove('hidden');
+      try {
+        const q = document.getElementById('ticketSearch').value.trim();
+        const status = document.getElementById('ticketStatus').value;
+        const category = document.getElementById('ticketCategory').value;
+        let url = '/admin/api/support/tickets?';
+        if (q) url += 'q=' + encodeURIComponent(q) + '&';
+        if (status) url += 'status=' + encodeURIComponent(status) + '&';
+        if (category) url += 'category=' + encodeURIComponent(category) + '&';
+        const data = await api(url);
+        tickets = data.tickets || [];
+        renderTicketsTable();
+      } finally {
+        document.getElementById('ticketsLoading').classList.add('hidden');
+      }
     }
 
     function renderTicketDetail(t) {
-      viewingTicket = t;
-      document.getElementById('ticketModalTitle').textContent = t.category.replace('_', ' ') + ' · ' + t.status.replace('_', ' ');
+      document.getElementById('ticketModalTitle').textContent = t.category.replace(/_/g, ' ') + ' · ' + t.status.replace(/_/g, ' ');
       document.getElementById('ticketModalMeta').textContent =
-        t.userEmail + ' · ' + new Date(t.createdAt).toLocaleString() +
-        (t.relatedActivityId ? ' · activity ' + t.relatedActivityId : '');
+        t.userEmail + ' · ' + new Date(t.createdAt).toLocaleString();
       document.getElementById('ticketStatusEdit').value = t.status;
       document.getElementById('ticketPayload').textContent = JSON.stringify(t.payload, null, 2);
     }
@@ -606,7 +844,6 @@
         const u = users.find((x) => x.id === viewingUserId);
         if (u) u.dropsPaused = paused;
         renderUsersTable();
-        if (activeTab === 'drops') await loadDrops();
       } catch (e) {
         document.getElementById('userModalErr').textContent = e.message;
         document.getElementById('userModalErr').classList.remove('hidden');
@@ -616,34 +853,46 @@
     function renderDropsTable() {
       const tbody = document.getElementById('dropRows');
       tbody.innerHTML = '';
+      if (!drops.length) {
+        tbody.innerHTML = '<tr><td colspan="8" style="color:var(--muted);">No scheduled drops</td></tr>';
+      }
       drops.forEach((d) => {
         const tr = document.createElement('tr');
         const paused = d.dropsPaused ? ' <span class="pill pill-paused">paused</span>' : '';
         tr.innerHTML =
-          '<td>' + escapeHtml(d.userEmail) + paused + '<br><span style="color:var(--muted);font-size:0.7rem;">' + d.dropIndex + ' · wk ' + d.weekStart + '</span></td>' +
+          '<td>' + escapeHtml(d.userEmail) + paused + '<br><span style="color:var(--muted);font-size:0.7rem;">#' + d.dropIndex + ' · ' + d.weekStart + '</span></td>' +
           '<td>' + new Date(d.dueAt).toLocaleString() + '</td>' +
           '<td>' + fmtCountdown(d.secondsRemaining) + '</td>' +
           '<td><strong>' + d.percent + '%</strong>' + (d.percentLocked ? ' <span class="pill">locked</span>' : '') + '</td>' +
-          '<td>$' + d.minBalance + '</td>' +
-          '<td>$' + d.maxBalance + '</td>' +
+          '<td>$' + d.minBalance + '</td><td>$' + d.maxBalance + '</td>' +
           '<td>' + (d.bandIndex != null ? d.bandIndex : '—') + '</td>' +
-          '<td><button class="btn-ghost" data-id="' + d.id + '">Edit</button></td>';
+          '<td><button type="button" class="btn-ghost" data-id="' + d.id + '">Edit</button></td>';
         tbody.appendChild(tr);
       });
       tbody.querySelectorAll('button[data-id]').forEach((btn) => {
         btn.onclick = () => openEdit(btn.getAttribute('data-id'));
       });
-      document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max percent ' + maxPercent + '%';
+      document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max ' + maxPercent + '%';
     }
 
     async function loadDrops() {
       document.getElementById('loadErr').classList.add('hidden');
-      const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
-      const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
-      drops = data.drops || [];
-      maxPercent = data.maxPercent || 57.9;
-      document.getElementById('maxPct').textContent = maxPercent;
-      renderDropsTable();
+      document.getElementById('dropsNote').classList.add('hidden');
+      document.getElementById('dropsLoading').classList.remove('hidden');
+      try {
+        const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
+        const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
+        drops = data.drops || [];
+        maxPercent = data.maxPercent || 57.9;
+        document.getElementById('maxPct').textContent = maxPercent;
+        if (data.schemaNote) {
+          document.getElementById('dropsNote').textContent = data.schemaNote;
+          document.getElementById('dropsNote').classList.remove('hidden');
+        }
+        renderDropsTable();
+      } finally {
+        document.getElementById('dropsLoading').classList.add('hidden');
+      }
     }
 
     function openEdit(id) {
@@ -658,11 +907,6 @@
       document.getElementById('editLocked').checked = d.percentLocked;
       document.getElementById('editErr').classList.add('hidden');
       document.getElementById('editModal').classList.remove('hidden');
-    }
-
-    function closeEdit() {
-      editingId = null;
-      document.getElementById('editModal').classList.add('hidden');
     }
 
     async function saveEdit() {
@@ -682,16 +926,12 @@
         const idx = drops.findIndex((x) => x.id === editingId);
         if (idx >= 0) drops[idx] = data.drop;
         renderDropsTable();
-        closeEdit();
+        document.getElementById('editModal').classList.add('hidden');
+        editingId = null;
       } catch (e) {
         document.getElementById('editErr').textContent = e.message;
         document.getElementById('editErr').classList.remove('hidden');
       }
-    }
-
-    function showDash() {
-      document.getElementById('loginCard').classList.add('hidden');
-      document.getElementById('dash').classList.remove('hidden');
     }
 
     async function refreshActive() {
@@ -700,30 +940,28 @@
       else await loadDrops();
     }
 
-    document.querySelectorAll('.tab').forEach((el) => {
-      el.onclick = () => {
-        const tab = el.getAttribute('data-tab');
-        setTab(tab);
-        if (tab === 'users' && !users.length) loadUsers().catch(showUsersErr);
-        if (tab === 'support' && !tickets.length) loadTickets().catch(showTicketsErr);
-        if (tab === 'drops' && !drops.length) loadDrops().catch(showDropsErr);
-      };
-    });
-
     function showUsersErr(e) {
       document.getElementById('usersErr').textContent = e.message;
       document.getElementById('usersErr').classList.remove('hidden');
     }
-
     function showDropsErr(e) {
       document.getElementById('loadErr').textContent = e.message;
       document.getElementById('loadErr').classList.remove('hidden');
     }
-
     function showTicketsErr(e) {
       document.getElementById('ticketsErr').textContent = e.message;
       document.getElementById('ticketsErr').classList.remove('hidden');
     }
+
+    document.querySelectorAll('.nav-item').forEach((el) => {
+      el.onclick = () => setTab(el.getAttribute('data-tab'));
+    });
+
+    document.getElementById('menuToggle').onclick = () => {
+      document.getElementById('sidebar').classList.toggle('open');
+      document.getElementById('sidebarOverlay').classList.toggle('open');
+    };
+    document.getElementById('sidebarOverlay').onclick = closeSidebar;
 
     document.getElementById('loginBtn').onclick = async () => {
       document.getElementById('loginErr').classList.add('hidden');
@@ -738,7 +976,6 @@
         localStorage.setItem(TOKEN_KEY, data.token);
         showDash();
         setTab('users');
-        await loadUsers();
       } catch (e) {
         document.getElementById('loginErr').textContent = e.message;
         document.getElementById('loginErr').classList.remove('hidden');
@@ -757,36 +994,26 @@
     });
 
     document.getElementById('searchUsersBtn').onclick = () => loadUsers().catch(showUsersErr);
-    document.getElementById('userSearch').onkeydown = (e) => {
-      if (e.key === 'Enter') loadUsers().catch(showUsersErr);
-    };
-
+    document.getElementById('userSearch').onkeydown = (e) => { if (e.key === 'Enter') loadUsers().catch(showUsersErr); };
     document.getElementById('searchTicketsBtn').onclick = () => loadTickets().catch(showTicketsErr);
-    document.getElementById('ticketSearch').onkeydown = (e) => {
-      if (e.key === 'Enter') loadTickets().catch(showTicketsErr);
-    };
+    document.getElementById('ticketSearch').onkeydown = (e) => { if (e.key === 'Enter') loadTickets().catch(showTicketsErr); };
     document.getElementById('upcomingOnly').onchange = () => loadDrops().catch(showDropsErr);
-    document.getElementById('saveBtn').onclick = saveEdit;
-    document.getElementById('cancelBtn').onclick = closeEdit;
-    document.getElementById('closeUserBtn').onclick = () => {
-      viewingUserId = null;
-      document.getElementById('userModal').classList.add('hidden');
-    };
+    document.getElementById('saveBtn').onclick = () => saveEdit();
+    document.getElementById('cancelBtn').onclick = () => document.getElementById('editModal').classList.add('hidden');
+    document.getElementById('closeUserBtn').onclick = () => document.getElementById('userModal').classList.add('hidden');
     document.getElementById('pauseDropsBtn').onclick = () => setDropsPaused(true);
     document.getElementById('resumeDropsBtn').onclick = () => setDropsPaused(false);
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
-    document.getElementById('closeTicketBtn').onclick = () => {
-      viewingTicketId = null;
-      document.getElementById('ticketModal').classList.add('hidden');
-    };
+    document.getElementById('closeTicketBtn').onclick = () => document.getElementById('ticketModal').classList.add('hidden');
 
-    if (localStorage.getItem(TOKEN_KEY)) {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (token) {
       api('/admin/api/me')
-        .then(() => {
+        .then((me) => {
+          document.getElementById('adminUserLabel').textContent = me.username || 'admin';
           showDash();
           setTab('users');
-          return loadUsers();
         })
         .catch(() => localStorage.removeItem(TOKEN_KEY));
     }
