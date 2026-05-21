@@ -52,6 +52,8 @@ const { registerCryptoRoutes, handleTatumWebhook } = require('./cryptoRoutes');
 const { registerNowpaymentsRoutes, handlePaymentWebhook, handlePayoutWebhook } = require('./nowpaymentsRoutes');
 const { registerAirfarmingRoutes } = require('./airfarmingRoutes');
 const { registerPasswordResetRoutes } = require('./passwordReset');
+const { registerAdminRoutes } = require('./adminRoutes');
+const path = require('path');
 const { registerContractRoutes } = require('./contractRoutes');
 const { registerExpertRoutes } = require('./expertRoutes');
 const { registerMt5EaWebhookRoutes } = require('./mt5EaWebhookRoutes');
@@ -627,6 +629,8 @@ registerSupportRoutes(app, { authMiddleware });
 registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 registerExpertRoutes(app, { authMiddleware });
+registerAdminRoutes(app);
+app.use('/admin', express.static(path.join(__dirname, '../public/admin')));
 
 function mapRpcPeerTransferError(error) {
   const raw = `${String(error?.message || '')} ${String(error?.details || '')} ${String(error?.hint || '')}`;

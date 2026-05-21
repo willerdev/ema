@@ -38,6 +38,8 @@ In Render service settings, add:
 - `ALPACA_BASE_URL=https://paper-api.alpaca.markets`
 - `ALPACA_LIVE_URL=https://api.alpaca.markets`
 - `DEV_RESET_TOKEN=<set-random-token-or-remove-route-for-prod>`
+- `ADMIN_USERNAME=admin` (change in production)
+- `ADMIN_PASSWORD=<strong-password>` (required in production; defaults to `admin` only for local dev)
 - `MT5_METAAPI_TOKEN=<MetaApi token>` (for MT5 balance, positions, server-side orders)
 - `MT5_EA_WEBHOOK_SECRET=<optional>` (HMAC on `POST /webhooks/mt5-ea/telemetry` when EA does not use Bearer token; body must include `login` and `server`)
 
@@ -58,6 +60,14 @@ Example:
 
 - `https://your-render-service.onrender.com/health`
 - `https://your-render-service.onrender.com/health/db`
+
+## Admin dashboard (Airfarming drops)
+
+After deploy, open:
+
+- `https://your-render-service.onrender.com/admin/`
+
+Sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. You can view all **scheduled** airfarming drops across users and edit percent, min/max balance, and due time. Edited percent is **locked** so automatic band sync does not overwrite your change.
 
 ## 5) Point mobile app to production backend
 

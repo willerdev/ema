@@ -625,6 +625,35 @@ async function updateAirfarmingDrop(id, patch) {
   return data;
 }
 
+async function getAirfarmingDropById(id) {
+  const { data, error } = await supabase.from('airfarming_drops').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function listScheduledAirfarmingDropsAdmin({ upcomingOnly = false, limit = 500 } = {}) {
+  let query = supabase
+    .from('airfarming_drops')
+    .select('*')
+    .eq('status', 'scheduled')
+    .order('due_at', { ascending: true })
+    .limit(limit);
+  if (upcomingOnly) {
+    query = query.gte('due_at', new Date().toISOString());
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function getUsersByIds(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('users').select('id, email').in('id', ids);
+  if (error) throw error;
+  return data || [];
+}
+
 async function listAirfarmingDropsByUserId(userId, limit = 40) {
   const { data, error } = await supabase
     .from('airfarming_drops')
@@ -1375,6 +1404,9 @@ module.exports = {
   getLastAirfarmingDropForWeek,
   insertAirfarmingDrop,
   updateAirfarmingDrop,
+  getAirfarmingDropById,
+  listScheduledAirfarmingDropsAdmin,
+  getUsersByIds,
   listAirfarmingDropsByUserId,
   listAirfarmingDropsForWeek,
   listAirfarmingDropBands,

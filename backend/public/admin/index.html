@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ema Admin — Airfarming Drops</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --surface: #141c2b;
+      --border: #2a3548;
+      --text: #e8edf5;
+      --muted: #8b9bb4;
+      --gold: #c9a227;
+      --gold-dim: rgba(201, 162, 39, 0.15);
+      --danger: #f87171;
+      --ok: #4ade80;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { color: var(--gold); font-size: 1.75rem; margin: 0 0 4px; }
+    .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.9rem; }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    label { display: block; font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+    input, select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 0.95rem;
+      margin-bottom: 12px;
+    }
+    button {
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+    .btn-primary { background: var(--gold); color: #0b1220; }
+    .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    .row > * { flex: 1; min-width: 140px; }
+    .hidden { display: none !important; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    th, td {
+      text-align: left;
+      padding: 10px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 700; font-size: 0.72rem; text-transform: uppercase; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.7rem;
+      background: var(--gold-dim);
+      color: var(--gold);
+    }
+    .err { color: var(--danger); font-size: 0.85rem; margin-top: 8px; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+    .modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+      z-index: 100;
+    }
+    .modal { max-width: 420px; width: 100%; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    @media (max-width: 720px) {
+      table { display: block; overflow-x: auto; }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>EMA Admin</h1>
+    <p class="sub">Airfarming drops — view and edit upcoming scheduled drops for all users</p>
+
+    <div id="loginCard" class="card">
+      <h2 style="margin:0 0 12px;font-size:1.1rem;">Sign in</h2>
+      <div class="row">
+        <div>
+          <label>Username</label>
+          <input id="username" value="admin" autocomplete="username" />
+        </div>
+        <div>
+          <label>Password</label>
+          <input id="password" type="password" value="admin" autocomplete="current-password" />
+        </div>
+      </div>
+      <button class="btn-primary" id="loginBtn">Login</button>
+      <p id="loginErr" class="err hidden"></p>
+    </div>
+
+    <div id="dash" class="hidden">
+      <div class="toolbar">
+        <div class="row" style="flex:0;">
+          <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text);">
+            <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
+            Upcoming only (due in future)
+          </label>
+        </div>
+        <div class="row" style="flex:0;">
+          <button class="btn-ghost" id="refreshBtn">Refresh</button>
+          <button class="btn-danger" id="logoutBtn">Logout</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <p id="stats" class="sub" style="margin:0 0 12px;"></p>
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>User</th>
+                <th>Due (UTC)</th>
+                <th>Countdown</th>
+                <th>%</th>
+                <th>Min $</th>
+                <th>Max $</th>
+                <th>Band</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="dropRows"></tbody>
+          </table>
+        </div>
+        <p id="loadErr" class="err hidden"></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="editModal" class="modal-backdrop hidden">
+    <div class="card modal">
+      <h2 style="margin:0 0 8px;font-size:1.1rem;">Edit drop</h2>
+      <p id="editMeta" class="sub" style="margin:0 0 12px;"></p>
+      <label>Percent (max <span id="maxPct">57.9</span>%)</label>
+      <input id="editPercent" type="number" step="0.01" min="0.01" />
+      <div class="grid-2">
+        <div>
+          <label>Min balance ($)</label>
+          <input id="editMin" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Max balance ($)</label>
+          <input id="editMax" type="number" step="0.01" />
+        </div>
+      </div>
+      <label>Due at (local picker → stored UTC)</label>
+      <input id="editDue" type="datetime-local" />
+      <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+        <input id="editLocked" type="checkbox" style="width:auto;margin:0;" checked />
+        Lock percent (admin override won’t be auto-synced)
+      </label>
+      <div class="row" style="margin-top:12px;">
+        <button class="btn-primary" id="saveBtn">Save</button>
+        <button class="btn-ghost" id="cancelBtn">Cancel</button>
+      </div>
+      <p id="editErr" class="err hidden"></p>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = 'ema_admin_token';
+    let drops = [];
+    let editingId = null;
+    let maxPercent = 57.9;
+
+    function api(path, opts = {}) {
+      const token = localStorage.getItem(TOKEN_KEY);
+      const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      return fetch(path, { ...opts, headers }).then(async (res) => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || res.statusText);
+        return data;
+      });
+    }
+
+    function fmtCountdown(sec) {
+      if (sec <= 0) return 'Due now';
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      return h + 'h ' + m + 'm';
+    }
+
+    function toLocalInput(iso) {
+      const d = new Date(iso);
+      const pad = (n) => String(n).padStart(2, '0');
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('dropRows');
+      tbody.innerHTML = '';
+      drops.forEach((d) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(d.userEmail) + '<br><span style="color:var(--muted);font-size:0.7rem;">' + d.dropIndex + ' · wk ' + d.weekStart + '</span></td>' +
+          '<td>' + new Date(d.dueAt).toLocaleString() + '</td>' +
+          '<td>' + fmtCountdown(d.secondsRemaining) + '</td>' +
+          '<td><strong>' + d.percent + '%</strong>' + (d.percentLocked ? ' <span class="pill">locked</span>' : '') + '</td>' +
+          '<td>$' + d.minBalance + '</td>' +
+          '<td>$' + d.maxBalance + '</td>' +
+          '<td>' + (d.bandIndex != null ? d.bandIndex : '—') + '</td>' +
+          '<td><button class="btn-ghost" data-id="' + d.id + '">Edit</button></td>';
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button[data-id]').forEach((btn) => {
+        btn.onclick = () => openEdit(btn.getAttribute('data-id'));
+      });
+      document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max percent ' + maxPercent + '%';
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    async function loadDrops() {
+      document.getElementById('loadErr').classList.add('hidden');
+      const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
+      const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
+      drops = data.drops || [];
+      maxPercent = data.maxPercent || 57.9;
+      document.getElementById('maxPct').textContent = maxPercent;
+      renderTable();
+    }
+
+    function openEdit(id) {
+      const d = drops.find((x) => x.id === id);
+      if (!d) return;
+      editingId = id;
+      document.getElementById('editMeta').textContent = d.userEmail + ' · drop #' + d.dropIndex;
+      document.getElementById('editPercent').value = d.percent;
+      document.getElementById('editMin').value = d.minBalance;
+      document.getElementById('editMax').value = d.maxBalance;
+      document.getElementById('editDue').value = toLocalInput(d.dueAt);
+      document.getElementById('editLocked').checked = d.percentLocked;
+      document.getElementById('editErr').classList.add('hidden');
+      document.getElementById('editModal').classList.remove('hidden');
+    }
+
+    function closeEdit() {
+      editingId = null;
+      document.getElementById('editModal').classList.add('hidden');
+    }
+
+    async function saveEdit() {
+      document.getElementById('editErr').classList.add('hidden');
+      try {
+        const body = {
+          percent: Number(document.getElementById('editPercent').value),
+          minBalance: Number(document.getElementById('editMin').value),
+          maxBalance: Number(document.getElementById('editMax').value),
+          dueAt: new Date(document.getElementById('editDue').value).toISOString(),
+          percentLocked: document.getElementById('editLocked').checked,
+        };
+        const data = await api('/admin/api/airfarming/drops/' + editingId, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
+        const idx = drops.findIndex((x) => x.id === editingId);
+        if (idx >= 0) drops[idx] = data.drop;
+        renderTable();
+        closeEdit();
+      } catch (e) {
+        document.getElementById('editErr').textContent = e.message;
+        document.getElementById('editErr').classList.remove('hidden');
+      }
+    }
+
+    function showDash() {
+      document.getElementById('loginCard').classList.add('hidden');
+      document.getElementById('dash').classList.remove('hidden');
+    }
+
+    document.getElementById('loginBtn').onclick = async () => {
+      document.getElementById('loginErr').classList.add('hidden');
+      try {
+        const data = await api('/admin/api/login', {
+          method: 'POST',
+          body: JSON.stringify({
+            username: document.getElementById('username').value.trim(),
+            password: document.getElementById('password').value,
+          }),
+        });
+        localStorage.setItem(TOKEN_KEY, data.token);
+        showDash();
+        await loadDrops();
+      } catch (e) {
+        document.getElementById('loginErr').textContent = e.message;
+        document.getElementById('loginErr').classList.remove('hidden');
+      }
+    };
+
+    document.getElementById('logoutBtn').onclick = () => {
+      localStorage.removeItem(TOKEN_KEY);
+      location.reload();
+    };
+
+    document.getElementById('refreshBtn').onclick = () => loadDrops().catch((e) => {
+      document.getElementById('loadErr').textContent = e.message;
+      document.getElementById('loadErr').classList.remove('hidden');
+    });
+
+    document.getElementById('upcomingOnly').onchange = () => loadDrops().catch(() => {});
+
+    document.getElementById('saveBtn').onclick = saveEdit;
+    document.getElementById('cancelBtn').onclick = closeEdit;
+
+    if (localStorage.getItem(TOKEN_KEY)) {
+      api('/admin/api/me')
+        .then(() => { showDash(); return loadDrops(); })
+        .catch(() => localStorage.removeItem(TOKEN_KEY));
+    }
+  </script>
+</body>
+</html>
