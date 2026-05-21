@@ -652,13 +652,20 @@ async function updateAirfarmingUserDropPause(userId, patch) {
     row.drops_pause_until = null;
     row.drops_pause_band_indexes = null;
   } else {
-    if (patch.indefinitePause !== undefined) row.drops_paused = Boolean(patch.indefinitePause);
-    if (patch.pauseFrom !== undefined) row.drops_pause_from = patch.pauseFrom;
-    if (patch.pauseUntil !== undefined) row.drops_pause_until = patch.pauseUntil;
-    if (patch.bandIndexes !== undefined) {
-      row.drops_pause_band_indexes = normalizeBandIndexes(patch.bandIndexes);
+    if (patch.indefinitePause === true) {
+      row.drops_paused = true;
+      row.drops_pause_from = null;
+      row.drops_pause_until = null;
+      row.drops_pause_band_indexes = null;
+    } else {
+      if (patch.indefinitePause !== undefined) row.drops_paused = Boolean(patch.indefinitePause);
+      if (patch.pauseFrom !== undefined) row.drops_pause_from = patch.pauseFrom;
+      if (patch.pauseUntil !== undefined) row.drops_pause_until = patch.pauseUntil;
+      if (patch.bandIndexes !== undefined) {
+        row.drops_pause_band_indexes = normalizeBandIndexes(patch.bandIndexes);
+      }
+      if (patch.pauseFrom || patch.pauseUntil) row.drops_paused = false;
     }
-    if (patch.pauseFrom || patch.pauseUntil) row.drops_paused = false;
   }
 
   let { data, error } = await supabase
@@ -818,6 +825,92 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
       airfarmingWeekStart: st?.week_start || null,
     };
   });
+}
+
+const NP_DEPOSIT_DONE = new Set(['finished', 'confirmed', 'paid', 'sending']);
+
+function dayKey(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return null;
+  return d.toISOString().slice(0, 10);
+}
+
+function addDailyBucket(map, iso, amount) {
+  const day = dayKey(iso);
+  const n = Number(amount);
+  if (!day || !Number.isFinite(n) || n <= 0) return;
+  map.set(day, (map.get(day) || 0) + n);
+}
+
+function mapToChartSeries(map) {
+  const points = [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([date, amount]) => ({ date, amount: Math.round(amount * 100) / 100 }));
+  const total = Math.round(points.reduce((s, p) => s + p.amount, 0) * 100) / 100;
+  return { points, total };
+}
+
+/** Last 90 days: daily deposit and airfarming profit totals for admin charts. */
+async function getAdminUserChartSeries(userId, days = 90) {
+  const span = Math.min(365, Math.max(7, Number(days) || 90));
+  const since = new Date();
+  since.setUTCDate(since.getUTCDate() - span);
+  const sinceIso = since.toISOString();
+
+  const depositMap = new Map();
+  const profitMap = new Map();
+
+  const [txRes, npRes, dropsRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('type, amount, status, created_at')
+      .eq('user_id', userId)
+      .eq('type', 'deposit')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('nowpayments_payments')
+      .select('price_amount, payment_status, created_at, updated_at')
+      .eq('user_id', userId)
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: true }),
+    supabase
+      .from('airfarming_drops')
+      .select('profit_amount, paid_at, status')
+      .eq('user_id', userId)
+      .eq('status', 'paid')
+      .not('paid_at', 'is', null)
+      .gte('paid_at', sinceIso)
+      .order('paid_at', { ascending: true }),
+  ]);
+
+  if (txRes.error && !isSchemaError(txRes.error)) throw txRes.error;
+  if (npRes.error && !isSchemaError(npRes.error)) throw npRes.error;
+  if (dropsRes.error && !isSchemaError(dropsRes.error)) throw dropsRes.error;
+
+  for (const t of txRes.data || []) {
+    const st = String(t.status || '').toLowerCase();
+    if (st.startsWith('failed') || st === 'cancelled') continue;
+    addDailyBucket(depositMap, t.created_at, t.amount);
+  }
+
+  for (const p of npRes.data || []) {
+    const st = String(p.payment_status || '').toLowerCase();
+    if (!NP_DEPOSIT_DONE.has(st)) continue;
+    const at = p.updated_at || p.created_at;
+    addDailyBucket(depositMap, at, p.price_amount);
+  }
+
+  for (const d of dropsRes.data || []) {
+    addDailyBucket(profitMap, d.paid_at, d.profit_amount);
+  }
+
+  return {
+    days: span,
+    deposits: mapToChartSeries(depositMap),
+    profits: mapToChartSeries(profitMap),
+  };
 }
 
 async function getAdminUserDetail(userId) {
@@ -1883,6 +1976,7 @@ module.exports = {
   endGlobalDropPauseEarly,
   listUsersAdmin,
   getAdminUserDetail,
+  getAdminUserChartSeries,
   getAirfarmingDropsPausedByUserIds,
   insertAirfarmingEvent,
   listAirfarmingEventsByUserId,

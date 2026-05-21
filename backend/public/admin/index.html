@@ -262,7 +262,29 @@
       overflow-y: auto;
     }
     .modal { max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; position: relative; }
-    .modal-wide { max-width: 720px; }
+    .modal-wide { max-width: 860px; }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    @media (max-width: 700px) {
+      .chart-grid { grid-template-columns: 1fr; }
+    }
+    .chart-wrap {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px 8px;
+      height: 220px;
+    }
+    .chart-wrap h4 {
+      margin: 0 0 6px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      font-weight: 700;
+    }
     .modal-header {
       display: flex;
       align-items: flex-start;
@@ -400,7 +422,7 @@
                     <th>Cash</th>
                     <th>Airfarming</th>
                     <th>Drops</th>
-                    <th></th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody id="userRows"></tbody>
@@ -558,29 +580,20 @@
       <input id="userNewPasswordConfirm" type="password" autocomplete="new-password" placeholder="Confirm password" />
       <button type="button" class="btn-primary" id="saveUserPasswordBtn" style="width:auto;margin-bottom:16px;">Update password</button>
       <p id="userPasswordOk" class="hint hidden" style="color:var(--ok);"></p>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Drop pause (this user)</h3>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Airfarming drops</h3>
       <p id="userPauseStatus" class="hint" style="margin-bottom:10px;"></p>
-      <div class="row">
-        <div>
-          <label>Pause from</label>
-          <input id="userPauseFrom" type="datetime-local" />
+      <button type="button" id="toggleUserPauseBtn" class="btn-warn" style="width:auto;margin-bottom:16px;">Pause drops</button>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Deposits &amp; profits (last 90 days)</h3>
+      <p id="chartTotals" class="hint" style="margin-bottom:8px;"></p>
+      <div class="chart-grid">
+        <div class="chart-wrap">
+          <h4>Deposits (USD)</h4>
+          <canvas id="chartDeposits"></canvas>
         </div>
-        <div>
-          <label>Pause until</label>
-          <input id="userPauseUntil" type="datetime-local" />
+        <div class="chart-wrap">
+          <h4>Drop profits (USD)</h4>
+          <canvas id="chartProfits"></canvas>
         </div>
-      </div>
-      <div class="band-picks" id="userBandPicks">
-        <span style="font-size:0.72rem;color:var(--muted);font-weight:700;">Tiers (empty = all):</span>
-        <label><input type="checkbox" class="user-band" value="0" />0</label>
-        <label><input type="checkbox" class="user-band" value="1" />1</label>
-        <label><input type="checkbox" class="user-band" value="2" />2</label>
-        <label><input type="checkbox" class="user-band" value="3" />3</label>
-      </div>
-      <div class="row" style="margin-bottom:16px;">
-        <button type="button" class="btn-primary" id="saveUserPauseBtn" style="width:auto;">Save scheduled pause</button>
-        <button type="button" class="btn-warn" id="pauseDropsBtn" style="width:auto;">Pause indefinitely</button>
-        <button type="button" class="btn-ghost" id="clearUserPauseBtn" style="width:auto;">Clear pause</button>
       </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Move cash → airfarming</h3>
       <div class="row" style="margin-bottom:16px;">
@@ -668,6 +681,7 @@
     </div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     const TOKEN_KEY = 'ema_admin_token';
     const PAGE_TITLES = { users: 'Users', support: 'Support tickets', drops: 'Airfarming drops', announce: 'Announcements' };
@@ -679,6 +693,8 @@
     let activeTab = 'users';
     let viewingUserId = null;
     let viewingUserDetail = null;
+    let chartDepositsInst = null;
+    let chartProfitsInst = null;
     let viewingTicketId = null;
 
     function api(path, opts = {}) {
@@ -755,7 +771,7 @@
       const tbody = document.getElementById('userRows');
       tbody.innerHTML = '';
       if (!users.length) {
-        tbody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No users found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No users found</td></tr>';
       }
       users.forEach((u) => {
         const tr = document.createElement('tr');
@@ -770,11 +786,17 @@
           '<td>' + fmtMoney(u.cashBalance) + '</td>' +
           '<td>' + fmtMoney(u.airfarmingBalance) + '</td>' +
           '<td>' + pausePill + '</td>' +
-          '<td><button type="button" class="btn-ghost" data-user="' + u.id + '">View</button></td>';
+          '<td style="white-space:nowrap;">' +
+          '<button type="button" class="' + (u.dropsPaused ? 'btn-primary' : 'btn-warn') + '" data-pause-user="' + u.id + '" style="width:auto;margin-right:6px;font-size:0.75rem;padding:6px 10px;">' +
+          (u.dropsPaused ? 'Resume' : 'Pause') + '</button>' +
+          '<button type="button" class="btn-ghost" data-user="' + u.id + '">View</button></td>';
         tbody.appendChild(tr);
       });
       tbody.querySelectorAll('button[data-user]').forEach((btn) => {
         btn.onclick = () => openUser(btn.getAttribute('data-user'));
+      });
+      tbody.querySelectorAll('button[data-pause-user]').forEach((btn) => {
+        btn.onclick = () => quickTogglePause(btn.getAttribute('data-pause-user'), btn);
       });
       document.getElementById('userStats').textContent = users.length + ' user(s)';
     }
@@ -820,19 +842,15 @@
       document.getElementById('userStatsGrid').innerHTML =
         '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
-        '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops now</div></div>' +
-        '<div class="stat"><div class="val">' + (af?.pauseMode || 'none') + '</div><div class="lbl">Pause mode</div></div>' +
+        '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
+        '<div class="stat"><div class="val" id="statDeposits90">—</div><div class="lbl">Deposits 90d</div></div>' +
+        '<div class="stat"><div class="val" id="statProfits90">—</div><div class="lbl">Profits 90d</div></div>' +
         '<div class="stat"><div class="val">' + (af?.autoFundEnabled ? 'On' : 'Off') + '</div><div class="lbl">Auto-fund</div></div>';
-      let pauseLine = 'Drops: ' + (af?.dropsPaused ? 'paused now' : 'active');
-      if (af?.dropsPauseFrom || af?.dropsPauseUntil) {
-        pauseLine += ' · window ' + (af.dropsPauseFrom ? new Date(af.dropsPauseFrom).toLocaleString() : '…');
-        pauseLine += ' → ' + (af.dropsPauseUntil ? new Date(af.dropsPauseUntil).toLocaleString() : '…');
-      }
-      if (af?.dropsPauseBandIndexes?.length) pauseLine += ' · tiers ' + af.dropsPauseBandIndexes.join(', ');
-      document.getElementById('userPauseStatus').textContent = pauseLine;
-      fillDatetimeLocal('userPauseFrom', af?.dropsPauseFrom);
-      fillDatetimeLocal('userPauseUntil', af?.dropsPauseUntil);
-      setBandCheckboxes('user-band', af?.dropsPauseBandIndexes);
+      document.getElementById('userPauseStatus').textContent =
+        af?.dropsPaused
+          ? 'Drops are paused for this user. Tap Resume to unpause.'
+          : 'Drops are active. Tap Pause to stop scheduled payouts for this user.';
+      updatePauseButton(af);
       const txBody = document.getElementById('userTxRows');
       txBody.innerHTML = '';
       (d.transactions || []).forEach((t) => {
@@ -909,15 +927,95 @@
       }
     }
 
+    function destroyChart(inst) {
+      if (inst) inst.destroy();
+      return null;
+    }
+
+    const CHART_OPTS = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#8b9bb4', maxTicksLimit: 10 }, grid: { color: 'rgba(42,53,72,0.4)' } },
+        y: { ticks: { color: '#8b9bb4' }, grid: { color: 'rgba(42,53,72,0.4)' } },
+      },
+    };
+
+    function renderBarChart(canvasId, existingInst, points, color) {
+      const ctx = document.getElementById(canvasId);
+      const labels = (points || []).map((p) => p.date.slice(5));
+      const values = (points || []).map((p) => p.amount);
+      if (existingInst) {
+        existingInst.data.labels = labels;
+        existingInst.data.datasets[0].data = values;
+        existingInst.update();
+        return existingInst;
+      }
+      return new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{ data: values, backgroundColor: color, borderRadius: 4 }],
+        },
+        options: CHART_OPTS,
+      });
+    }
+
+    async function loadUserCharts(userId) {
+      document.getElementById('chartTotals').textContent = 'Loading charts…';
+      try {
+        const data = await api('/admin/api/users/' + userId + '/charts');
+        document.getElementById('chartTotals').textContent =
+          'Totals (90 days): deposits ' + fmtMoney(data.deposits.total) +
+          ' · drop profits ' + fmtMoney(data.profits.total);
+        const depEl = document.getElementById('statDeposits90');
+        const profEl = document.getElementById('statProfits90');
+        if (depEl) depEl.textContent = fmtMoney(data.deposits.total);
+        if (profEl) profEl.textContent = fmtMoney(data.profits.total);
+        chartDepositsInst = renderBarChart(
+          'chartDeposits',
+          chartDepositsInst,
+          data.deposits.points,
+          'rgba(201, 162, 39, 0.8)'
+        );
+        chartProfitsInst = renderBarChart(
+          'chartProfits',
+          chartProfitsInst,
+          data.profits.points,
+          'rgba(74, 222, 128, 0.75)'
+        );
+      } catch (e) {
+        document.getElementById('chartTotals').textContent = 'Charts unavailable: ' + e.message;
+        chartDepositsInst = destroyChart(chartDepositsInst);
+        chartProfitsInst = destroyChart(chartProfitsInst);
+      }
+    }
+
+    function updatePauseButton(af) {
+      const btn = document.getElementById('toggleUserPauseBtn');
+      if (!btn) return;
+      if (af?.dropsPaused) {
+        btn.textContent = 'Resume drops';
+        btn.className = 'btn-primary';
+      } else {
+        btn.textContent = 'Pause drops';
+        btn.className = 'btn-warn';
+      }
+    }
+
     async function openUser(id) {
       document.getElementById('userModalErr').classList.add('hidden');
       document.getElementById('userPasswordOk').classList.add('hidden');
       document.getElementById('userNewPassword').value = '';
       document.getElementById('userNewPasswordConfirm').value = '';
       viewingUserId = id;
+      chartDepositsInst = destroyChart(chartDepositsInst);
+      chartProfitsInst = destroyChart(chartProfitsInst);
       const d = await api('/admin/api/users/' + id);
       renderUserDetail(d);
       document.getElementById('userModal').classList.remove('hidden');
+      void loadUserCharts(id);
     }
 
     async function moveToAirfarming() {
@@ -1039,41 +1137,40 @@
       renderUsersTable();
     }
 
-    async function saveUserScheduledPause() {
+    async function toggleUserPause() {
+      const paused = Boolean(viewingUserDetail?.airfarming?.dropsPaused);
       try {
-        const from = document.getElementById('userPauseFrom').value;
-        const until = document.getElementById('userPauseUntil').value;
-        if (!from || !until) {
-          document.getElementById('userModalErr').textContent = 'Set both pause from and until';
-          document.getElementById('userModalErr').classList.remove('hidden');
-          return;
-        }
-        await patchUserPause({
-          pauseFrom: new Date(from).toISOString(),
-          pauseUntil: new Date(until).toISOString(),
-          bandIndexes: readBandIndexes('user-band'),
+        await patchUserPause(paused ? { clearPause: true } : { dropsPaused: true });
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    async function quickTogglePause(userId, btnEl) {
+      const u = users.find((x) => x.id === userId);
+      const paused = Boolean(u?.dropsPaused);
+      try {
+        if (btnEl) btnEl.disabled = true;
+        await api('/admin/api/users/' + userId + '/airfarming', {
+          method: 'PATCH',
+          body: JSON.stringify(paused ? { clearPause: true } : { dropsPaused: true }),
         });
+        const d = await api('/admin/api/users/' + userId);
+        const idx = users.findIndex((x) => x.id === userId);
+        if (idx >= 0) {
+          users[idx].dropsPaused = Boolean(d.airfarming?.dropsPaused);
+          users[idx].dropsPauseUntil = d.airfarming?.dropsPauseUntil || null;
+        }
+        renderUsersTable();
+        if (viewingUserId === userId) {
+          renderUserDetail(d);
+          void loadUserCharts(userId);
+        }
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
-      }
-    }
-
-    async function setDropsPausedIndefinite() {
-      try {
-        await patchUserPause({ dropsPaused: true });
-      } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
-      }
-    }
-
-    async function clearUserPause() {
-      try {
-        await patchUserPause({ clearPause: true });
-      } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        alert(e.message || 'Failed to update pause');
+      } finally {
+        if (btnEl) btnEl.disabled = false;
       }
     }
 
@@ -1369,9 +1466,7 @@
     setupDismissibleModals();
     document.getElementById('cancelBtn').onclick = () => closeModal('editModal');
     document.getElementById('closeUserBtn').onclick = () => closeModal('userModal');
-    document.getElementById('saveUserPauseBtn').onclick = () => saveUserScheduledPause();
-    document.getElementById('pauseDropsBtn').onclick = () => setDropsPausedIndefinite();
-    document.getElementById('clearUserPauseBtn').onclick = () => clearUserPause();
+    document.getElementById('toggleUserPauseBtn').onclick = () => toggleUserPause();
     document.getElementById('saveGlobalPauseBtn').onclick = () => saveGlobalPause();
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();

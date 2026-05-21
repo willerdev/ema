@@ -9,6 +9,7 @@ const {
   updateUserPasswordHash,
   listUsersAdmin,
   getAdminUserDetail,
+  getAdminUserChartSeries,
   updateAirfarmingUserDropPause,
   getAirfarmingDropsPausedByUserIds,
   adminMoveCashToAirfarming,
@@ -148,6 +149,22 @@ function registerAdminRoutes(app) {
     }
   });
 
+  app.get('/admin/api/users/:id/charts', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const days = Math.min(365, Math.max(7, Number(req.query.days) || 90));
+      const series = await getAdminUserChartSeries(req.params.id, days);
+      return res.json(series);
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Database schema not ready. Run Supabase migrations.' });
+      }
+      console.error('[admin/users/:id/charts]', e);
+      return res.status(500).json({ message: e.message || 'Failed to load charts' });
+    }
+  });
+
   app.post('/admin/api/users/:id/password', adminAuthMiddleware, async (req, res) => {
     try {
       const user = await getUserById(req.params.id);
@@ -205,9 +222,10 @@ function registerAdminRoutes(app) {
       if (req.body?.clearPause) {
         state = await updateAirfarmingUserDropPause(req.params.id, { clearPause: true });
       } else if (req.body?.dropsPaused !== undefined && !req.body?.pauseFrom && !req.body?.pauseUntil) {
-        state = await updateAirfarmingUserDropPause(req.params.id, {
-          indefinitePause: Boolean(req.body.dropsPaused),
-        });
+        const pause = Boolean(req.body.dropsPaused);
+        state = pause
+          ? await updateAirfarmingUserDropPause(req.params.id, { indefinitePause: true })
+          : await updateAirfarmingUserDropPause(req.params.id, { clearPause: true });
       } else if (
         req.body?.pauseFrom !== undefined ||
         req.body?.pauseUntil !== undefined ||
