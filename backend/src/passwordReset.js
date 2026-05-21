@@ -4,7 +4,7 @@ const {
   getComplianceProfileByUserId,
   updateUserPasswordHash,
 } = require('./db');
-const { getRegion, normalizePhone, REGIONS } = require('./localMoneyRegions');
+const { isComplianceProfileComplete } = require('./complianceProfile');
 
 function normalizeEmail(email) {
   return String(email || '')
@@ -12,16 +12,16 @@ function normalizeEmail(email) {
     .toLowerCase();
 }
 
-/** All comparable digit forms for UG/RW (256…, 250…, or local without leading 0). */
+/** Comparable digit forms (strips formatting; handles optional leading 0 / country prefix). */
 function allNormalizedForms(phoneRaw) {
   const forms = new Set();
   const raw = String(phoneRaw || '').replace(/\D/g, '');
   if (!raw) return forms;
   forms.add(raw);
-  for (const code of Object.keys(REGIONS)) {
-    const region = getRegion(code);
-    const normalized = normalizePhone(phoneRaw, region.dialCode);
-    if (normalized) forms.add(normalized);
+  if (raw.startsWith('0')) forms.add(raw.slice(1));
+  if (raw.length > 9 && raw.startsWith('00')) forms.add(raw.replace(/^00+/, ''));
+  for (const len of [3, 2, 1]) {
+    if (raw.length > 9) forms.add(raw.slice(len));
   }
   return forms;
 }
@@ -33,7 +33,7 @@ function validatePhoneInput(phoneRaw) {
     return {
       ok: false,
       status: 400,
-      message: 'Enter a valid mobile number saved on your profile (e.g. 766532251 or 256766532251).',
+      message: 'Enter the mobile number saved on your compliance profile.',
     };
   }
   return { ok: true };
@@ -48,13 +48,7 @@ function phonesMatch(inputPhone, profilePhone) {
   return false;
 }
 
-async function phoneMatchesUserProfile(userId, phoneRaw) {
-  const profile = await getComplianceProfileByUserId(userId);
-  if (!profile?.phone) return false;
-  return phonesMatch(phoneRaw, profile.phone);
-}
-
-async function recoverPassword({ email, phone, password }) {
+async function verifyRecoverCredentials({ email, phone }) {
   const normalized = normalizeEmail(email);
   if (!normalized || !normalized.includes('@')) {
     return { ok: false, status: 400, message: 'Enter a valid email address' };
@@ -63,22 +57,47 @@ async function recoverPassword({ email, phone, password }) {
   const phoneCheck = validatePhoneInput(phone);
   if (!phoneCheck.ok) return phoneCheck;
 
-  if (!password || String(password).length < 6) {
-    return { ok: false, status: 400, message: 'Password must be at least 6 characters' };
-  }
-
   const user = await getUserByEmail(normalized);
-  const phoneOk = user ? await phoneMatchesUserProfile(user.id, phone) : false;
-
-  if (!user || !phoneOk) {
+  if (!user) {
     return {
       ok: false,
       status: 400,
       message:
-        'Could not verify your account. Use the same email and mobile number saved on your Ema profile (Settings / verification).',
+        'We could not verify your details. Use the email and phone from your account compliance profile.',
     };
   }
 
+  const profile = await getComplianceProfileByUserId(user.id);
+  if (!isComplianceProfileComplete(profile)) {
+    return {
+      ok: false,
+      status: 400,
+      message:
+        'Complete your compliance profile in Settings before resetting your password, then try again.',
+    };
+  }
+
+  if (!profile?.phone || !phonesMatch(phone, profile.phone)) {
+    return {
+      ok: false,
+      status: 400,
+      message:
+        'We could not verify your details. Use the same email and phone number saved on your compliance profile.',
+    };
+  }
+
+  return { ok: true, verified: true };
+}
+
+async function recoverPassword({ email, phone, password }) {
+  const verify = await verifyRecoverCredentials({ email, phone });
+  if (!verify.ok) return verify;
+
+  if (!password || String(password).length < 6) {
+    return { ok: false, status: 400, message: 'Password must be at least 6 characters' };
+  }
+
+  const user = await getUserByEmail(normalizeEmail(email));
   const passwordHash = await bcrypt.hash(String(password), 10);
   await updateUserPasswordHash(user.id, passwordHash);
 
@@ -86,6 +105,20 @@ async function recoverPassword({ email, phone, password }) {
 }
 
 function registerPasswordResetRoutes(app) {
+  app.post('/auth/recover-password/verify', async (req, res) => {
+    try {
+      const result = await verifyRecoverCredentials({
+        email: req.body?.email,
+        phone: req.body?.phone,
+      });
+      if (!result.ok) return res.status(result.status).json({ message: result.message });
+      return res.json({ verified: true, message: 'Verified. You can set a new password.' });
+    } catch (e) {
+      console.error('[auth/recover-password/verify]', e);
+      return res.status(500).json({ message: 'Could not verify your details. Try again later.' });
+    }
+  });
+
   app.post('/auth/recover-password', async (req, res) => {
     try {
       const result = await recoverPassword({
@@ -102,4 +135,10 @@ function registerPasswordResetRoutes(app) {
   });
 }
 
-module.exports = { registerPasswordResetRoutes, recoverPassword, allNormalizedForms, phonesMatch };
+module.exports = {
+  registerPasswordResetRoutes,
+  recoverPassword,
+  verifyRecoverCredentials,
+  allNormalizedForms,
+  phonesMatch,
+};

@@ -357,6 +357,9 @@
         <button type="button" class="nav-item" data-tab="drops">
           <span class="nav-icon">📉</span> Drops
         </button>
+        <button type="button" class="nav-item" data-tab="announce">
+          <span class="nav-icon">📢</span> Announce
+        </button>
       </nav>
       <div class="sidebar-foot">
         <button type="button" class="btn-ghost btn-block-sm" id="refreshBtn">Refresh</button>
@@ -456,6 +459,24 @@
               </table>
             </div>
             <p id="ticketsErr" class="err hidden"></p>
+          </div>
+        </div>
+
+        <div id="panelAnnounce" class="hidden">
+          <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">In-app announcement</h3>
+            <p class="hint">Shown on the Home screen when published. Users can dismiss it; a new announcement shows again after you publish.</p>
+            <p id="announceActive" class="warn-box hidden"></p>
+            <label>Title</label>
+            <input id="announceTitle" type="text" placeholder="e.g. Scheduled maintenance" />
+            <label>Message</label>
+            <textarea id="announceBody" rows="4" placeholder="Message for all users…" style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;margin-bottom:12px;"></textarea>
+            <div class="row">
+              <button type="button" class="btn-primary" id="publishAnnounceBtn" style="width:auto;">Publish</button>
+              <button type="button" class="btn-ghost" id="clearAnnounceBtn" style="width:auto;">Clear active</button>
+            </div>
+            <p id="announceOk" class="hint hidden" style="color:var(--ok);"></p>
+            <p id="announceErr" class="err hidden"></p>
           </div>
         </div>
 
@@ -649,7 +670,7 @@
 
   <script>
     const TOKEN_KEY = 'ema_admin_token';
-    const PAGE_TITLES = { users: 'Users', support: 'Support tickets', drops: 'Airfarming drops' };
+    const PAGE_TITLES = { users: 'Users', support: 'Support tickets', drops: 'Airfarming drops', announce: 'Announcements' };
     let drops = [];
     let users = [];
     let tickets = [];
@@ -720,6 +741,7 @@
       document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
       document.getElementById('panelSupport').classList.toggle('hidden', tab !== 'support');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
+      document.getElementById('panelAnnounce').classList.toggle('hidden', tab !== 'announce');
       document.getElementById('pageTitle').textContent = PAGE_TITLES[tab] || 'Admin';
       closeSidebar();
       refreshActive().catch((e) => {
@@ -1223,10 +1245,63 @@
       }
     }
 
+    async function loadAnnouncements() {
+      document.getElementById('announceErr').classList.add('hidden');
+      document.getElementById('announceOk').classList.add('hidden');
+      try {
+        const data = await api('/admin/api/announcements');
+        const activeEl = document.getElementById('announceActive');
+        if (data.active) {
+          activeEl.classList.remove('hidden');
+          activeEl.textContent = 'Live: “' + data.active.title + '” — ' + data.active.body;
+        } else {
+          activeEl.classList.add('hidden');
+        }
+      } catch (e) {
+        document.getElementById('announceErr').textContent = e.message;
+        document.getElementById('announceErr').classList.remove('hidden');
+      }
+    }
+
+    async function publishAnnouncement() {
+      document.getElementById('announceErr').classList.add('hidden');
+      try {
+        const title = document.getElementById('announceTitle').value.trim();
+        const body = document.getElementById('announceBody').value.trim();
+        if (!title || !body) throw new Error('Title and message are required');
+        await api('/admin/api/announcements', {
+          method: 'POST',
+          body: JSON.stringify({ title, body }),
+        });
+        document.getElementById('announceOk').textContent = 'Published. Users will see it until dismissed.';
+        document.getElementById('announceOk').classList.remove('hidden');
+        await loadAnnouncements();
+      } catch (e) {
+        document.getElementById('announceErr').textContent = e.message;
+        document.getElementById('announceErr').classList.remove('hidden');
+      }
+    }
+
+    async function clearAnnouncement() {
+      document.getElementById('announceErr').classList.add('hidden');
+      try {
+        await api('/admin/api/announcements/active', { method: 'DELETE' });
+        document.getElementById('announceTitle').value = '';
+        document.getElementById('announceBody').value = '';
+        document.getElementById('announceOk').textContent = 'Announcement cleared.';
+        document.getElementById('announceOk').classList.remove('hidden');
+        await loadAnnouncements();
+      } catch (e) {
+        document.getElementById('announceErr').textContent = e.message;
+        document.getElementById('announceErr').classList.remove('hidden');
+      }
+    }
+
     async function refreshActive() {
       if (activeTab === 'users') await loadUsers();
       else if (activeTab === 'support') await loadTickets();
-      else await loadDrops();
+      else if (activeTab === 'drops') await loadDrops();
+      else if (activeTab === 'announce') await loadAnnouncements();
     }
 
     function showUsersErr(e) {
@@ -1279,7 +1354,10 @@
     document.getElementById('refreshBtn').onclick = () => refreshActive().catch((e) => {
       if (activeTab === 'users') showUsersErr(e);
       else if (activeTab === 'support') showTicketsErr(e);
-      else showDropsErr(e);
+      else if (activeTab === 'announce') {
+        document.getElementById('announceErr').textContent = e.message;
+        document.getElementById('announceErr').classList.remove('hidden');
+      } else showDropsErr(e);
     });
 
     document.getElementById('searchUsersBtn').onclick = () => loadUsers().catch(showUsersErr);
@@ -1300,6 +1378,8 @@
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
+    document.getElementById('publishAnnounceBtn').onclick = () => publishAnnouncement();
+    document.getElementById('clearAnnounceBtn').onclick = () => clearAnnouncement();
 
     const token = localStorage.getItem(TOKEN_KEY);
     if (token) {

@@ -8,6 +8,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
 import { TwoFactorReminderCard } from '../components/TwoFactorReminderCard';
+import { AnnouncementBanner } from '../components/AnnouncementBanner';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { useTransactionFeed } from '../hooks/useTransactionFeed';
@@ -72,6 +73,8 @@ export function HomeScreen() {
       <Text style={styles.sub}>Wallet overview</Text>
 
       <TwoFactorReminderCard />
+
+      <AnnouncementBanner />
 
       <Card style={styles.supportCard}>
         <View style={styles.supportRow}>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { securityStorage } from '../services/securityStorage';
 import { canUseBiometrics, biometricLabel } from '../utils/biometrics';
@@ -8,10 +8,12 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { authService } from '../services/authService';
 
 type AuthMode = 'signin' | 'register' | 'recover';
+type RecoverStep = 'credentials' | 'verifying' | 'password';
 
 export function AuthScreen() {
   const { login, register, completeTotpLogin, loginWithBiometric } = useAuth();
   const [mode, setMode] = useState<AuthMode>('signin');
+  const [recoverStep, setRecoverStep] = useState<RecoverStep>('credentials');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
@@ -21,6 +23,7 @@ export function AuthScreen() {
   const [showBiometricLogin, setShowBiometricLogin] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);
   const [recoverBusy, setRecoverBusy] = useState(false);
+  const [verifyDots, setVerifyDots] = useState(0);
 
   useEffect(() => {
     (async () => {
@@ -32,6 +35,12 @@ export function AuthScreen() {
       setShowBiometricLogin(Boolean(enabled && token && hardware));
     })();
   }, []);
+
+  useEffect(() => {
+    if (recoverStep !== 'verifying') return;
+    const t = setInterval(() => setVerifyDots((d) => (d + 1) % 4), 400);
+    return () => clearInterval(t);
+  }, [recoverStep]);
 
   const submit = async () => {
     try {
@@ -85,16 +94,39 @@ export function AuthScreen() {
     setTotpCode('');
   };
 
-  const submitRecover = async () => {
+  const resetRecoverFlow = () => {
+    setRecoverStep('credentials');
+    setPassword('');
+    setConfirmPassword('');
+  };
+
+  const startRecover = () => {
+    setMode('recover');
+    resetRecoverFlow();
+  };
+
+  const verifyRecoverCredentials = async () => {
     const trimmed = email.trim();
     if (!trimmed || !trimmed.includes('@')) {
       Alert.alert('Validation', 'Enter the email for your account.');
       return;
     }
     if (!phone.trim()) {
-      Alert.alert('Validation', 'Enter the mobile number saved on your Ema profile.');
+      Alert.alert('Validation', 'Enter the phone number from your compliance profile.');
       return;
     }
+    setRecoverStep('verifying');
+    try {
+      await authService.verifyRecoverPassword({ email: trimmed, phone: phone.trim() });
+      setRecoverStep('password');
+    } catch (error: any) {
+      setRecoverStep('credentials');
+      Alert.alert('Could not verify', error.message);
+    }
+  };
+
+  const submitRecoverPassword = async () => {
+    const trimmed = email.trim();
     if (password.length < 6) {
       Alert.alert('Validation', 'New password must be at least 6 characters.');
       return;
@@ -112,9 +144,8 @@ export function AuthScreen() {
       });
       Alert.alert('Password updated', res.message);
       setMode('signin');
-      setPassword('');
-      setConfirmPassword('');
       setPhone('');
+      resetRecoverFlow();
     } catch (error: any) {
       Alert.alert('Recovery failed', error.message);
     } finally {
@@ -147,12 +178,61 @@ export function AuthScreen() {
   }
 
   if (mode === 'recover') {
+    if (recoverStep === 'verifying') {
+      const dots = '.'.repeat(verifyDots);
+      return (
+        <View style={styles.container}>
+          <ActivityIndicator size='large' color={palette.primary} style={{ marginBottom: 24 }} />
+          <Text style={styles.title}>EMA</Text>
+          <Text style={styles.subtitle}>Verifying{dots}</Text>
+          <Text style={styles.hint}>
+            Checking your email and phone against your compliance profile. This may take a moment.
+          </Text>
+        </View>
+      );
+    }
+
+    if (recoverStep === 'password') {
+      return (
+        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
+          <Text style={styles.title}>EMA</Text>
+          <Text style={styles.subtitle}>Set new password</Text>
+          <Text style={styles.hint}>Your details were verified. Choose a new password for {email.trim()}.</Text>
+          <TextInput
+            style={styles.input}
+            placeholder='New password'
+            placeholderTextColor={palette.textSecondary}
+            secureTextEntry
+            value={password}
+            onChangeText={setPassword}
+          />
+          <TextInput
+            style={styles.input}
+            placeholder='Confirm new password'
+            placeholderTextColor={palette.textSecondary}
+            secureTextEntry
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+          />
+          <PrimaryButton
+            label={recoverBusy ? 'Updating…' : 'Update password'}
+            onPress={() => void submitRecoverPassword()}
+            disabled={recoverBusy}
+          />
+          <Text style={styles.switch} onPress={() => setRecoverStep('credentials')}>
+            Back
+          </Text>
+        </ScrollView>
+      );
+    }
+
     return (
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
         <Text style={styles.title}>EMA</Text>
         <Text style={styles.subtitle}>Recover account</Text>
         <Text style={styles.hint}>
-          Enter your account email and mobile number from your profile, then choose a new password.
+          Enter the email and phone number you used when completing compliance in Settings. We will verify them before
+          you set a new password.
         </Text>
         <TextInput
           style={styles.input}
@@ -165,35 +245,20 @@ export function AuthScreen() {
         />
         <TextInput
           style={styles.input}
-          placeholder='Mobile number'
+          placeholder='Phone (compliance profile)'
           placeholderTextColor={palette.textSecondary}
           value={phone}
           onChangeText={setPhone}
           keyboardType='phone-pad'
         />
-        <Text style={styles.phoneHint}>Use the number saved in Settings (e.g. 766532251 or 256766532251).</Text>
-        <TextInput
-          style={styles.input}
-          placeholder='New password'
-          placeholderTextColor={palette.textSecondary}
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder='Confirm new password'
-          placeholderTextColor={palette.textSecondary}
-          secureTextEntry
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-        />
-        <PrimaryButton
-          label={recoverBusy ? 'Updating…' : 'Reset password'}
-          onPress={() => void submitRecover()}
-          disabled={recoverBusy}
-        />
-        <Text style={styles.switch} onPress={() => setMode('signin')}>
+        <PrimaryButton label='Continue' onPress={() => void verifyRecoverCredentials()} />
+        <Text
+          style={styles.switch}
+          onPress={() => {
+            setMode('signin');
+            resetRecoverFlow();
+          }}
+        >
           Back to sign in
         </Text>
       </ScrollView>
@@ -232,7 +297,7 @@ export function AuthScreen() {
       />
       <PrimaryButton label={mode === 'register' ? 'Create Account' : 'Login'} onPress={submit} />
       {mode === 'signin' ? (
-        <Text style={styles.switch} onPress={() => setMode('recover')}>
+        <Text style={styles.switch} onPress={startRecover}>
           Forgot password?
         </Text>
       ) : null}
@@ -262,7 +327,6 @@ const styles = StyleSheet.create({
   title: { color: palette.primary, fontSize: 32, fontWeight: '800', textAlign: 'center' },
   subtitle: { color: palette.textPrimary, fontSize: 18, textAlign: 'center', marginBottom: 10 },
   hint: { color: palette.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 4, lineHeight: 20 },
-  phoneHint: { color: palette.textSecondary, fontSize: 12, textAlign: 'center', marginTop: -4 },
   or: { color: palette.textSecondary, textAlign: 'center', fontSize: 13 },
   input: {
     backgroundColor: palette.surface,

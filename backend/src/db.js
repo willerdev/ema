@@ -1665,6 +1665,55 @@ async function adminMoveCashToAirfarming(userId, amount) {
   return { cashWallet: cash - amt, airfarmingBalance: nextAf, amount: amt };
 }
 
+async function getActiveAppAnnouncement() {
+  const { data, error } = await supabase
+    .from('app_announcements')
+    .select('*')
+    .eq('active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && isSchemaError(error)) return null;
+  if (error) throw error;
+  return data;
+}
+
+async function listAppAnnouncementsAdmin(limit = 30) {
+  const { data, error } = await supabase
+    .from('app_announcements')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function publishAppAnnouncement({ title, body }) {
+  const now = new Date().toISOString();
+  await supabase.from('app_announcements').update({ active: false, updated_at: now }).eq('active', true);
+  const row = {
+    id: id(),
+    title: String(title).trim(),
+    body: String(body).trim(),
+    active: true,
+    created_at: now,
+    updated_at: now,
+  };
+  const { data, error } = await supabase.from('app_announcements').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function clearActiveAppAnnouncement() {
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from('app_announcements')
+    .update({ active: false, updated_at: now })
+    .eq('active', true);
+  if (error) throw error;
+}
+
 async function createAppNotification({ userId, title, body }) {
   const row = {
     user_id: userId || null,
@@ -1836,6 +1885,10 @@ module.exports = {
   MAX_WHITELISTED_WALLETS_PER_USER,
   listNotificationsForUser,
   createAppNotification,
+  getActiveAppAnnouncement,
+  listAppAnnouncementsAdmin,
+  publishAppAnnouncement,
+  clearActiveAppAnnouncement,
   insertSupportTicket,
   listSupportTicketsByUserId,
   getSupportTicketForUser,
