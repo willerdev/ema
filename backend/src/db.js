@@ -24,6 +24,30 @@ function isSchemaError(error) {
   return /does not exist|Could not find the/i.test(msg);
 }
 
+function isMissingColumnError(error, columnName) {
+  if (!error) return false;
+  const msg = String(error.message || error.details || '');
+  return isSchemaError(error) && msg.includes(String(columnName));
+}
+
+/** Omit scheduled-pause columns when DB migration 20260601 is not applied yet. */
+function withoutPauseScheduleFields(row) {
+  if (!row || typeof row !== 'object') return row;
+  const {
+    drops_pause_from: _f,
+    drops_pause_until: _u,
+    drops_pause_band_indexes: _b,
+    ...rest
+  } = row;
+  return rest;
+}
+
+function withoutPauseBandIndexes(row) {
+  if (!row || typeof row !== 'object') return row;
+  const { drops_pause_band_indexes: _b, ...rest } = row;
+  return rest;
+}
+
 function id() {
   return crypto.randomUUID();
 }
@@ -545,7 +569,14 @@ async function getAirfarmingStateByUserId(userId) {
 }
 
 async function upsertAirfarmingState(row) {
-  const { data, error } = await supabase.from('airfarming_state').upsert(row, { onConflict: 'user_id' }).select('*').single();
+  let { data, error } = await supabase.from('airfarming_state').upsert(row, { onConflict: 'user_id' }).select('*').single();
+  if (error && isSchemaError(error)) {
+    ({ data, error } = await supabase
+      .from('airfarming_state')
+      .upsert(withoutPauseScheduleFields(row), { onConflict: 'user_id' })
+      .select('*')
+      .single());
+  }
   if (error) throw error;
   return data;
 }
@@ -630,12 +661,28 @@ async function updateAirfarmingUserDropPause(userId, patch) {
     if (patch.pauseFrom || patch.pauseUntil) row.drops_paused = false;
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('airfarming_state')
     .update(row)
     .eq('user_id', userId)
     .select('*')
     .single();
+  if (error && isMissingColumnError(error, 'drops_pause_band_indexes')) {
+    ({ data, error } = await supabase
+      .from('airfarming_state')
+      .update(withoutPauseBandIndexes(row))
+      .eq('user_id', userId)
+      .select('*')
+      .single());
+  }
+  if (error && isSchemaError(error)) {
+    ({ data, error } = await supabase
+      .from('airfarming_state')
+      .update(withoutPauseScheduleFields(row))
+      .eq('user_id', userId)
+      .select('*')
+      .single());
+  }
   if (error) throw error;
   return data;
 }
@@ -737,6 +784,12 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
         'user_id, drops_paused, drops_pause_from, drops_pause_until, drops_pause_band_indexes, auto_fund_enabled, week_start'
       )
       .in('user_id', ids);
+    if (stateRes.error && isMissingColumnError(stateRes.error, 'drops_pause_band_indexes')) {
+      stateRes = await supabase
+        .from('airfarming_state')
+        .select('user_id, drops_paused, drops_pause_from, drops_pause_until, auto_fund_enabled, week_start')
+        .in('user_id', ids);
+    }
     if (stateRes.error && isSchemaError(stateRes.error)) {
       stateRes = await supabase
         .from('airfarming_state')
