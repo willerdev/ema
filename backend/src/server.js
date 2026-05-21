@@ -630,7 +630,16 @@ registerAirfarmingRoutes(app, { authMiddleware });
 registerContractRoutes(app, { authMiddleware });
 registerExpertRoutes(app, { authMiddleware });
 registerAdminRoutes(app);
-app.use('/admin', express.static(path.join(__dirname, '../public/admin')));
+app.use(
+  '/admin',
+  (req, res, next) => {
+    if (req.path === '/' || req.path === '/index.html' || /\.html$/i.test(req.path)) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    }
+    next();
+  },
+  express.static(path.join(__dirname, '../public/admin'))
+);
 
 function mapRpcPeerTransferError(error) {
   const raw = `${String(error?.message || '')} ${String(error?.details || '')} ${String(error?.hint || '')}`;
