@@ -41,9 +41,11 @@ async function ensureWeekState(userId) {
       user_id: userId,
       week_start: weekYmd,
       weekly_event_target: 2,
-      weekly_events_used: 0,
-      event_offsets_hours: [],
-      last_event_at: null,
+      weekly_events_used: row?.weekly_events_used ?? 0,
+      event_offsets_hours: row?.event_offsets_hours ?? [],
+      last_event_at: row?.last_event_at ?? null,
+      auto_fund_enabled: Boolean(row?.auto_fund_enabled),
+      drops_paused: Boolean(row?.drops_paused),
       updated_at: new Date().toISOString(),
     });
   }
@@ -105,6 +107,7 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         scheduleHours: [],
         lastEventAt: settled[0]?.paid_at || settled[0]?.due_at || null,
         autoFundEnabled,
+        dropsPaused: Boolean(state.drops_paused),
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
         nextDrop,
         history,

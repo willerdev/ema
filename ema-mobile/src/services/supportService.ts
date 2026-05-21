@@ -1,6 +1,6 @@
 import { api } from './api';
 
-export type SupportCategory = 'withdraw' | 'deposit' | 'daily_earning' | 'transfer';
+export type SupportCategory = 'withdraw' | 'deposit' | 'daily_earning' | 'transfer' | 'general';
 
 export type SupportTicket = {
   id: string;

@@ -10,7 +10,7 @@ const {
 const SCHEMA_MSG =
   'Support schema missing. Run backend/sql/migrations/20260524_support_tickets.sql in Supabase.';
 
-const CATEGORIES = new Set(['withdraw', 'deposit', 'daily_earning', 'transfer']);
+const CATEGORIES = new Set(['withdraw', 'deposit', 'daily_earning', 'transfer', 'general']);
 
 function newId() {
   return crypto.randomUUID();
@@ -49,6 +49,9 @@ function validatePayload(category, body) {
     if (!String(p.recipientTransferId || '').trim()) errors.push('Recipient transfer ID is required');
     const amount = Number(p.amount);
     if (!Number.isFinite(amount) || amount <= 0) errors.push('Valid transfer amount is required');
+  } else if (category === 'general') {
+    if (!String(p.subject || '').trim()) errors.push('Subject is required');
+    if (!String(p.message || '').trim()) errors.push('Message is required');
   }
 
   return { ok: errors.length === 0, errors, normalized: p };

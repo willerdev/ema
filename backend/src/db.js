@@ -556,6 +556,160 @@ async function updateAirfarmingAutoFundSetting(userId, enabled) {
   return data;
 }
 
+function mondayUtcYmd(now = new Date()) {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const dow = d.getUTCDay();
+  const offset = (dow + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - offset);
+  return d.toISOString().slice(0, 10);
+}
+
+async function ensureAirfarmingStateRow(userId) {
+  const weekYmd = mondayUtcYmd();
+  let row = await getAirfarmingStateByUserId(userId);
+  if (!row || row.week_start !== weekYmd) {
+    const sameWeek = row?.week_start === weekYmd;
+    row = await upsertAirfarmingState({
+      user_id: userId,
+      week_start: weekYmd,
+      weekly_event_target: 2,
+      weekly_events_used: sameWeek ? Number(row?.weekly_events_used || 0) : 0,
+      event_offsets_hours: sameWeek ? row?.event_offsets_hours ?? [] : [],
+      last_event_at: sameWeek ? row?.last_event_at ?? null : null,
+      auto_fund_enabled: Boolean(row?.auto_fund_enabled),
+      drops_paused: Boolean(row?.drops_paused),
+      updated_at: new Date().toISOString(),
+    });
+  }
+  return row;
+}
+
+async function updateAirfarmingDropsPaused(userId, paused) {
+  await ensureAirfarmingStateRow(userId);
+  const { data, error } = await supabase
+    .from('airfarming_state')
+    .update({
+      drops_paused: Boolean(paused),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listUsersAdmin({ limit = 100, search = '' } = {}) {
+  let query = supabase
+    .from('users')
+    .select('id, email, created_at, transfer_code')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  const term = String(search || '').trim();
+  if (term) query = query.ilike('email', `%${term}%`);
+  const { data, error } = await query;
+  if (error) throw error;
+  const users = data || [];
+  const ids = users.map((u) => u.id);
+  if (!ids.length) return [];
+
+  const [walletsRes, afRes, stateRes] = await Promise.all([
+    supabase.from('wallets').select('user_id, balance').in('user_id', ids),
+    supabase.from('airfarming_wallets').select('user_id, balance').in('user_id', ids),
+    supabase.from('airfarming_state').select('user_id, drops_paused, auto_fund_enabled, week_start').in('user_id', ids),
+  ]);
+  if (walletsRes.error) throw walletsRes.error;
+  if (afRes.error) throw afRes.error;
+  if (stateRes.error) throw stateRes.error;
+
+  const cashByUser = new Map((walletsRes.data || []).map((w) => [w.user_id, Number(w.balance)]));
+  const afByUser = new Map((afRes.data || []).map((w) => [w.user_id, Number(w.balance)]));
+  const stateByUser = new Map((stateRes.data || []).map((s) => [s.user_id, s]));
+
+  return users.map((u) => {
+    const st = stateByUser.get(u.id);
+    return {
+      id: u.id,
+      email: u.email,
+      createdAt: u.created_at,
+      transferCode: u.transfer_code || null,
+      cashBalance: cashByUser.get(u.id) ?? 0,
+      airfarmingBalance: afByUser.get(u.id) ?? 0,
+      dropsPaused: Boolean(st?.drops_paused),
+      autoFundEnabled: Boolean(st?.auto_fund_enabled),
+      airfarmingWeekStart: st?.week_start || null,
+    };
+  });
+}
+
+async function getAdminUserDetail(userId) {
+  const user = await getUserById(userId);
+  if (!user) return null;
+
+  const [wallet, afWallet, state, transactions, scheduledDrops] = await Promise.all([
+    getWalletByUserId(userId),
+    getAirfarmingWalletByUserId(userId),
+    getAirfarmingStateByUserId(userId),
+    getTransactionsByUserId(userId),
+    supabase
+      .from('airfarming_drops')
+      .select('id, drop_index, due_at, percent, min_balance, max_balance, status')
+      .eq('user_id', userId)
+      .eq('status', 'scheduled')
+      .order('due_at', { ascending: true })
+      .limit(10),
+  ]);
+
+  if (scheduledDrops.error) throw scheduledDrops.error;
+
+  return {
+    user: {
+      id: user.id,
+      email: user.email,
+      createdAt: user.created_at,
+      transferCode: user.transfer_code || null,
+      totpEnabled: Boolean(user.totp_enabled),
+    },
+    cashBalance: Number.parseFloat(String(wallet?.balance ?? 0)) || 0,
+    airfarmingBalance: Number.parseFloat(String(afWallet?.balance ?? 0)) || 0,
+    airfarming: state
+      ? {
+          weekStart: state.week_start,
+          dropsPaused: Boolean(state.drops_paused),
+          autoFundEnabled: Boolean(state.auto_fund_enabled),
+          weeklyEventsUsed: Number(state.weekly_events_used || 0),
+        }
+      : null,
+    transactions: (transactions || []).slice(0, 50).map((t) => ({
+      id: t.id,
+      type: t.type,
+      amount: Number(t.amount),
+      status: t.status,
+      createdAt: t.created_at,
+    })),
+    scheduledDrops: (scheduledDrops.data || []).map((d) => ({
+      id: d.id,
+      dropIndex: Number(d.drop_index),
+      dueAt: d.due_at,
+      percent: Number(d.percent),
+      minBalance: Number(d.min_balance),
+      maxBalance: Number(d.max_balance),
+      status: d.status,
+    })),
+  };
+}
+
+async function getAirfarmingDropsPausedByUserIds(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return new Map();
+  const { data, error } = await supabase
+    .from('airfarming_state')
+    .select('user_id, drops_paused')
+    .in('user_id', ids);
+  if (error) throw error;
+  return new Map((data || []).map((r) => [r.user_id, Boolean(r.drops_paused)]));
+}
+
 async function insertAirfarmingEvent(row) {
   const { data, error } = await supabase.from('airfarming_events').insert(row).select('*').single();
   if (error) throw error;
@@ -1291,6 +1445,86 @@ async function getSupportTicketForUser(userId, ticketId) {
   return data;
 }
 
+async function getSupportTicketById(ticketId) {
+  const { data, error } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .eq('id', ticketId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function listSupportTicketsAdmin({ limit = 200, status, category, search } = {}) {
+  const cap = Math.min(500, Math.max(1, Number(limit) || 200));
+  let query = supabase.from('support_tickets').select('*').order('created_at', { ascending: false }).limit(cap);
+  if (status) query = query.eq('status', String(status));
+  if (category) query = query.eq('category', String(category));
+  const term = String(search || '').trim();
+  if (term) {
+    const { data: userRows, error: userErr } = await supabase
+      .from('users')
+      .select('id')
+      .ilike('email', `%${term}%`)
+      .limit(100);
+    if (userErr) throw userErr;
+    const ids = (userRows || []).map((u) => u.id);
+    if (!ids.length) return [];
+    query = query.in('user_id', ids);
+  }
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+async function updateSupportTicketStatus(ticketId, status) {
+  const { data, error } = await supabase
+    .from('support_tickets')
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq('id', ticketId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function adminMoveCashToAirfarming(userId, amount) {
+  const amt = Number(amount);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    const err = new Error('Invalid amount');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const wallet = await ensureWalletForUser(userId);
+  const cash = Number.parseFloat(String(wallet.balance ?? 0)) || 0;
+  if (cash < amt) {
+    const err = new Error('Insufficient cash wallet balance');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const af = await getAirfarmingWalletByUserId(userId);
+  const nextAf = (Number.parseFloat(String(af?.balance ?? 0)) || 0) + amt;
+  const now = new Date().toISOString();
+
+  await setWalletBalance(userId, cash - amt);
+  await upsertAirfarmingWalletRow({
+    user_id: userId,
+    balance: nextAf,
+    updated_at: now,
+  });
+  await insertAirfarmingTransfer({
+    id: id(),
+    user_id: userId,
+    direction: 'to_airfarming',
+    amount: amt,
+    created_at: now,
+  });
+
+  return { cashWallet: cash - amt, airfarmingBalance: nextAf, amount: amt };
+}
+
 async function createAppNotification({ userId, title, body }) {
   const row = {
     user_id: userId || null,
@@ -1397,6 +1631,11 @@ module.exports = {
   getAirfarmingStateByUserId,
   upsertAirfarmingState,
   updateAirfarmingAutoFundSetting,
+  ensureAirfarmingStateRow,
+  updateAirfarmingDropsPaused,
+  listUsersAdmin,
+  getAdminUserDetail,
+  getAirfarmingDropsPausedByUserIds,
   insertAirfarmingEvent,
   listAirfarmingEventsByUserId,
   getScheduledAirfarmingDrop,
@@ -1454,6 +1693,10 @@ module.exports = {
   insertSupportTicket,
   listSupportTicketsByUserId,
   getSupportTicketForUser,
+  getSupportTicketById,
+  listSupportTicketsAdmin,
+  updateSupportTicketStatus,
+  adminMoveCashToAirfarming,
   getNotificationPreferencesByUserId,
   upsertNotificationPreferences,
   insertLocalMoneyOrder,

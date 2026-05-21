@@ -12,6 +12,7 @@ const {
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
   getAirfarmingDropBandByIndex,
+  getAirfarmingStateByUserId,
 } = require('./db');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
@@ -172,7 +173,14 @@ function dropToHistoryRow(row) {
   };
 }
 
+async function isDropsPausedForUser(userId) {
+  const state = await getAirfarmingStateByUserId(userId);
+  return Boolean(state?.drops_paused);
+}
+
 async function ensureNextScheduledDrop(userId, weekStart) {
+  if (await isDropsPausedForUser(userId)) return null;
+
   const existing = await getScheduledAirfarmingDrop(userId, weekStart);
   if (existing) return existing;
 
@@ -342,6 +350,8 @@ async function settleDrop(userId, drop, options = {}) {
 
 /** Process all overdue scheduled drops; schedule the next one after each settlement. */
 async function processDueDrops(userId, weekStart, options = {}) {
+  if (await isDropsPausedForUser(userId)) return 0;
+
   let processed = 0;
   const guardMax = 20;
   while (processed < guardMax) {

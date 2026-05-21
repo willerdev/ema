@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Ema Admin — Airfarming Drops</title>
+  <title>Ema Admin</title>
   <style>
     :root {
       --bg: #0b1220;
@@ -15,6 +15,7 @@
       --gold-dim: rgba(201, 162, 39, 0.15);
       --danger: #f87171;
       --ok: #4ade80;
+      --warn: #fbbf24;
     }
     * { box-sizing: border-box; }
     body {
@@ -56,6 +57,7 @@
     .btn-primary { background: var(--gold); color: #0b1220; }
     .btn-ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
     .btn-danger { background: transparent; color: var(--danger); border: 1px solid var(--danger); }
+    .btn-warn { background: transparent; color: var(--warn); border: 1px solid var(--warn); }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
     .row > * { flex: 1; min-width: 140px; }
     .hidden { display: none !important; }
@@ -76,6 +78,8 @@
       background: var(--gold-dim);
       color: var(--gold);
     }
+    .pill-paused { background: rgba(248, 113, 113, 0.15); color: var(--danger); }
+    .pill-ok { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
     .err { color: var(--danger); font-size: 0.85rem; margin-top: 8px; }
     .toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
     .modal-backdrop {
@@ -84,9 +88,25 @@
       display: flex; align-items: center; justify-content: center;
       padding: 16px;
       z-index: 100;
+      overflow-y: auto;
     }
-    .modal { max-width: 420px; width: 100%; }
+    .modal { max-width: 560px; width: 100%; max-height: 90vh; overflow-y: auto; }
+    .modal-wide { max-width: 720px; }
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab {
+      padding: 8px 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .tab.active { background: var(--gold-dim); color: var(--gold); border-color: var(--gold); }
+    .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .stat { background: var(--bg); border-radius: 8px; padding: 12px; border: 1px solid var(--border); }
+    .stat .val { font-size: 1.25rem; font-weight: 700; color: var(--gold); }
+    .stat .lbl { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; }
     @media (max-width: 720px) {
       table { display: block; overflow-x: auto; }
       .grid-2 { grid-template-columns: 1fr; }
@@ -96,7 +116,7 @@
 <body>
   <div class="wrap">
     <h1>EMA Admin</h1>
-    <p class="sub">Airfarming drops — view and edit upcoming scheduled drops for all users</p>
+    <p class="sub">Users, wallets, support tickets, and airfarming drops</p>
 
     <div id="loginCard" class="card">
       <h2 style="margin:0 0 12px;font-size:1.1rem;">Sign in</h2>
@@ -116,11 +136,10 @@
 
     <div id="dash" class="hidden">
       <div class="toolbar">
-        <div class="row" style="flex:0;">
-          <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text);">
-            <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
-            Upcoming only (due in future)
-          </label>
+        <div class="tabs" id="navTabs">
+          <button type="button" class="tab active" data-tab="users">Users</button>
+          <button type="button" class="tab" data-tab="support">Support</button>
+          <button type="button" class="tab" data-tab="drops">Drops</button>
         </div>
         <div class="row" style="flex:0;">
           <button class="btn-ghost" id="refreshBtn">Refresh</button>
@@ -128,26 +147,178 @@
         </div>
       </div>
 
-      <div class="card">
-        <p id="stats" class="sub" style="margin:0 0 12px;"></p>
-        <div style="overflow-x:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>User</th>
-                <th>Due (UTC)</th>
-                <th>Countdown</th>
-                <th>%</th>
-                <th>Min $</th>
-                <th>Max $</th>
-                <th>Band</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="dropRows"></tbody>
-          </table>
+      <div id="panelUsers">
+        <div class="card">
+          <div class="row">
+            <div style="flex:2;">
+              <label>Search by email</label>
+              <input id="userSearch" type="search" placeholder="user@example.com" />
+            </div>
+            <div style="flex:0;align-self:flex-end;">
+              <button class="btn-primary" id="searchUsersBtn" style="margin-bottom:12px;">Search</button>
+            </div>
+          </div>
+          <p id="userStats" class="sub" style="margin:0 0 12px;"></p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Cash</th>
+                  <th>Airfarming</th>
+                  <th>Drops</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="userRows"></tbody>
+            </table>
+          </div>
+          <p id="usersErr" class="err hidden"></p>
         </div>
-        <p id="loadErr" class="err hidden"></p>
+      </div>
+
+      <div id="panelSupport" class="hidden">
+        <div class="card">
+          <div class="row">
+            <div>
+              <label>Search user email</label>
+              <input id="ticketSearch" type="search" placeholder="user@example.com" />
+            </div>
+            <div>
+              <label>Status</label>
+              <select id="ticketStatus">
+                <option value="">All</option>
+                <option value="under_review">Under review</option>
+                <option value="in_progress">In progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+            <div>
+              <label>Category</label>
+              <select id="ticketCategory">
+                <option value="">All</option>
+                <option value="general">General</option>
+                <option value="withdraw">Withdraw</option>
+                <option value="deposit">Deposit</option>
+                <option value="daily_earning">Daily earning</option>
+                <option value="transfer">Transfer</option>
+              </select>
+            </div>
+            <div style="flex:0;align-self:flex-end;">
+              <button class="btn-primary" id="searchTicketsBtn" style="margin-bottom:12px;">Search</button>
+            </div>
+          </div>
+          <p id="ticketStats" class="sub" style="margin:0 0 12px;"></p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="ticketRows"></tbody>
+            </table>
+          </div>
+          <p id="ticketsErr" class="err hidden"></p>
+        </div>
+      </div>
+
+      <div id="panelDrops" class="hidden">
+        <div class="card">
+          <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text);margin-bottom:12px;">
+            <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
+            Upcoming only (due in future)
+          </label>
+          <p id="stats" class="sub" style="margin:0 0 12px;"></p>
+          <div style="overflow-x:auto;">
+            <table>
+              <thead>
+                <tr>
+                  <th>User</th>
+                  <th>Due (UTC)</th>
+                  <th>Countdown</th>
+                  <th>%</th>
+                  <th>Min $</th>
+                  <th>Max $</th>
+                  <th>Band</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="dropRows"></tbody>
+            </table>
+          </div>
+          <p id="loadErr" class="err hidden"></p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="userModal" class="modal-backdrop hidden">
+    <div class="card modal modal-wide">
+      <h2 id="userModalTitle" style="margin:0 0 8px;font-size:1.1rem;">User</h2>
+      <p id="userModalMeta" class="sub" style="margin:0 0 12px;"></p>
+      <div class="stat-grid" id="userStatsGrid"></div>
+      <div class="row" style="margin-bottom:16px;">
+        <button class="btn-warn" id="pauseDropsBtn">Pause drops</button>
+        <button class="btn-ghost hidden" id="resumeDropsBtn">Resume drops</button>
+      </div>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Move cash → airfarming</h3>
+      <div class="row" style="margin-bottom:16px;">
+        <div style="flex:2;">
+          <label>Amount (USD)</label>
+          <input id="moveAmount" type="number" step="0.01" min="0.01" placeholder="0.00" />
+        </div>
+        <div style="flex:0;align-self:flex-end;">
+          <button class="btn-primary" id="moveToAfBtn" style="margin-bottom:12px;">Move funds</button>
+        </div>
+      </div>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Transactions (latest 50)</h3>
+      <div style="overflow-x:auto;max-height:220px;">
+        <table>
+          <thead>
+            <tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr>
+          </thead>
+          <tbody id="userTxRows"></tbody>
+        </table>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Scheduled drops</h3>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr><th>#</th><th>Due</th><th>%</th><th>Range</th></tr>
+          </thead>
+          <tbody id="userDropRows"></tbody>
+        </table>
+      </div>
+      <p id="userModalErr" class="err hidden"></p>
+      <div style="margin-top:16px;">
+        <button class="btn-ghost" id="closeUserBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ticketModal" class="modal-backdrop hidden">
+    <div class="card modal modal-wide">
+      <h2 id="ticketModalTitle" style="margin:0 0 8px;font-size:1.1rem;">Support ticket</h2>
+      <p id="ticketModalMeta" class="sub" style="margin:0 0 12px;"></p>
+      <label>Status</label>
+      <select id="ticketStatusEdit">
+        <option value="under_review">Under review</option>
+        <option value="in_progress">In progress</option>
+        <option value="resolved">Resolved</option>
+        <option value="closed">Closed</option>
+      </select>
+      <h3 style="font-size:0.95rem;margin:12px 0 8px;">Details</h3>
+      <pre id="ticketPayload" style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:0.75rem;overflow:auto;max-height:280px;color:var(--text);white-space:pre-wrap;"></pre>
+      <p id="ticketModalErr" class="err hidden"></p>
+      <div class="row" style="margin-top:16px;">
+        <button class="btn-primary" id="saveTicketBtn">Update status</button>
+        <button class="btn-ghost" id="closeTicketBtn">Close</button>
       </div>
     </div>
   </div>
@@ -185,8 +356,15 @@
   <script>
     const TOKEN_KEY = 'ema_admin_token';
     let drops = [];
+    let users = [];
+    let tickets = [];
     let editingId = null;
     let maxPercent = 57.9;
+    let activeTab = 'users';
+    let viewingUserId = null;
+    let viewingUserDetail = null;
+    let viewingTicketId = null;
+    let viewingTicket = null;
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -197,6 +375,10 @@
         if (!res.ok) throw new Error(data.message || res.statusText);
         return data;
       });
+    }
+
+    function fmtMoney(n) {
+      return '$' + Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     function fmtCountdown(sec) {
@@ -212,13 +394,233 @@
       return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
     }
 
-    function renderTable() {
+    function escapeHtml(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function setTab(tab) {
+      activeTab = tab;
+      document.querySelectorAll('.tab').forEach((el) => {
+        el.classList.toggle('active', el.getAttribute('data-tab') === tab);
+      });
+      document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
+      document.getElementById('panelSupport').classList.toggle('hidden', tab !== 'support');
+      document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
+    }
+
+    function renderUsersTable() {
+      const tbody = document.getElementById('userRows');
+      tbody.innerHTML = '';
+      users.forEach((u) => {
+        const tr = document.createElement('tr');
+        const pausePill = u.dropsPaused
+          ? '<span class="pill pill-paused">paused</span>'
+          : '<span class="pill pill-ok">active</span>';
+        tr.innerHTML =
+          '<td>' + escapeHtml(u.email) + '<br><span style="color:var(--muted);font-size:0.7rem;">' + escapeHtml(u.id.slice(0, 8)) + '…</span></td>' +
+          '<td>' + fmtMoney(u.cashBalance) + '</td>' +
+          '<td>' + fmtMoney(u.airfarmingBalance) + '</td>' +
+          '<td>' + pausePill + '</td>' +
+          '<td><button class="btn-ghost" data-user="' + u.id + '">View</button></td>';
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button[data-user]').forEach((btn) => {
+        btn.onclick = () => openUser(btn.getAttribute('data-user'));
+      });
+      document.getElementById('userStats').textContent = users.length + ' user(s)';
+    }
+
+    async function loadUsers() {
+      document.getElementById('usersErr').classList.add('hidden');
+      const q = document.getElementById('userSearch').value.trim();
+      const data = await api('/admin/api/users?q=' + encodeURIComponent(q));
+      users = data.users || [];
+      renderUsersTable();
+    }
+
+    function updatePauseButtons() {
+      const paused = Boolean(viewingUserDetail?.airfarming?.dropsPaused);
+      document.getElementById('pauseDropsBtn').classList.toggle('hidden', paused);
+      document.getElementById('resumeDropsBtn').classList.toggle('hidden', !paused);
+    }
+
+    function renderUserDetail(d) {
+      viewingUserDetail = d;
+      document.getElementById('userModalTitle').textContent = d.user.email;
+      document.getElementById('userModalMeta').textContent =
+        'Joined ' + new Date(d.user.createdAt).toLocaleString() +
+        (d.user.transferCode ? ' · Transfer ' + d.user.transferCode : '');
+      const af = d.airfarming;
+      document.getElementById('userStatsGrid').innerHTML =
+        '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash wallet</div></div>' +
+        '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
+        '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
+        '<div class="stat"><div class="val">' + (af?.autoFundEnabled ? 'On' : 'Off') + '</div><div class="lbl">Auto-fund</div></div>';
+      updatePauseButtons();
+
+      const txBody = document.getElementById('userTxRows');
+      txBody.innerHTML = '';
+      (d.transactions || []).forEach((t) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(t.type) + '</td>' +
+          '<td>' + fmtMoney(t.amount) + '</td>' +
+          '<td>' + escapeHtml(t.status) + '</td>' +
+          '<td>' + new Date(t.createdAt).toLocaleString() + '</td>';
+        txBody.appendChild(tr);
+      });
+      if (!(d.transactions || []).length) {
+        txBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No transactions</td></tr>';
+      }
+
+      const dropBody = document.getElementById('userDropRows');
+      dropBody.innerHTML = '';
+      (d.scheduledDrops || []).forEach((drop) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + drop.dropIndex + '</td>' +
+          '<td>' + new Date(drop.dueAt).toLocaleString() + '</td>' +
+          '<td>' + drop.percent + '%</td>' +
+          '<td>$' + drop.minBalance + ' – $' + drop.maxBalance + '</td>';
+        dropBody.appendChild(tr);
+      });
+      if (!(d.scheduledDrops || []).length) {
+        dropBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No scheduled drops</td></tr>';
+      }
+    }
+
+    async function openUser(id) {
+      document.getElementById('userModalErr').classList.add('hidden');
+      viewingUserId = id;
+      const d = await api('/admin/api/users/' + id);
+      renderUserDetail(d);
+      document.getElementById('userModal').classList.remove('hidden');
+    }
+
+    async function moveToAirfarming() {
+      document.getElementById('userModalErr').classList.add('hidden');
+      const amount = Number(document.getElementById('moveAmount').value);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        document.getElementById('userModalErr').textContent = 'Enter a valid amount';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/wallets/move-to-airfarming', {
+          method: 'POST',
+          body: JSON.stringify({ amount }),
+        });
+        document.getElementById('moveAmount').value = '';
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        const u = users.find((x) => x.id === viewingUserId);
+        if (u) {
+          u.cashBalance = d.cashBalance;
+          u.airfarmingBalance = d.airfarmingBalance;
+        }
+        renderUsersTable();
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    function renderTicketsTable() {
+      const tbody = document.getElementById('ticketRows');
+      tbody.innerHTML = '';
+      tickets.forEach((t) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(t.userEmail) + '</td>' +
+          '<td>' + escapeHtml(t.category.replace('_', ' ')) + '</td>' +
+          '<td><span class="pill">' + escapeHtml(t.status.replace('_', ' ')) + '</span></td>' +
+          '<td>' + new Date(t.createdAt).toLocaleString() + '</td>' +
+          '<td><button class="btn-ghost" data-ticket="' + t.id + '">View</button></td>';
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button[data-ticket]').forEach((btn) => {
+        btn.onclick = () => openTicket(btn.getAttribute('data-ticket'));
+      });
+      document.getElementById('ticketStats').textContent = tickets.length + ' ticket(s)';
+    }
+
+    async function loadTickets() {
+      document.getElementById('ticketsErr').classList.add('hidden');
+      const q = document.getElementById('ticketSearch').value.trim();
+      const status = document.getElementById('ticketStatus').value;
+      const category = document.getElementById('ticketCategory').value;
+      let url = '/admin/api/support/tickets?';
+      if (q) url += 'q=' + encodeURIComponent(q) + '&';
+      if (status) url += 'status=' + encodeURIComponent(status) + '&';
+      if (category) url += 'category=' + encodeURIComponent(category) + '&';
+      const data = await api(url);
+      tickets = data.tickets || [];
+      renderTicketsTable();
+    }
+
+    function renderTicketDetail(t) {
+      viewingTicket = t;
+      document.getElementById('ticketModalTitle').textContent = t.category.replace('_', ' ') + ' · ' + t.status.replace('_', ' ');
+      document.getElementById('ticketModalMeta').textContent =
+        t.userEmail + ' · ' + new Date(t.createdAt).toLocaleString() +
+        (t.relatedActivityId ? ' · activity ' + t.relatedActivityId : '');
+      document.getElementById('ticketStatusEdit').value = t.status;
+      document.getElementById('ticketPayload').textContent = JSON.stringify(t.payload, null, 2);
+    }
+
+    async function openTicket(id) {
+      document.getElementById('ticketModalErr').classList.add('hidden');
+      viewingTicketId = id;
+      const data = await api('/admin/api/support/tickets/' + id);
+      renderTicketDetail(data.ticket);
+      document.getElementById('ticketModal').classList.remove('hidden');
+    }
+
+    async function saveTicketStatus() {
+      document.getElementById('ticketModalErr').classList.add('hidden');
+      try {
+        const status = document.getElementById('ticketStatusEdit').value;
+        const data = await api('/admin/api/support/tickets/' + viewingTicketId, {
+          method: 'PATCH',
+          body: JSON.stringify({ status }),
+        });
+        renderTicketDetail(data.ticket);
+        const idx = tickets.findIndex((x) => x.id === viewingTicketId);
+        if (idx >= 0) tickets[idx] = data.ticket;
+        renderTicketsTable();
+      } catch (e) {
+        document.getElementById('ticketModalErr').textContent = e.message;
+        document.getElementById('ticketModalErr').classList.remove('hidden');
+      }
+    }
+
+    async function setDropsPaused(paused) {
+      document.getElementById('userModalErr').classList.add('hidden');
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/airfarming', {
+          method: 'PATCH',
+          body: JSON.stringify({ dropsPaused: paused }),
+        });
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        const u = users.find((x) => x.id === viewingUserId);
+        if (u) u.dropsPaused = paused;
+        renderUsersTable();
+        if (activeTab === 'drops') await loadDrops();
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    function renderDropsTable() {
       const tbody = document.getElementById('dropRows');
       tbody.innerHTML = '';
       drops.forEach((d) => {
         const tr = document.createElement('tr');
+        const paused = d.dropsPaused ? ' <span class="pill pill-paused">paused</span>' : '';
         tr.innerHTML =
-          '<td>' + escapeHtml(d.userEmail) + '<br><span style="color:var(--muted);font-size:0.7rem;">' + d.dropIndex + ' · wk ' + d.weekStart + '</span></td>' +
+          '<td>' + escapeHtml(d.userEmail) + paused + '<br><span style="color:var(--muted);font-size:0.7rem;">' + d.dropIndex + ' · wk ' + d.weekStart + '</span></td>' +
           '<td>' + new Date(d.dueAt).toLocaleString() + '</td>' +
           '<td>' + fmtCountdown(d.secondsRemaining) + '</td>' +
           '<td><strong>' + d.percent + '%</strong>' + (d.percentLocked ? ' <span class="pill">locked</span>' : '') + '</td>' +
@@ -234,10 +636,6 @@
       document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max percent ' + maxPercent + '%';
     }
 
-    function escapeHtml(s) {
-      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    }
-
     async function loadDrops() {
       document.getElementById('loadErr').classList.add('hidden');
       const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
@@ -245,7 +643,7 @@
       drops = data.drops || [];
       maxPercent = data.maxPercent || 57.9;
       document.getElementById('maxPct').textContent = maxPercent;
-      renderTable();
+      renderDropsTable();
     }
 
     function openEdit(id) {
@@ -283,7 +681,7 @@
         });
         const idx = drops.findIndex((x) => x.id === editingId);
         if (idx >= 0) drops[idx] = data.drop;
-        renderTable();
+        renderDropsTable();
         closeEdit();
       } catch (e) {
         document.getElementById('editErr').textContent = e.message;
@@ -294,6 +692,37 @@
     function showDash() {
       document.getElementById('loginCard').classList.add('hidden');
       document.getElementById('dash').classList.remove('hidden');
+    }
+
+    async function refreshActive() {
+      if (activeTab === 'users') await loadUsers();
+      else if (activeTab === 'support') await loadTickets();
+      else await loadDrops();
+    }
+
+    document.querySelectorAll('.tab').forEach((el) => {
+      el.onclick = () => {
+        const tab = el.getAttribute('data-tab');
+        setTab(tab);
+        if (tab === 'users' && !users.length) loadUsers().catch(showUsersErr);
+        if (tab === 'support' && !tickets.length) loadTickets().catch(showTicketsErr);
+        if (tab === 'drops' && !drops.length) loadDrops().catch(showDropsErr);
+      };
+    });
+
+    function showUsersErr(e) {
+      document.getElementById('usersErr').textContent = e.message;
+      document.getElementById('usersErr').classList.remove('hidden');
+    }
+
+    function showDropsErr(e) {
+      document.getElementById('loadErr').textContent = e.message;
+      document.getElementById('loadErr').classList.remove('hidden');
+    }
+
+    function showTicketsErr(e) {
+      document.getElementById('ticketsErr').textContent = e.message;
+      document.getElementById('ticketsErr').classList.remove('hidden');
     }
 
     document.getElementById('loginBtn').onclick = async () => {
@@ -308,7 +737,8 @@
         });
         localStorage.setItem(TOKEN_KEY, data.token);
         showDash();
-        await loadDrops();
+        setTab('users');
+        await loadUsers();
       } catch (e) {
         document.getElementById('loginErr').textContent = e.message;
         document.getElementById('loginErr').classList.remove('hidden');
@@ -320,19 +750,44 @@
       location.reload();
     };
 
-    document.getElementById('refreshBtn').onclick = () => loadDrops().catch((e) => {
-      document.getElementById('loadErr').textContent = e.message;
-      document.getElementById('loadErr').classList.remove('hidden');
+    document.getElementById('refreshBtn').onclick = () => refreshActive().catch((e) => {
+      if (activeTab === 'users') showUsersErr(e);
+      else if (activeTab === 'support') showTicketsErr(e);
+      else showDropsErr(e);
     });
 
-    document.getElementById('upcomingOnly').onchange = () => loadDrops().catch(() => {});
+    document.getElementById('searchUsersBtn').onclick = () => loadUsers().catch(showUsersErr);
+    document.getElementById('userSearch').onkeydown = (e) => {
+      if (e.key === 'Enter') loadUsers().catch(showUsersErr);
+    };
 
+    document.getElementById('searchTicketsBtn').onclick = () => loadTickets().catch(showTicketsErr);
+    document.getElementById('ticketSearch').onkeydown = (e) => {
+      if (e.key === 'Enter') loadTickets().catch(showTicketsErr);
+    };
+    document.getElementById('upcomingOnly').onchange = () => loadDrops().catch(showDropsErr);
     document.getElementById('saveBtn').onclick = saveEdit;
     document.getElementById('cancelBtn').onclick = closeEdit;
+    document.getElementById('closeUserBtn').onclick = () => {
+      viewingUserId = null;
+      document.getElementById('userModal').classList.add('hidden');
+    };
+    document.getElementById('pauseDropsBtn').onclick = () => setDropsPaused(true);
+    document.getElementById('resumeDropsBtn').onclick = () => setDropsPaused(false);
+    document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
+    document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
+    document.getElementById('closeTicketBtn').onclick = () => {
+      viewingTicketId = null;
+      document.getElementById('ticketModal').classList.add('hidden');
+    };
 
     if (localStorage.getItem(TOKEN_KEY)) {
       api('/admin/api/me')
-        .then(() => { showDash(); return loadDrops(); })
+        .then(() => {
+          showDash();
+          setTab('users');
+          return loadUsers();
+        })
         .catch(() => localStorage.removeItem(TOKEN_KEY));
     }
   </script>

@@ -13,7 +13,11 @@ import { usePolling } from '../hooks/usePolling';
 import { useTransactionFeed } from '../hooks/useTransactionFeed';
 import { useTradingStore } from '../store/useTradingStore';
 import { palette } from '../theme/colors';
-import { navigateToTransactionDetail, navigateToTransactionHistory } from '../utils/navigationHelpers';
+import {
+  navigateToSupport,
+  navigateToTransactionDetail,
+  navigateToTransactionHistory,
+} from '../utils/navigationHelpers';
 import { aggregateBalancesForDisplay } from '../utils/walletDisplay';
 import { filterActivityToday } from '../utils/walletActivity';
 
@@ -68,6 +72,19 @@ export function HomeScreen() {
       <Text style={styles.sub}>Wallet overview</Text>
 
       <TwoFactorReminderCard />
+
+      <Card style={styles.supportCard}>
+        <View style={styles.supportRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.supportTitle}>Help & support</Text>
+            <Text style={styles.supportSub}>
+              Submit a request about withdrawals, deposits, airfarming, or anything else.
+            </Text>
+          </View>
+          <Ionicons name='chatbubbles-outline' size={28} color={palette.primary} />
+        </View>
+        <PrimaryButton label='Contact support' onPress={() => navigateToSupport(navigation)} style={{ marginTop: 12 }} />
+      </Card>
 
       {noticeVisible ? (
         <Card style={styles.disclaimerCard}>
@@ -171,6 +188,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   greeting: { color: palette.textPrimary, fontSize: 22, fontWeight: '700', marginBottom: 4 },
   sub: { color: palette.textSecondary, marginBottom: 14 },
+  supportCard: { marginBottom: 12, borderColor: palette.border },
+  supportRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  supportTitle: { color: palette.textPrimary, fontSize: 16, fontWeight: '700' },
+  supportSub: { color: palette.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 4 },
   disclaimerCard: { borderColor: '#b45309', backgroundColor: '#1c1917' },
   disclaimerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   disclaimerTitle: { color: '#fbbf24', fontSize: 15, fontWeight: '700', flex: 1 },

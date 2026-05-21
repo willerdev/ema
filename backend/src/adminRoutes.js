@@ -4,10 +4,34 @@ const {
   getAirfarmingDropById,
   updateAirfarmingDrop,
   getUsersByIds,
+  listUsersAdmin,
+  getAdminUserDetail,
+  updateAirfarmingDropsPaused,
+  getAirfarmingDropsPausedByUserIds,
+  adminMoveCashToAirfarming,
+  listSupportTicketsAdmin,
+  getSupportTicketById,
+  updateSupportTicketStatus,
   isMissingTableError,
 } = require('./db');
 const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
 const { clampAirfarmingPercent, MAX_AIRFARMING_PERCENT } = require('./airfarmingDrops');
+
+const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
+
+function ticketToAdminRow(row, emailByUserId) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    userEmail: emailByUserId.get(row.user_id) || '—',
+    category: row.category,
+    status: row.status,
+    payload: row.payload || {},
+    relatedActivityId: row.related_activity_id || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
 
 function adminCredentials() {
   return {
@@ -16,13 +40,14 @@ function adminCredentials() {
   };
 }
 
-function dropToAdminRow(row, emailByUserId) {
+function dropToAdminRow(row, emailByUserId, pausedByUserId) {
   const dueMs = new Date(row.due_at).getTime();
   const secondsRemaining = Math.max(0, Math.floor((dueMs - Date.now()) / 1000));
   return {
     id: row.id,
     userId: row.user_id,
     userEmail: emailByUserId.get(row.user_id) || '—',
+    dropsPaused: Boolean(pausedByUserId?.get(row.user_id)),
     weekStart: row.week_start,
     dropIndex: Number(row.drop_index),
     dueAt: row.due_at,
@@ -89,13 +114,140 @@ function registerAdminRoutes(app) {
     return res.json({ username: req.adminUser });
   });
 
+  app.get('/admin/api/users', adminAuthMiddleware, async (req, res) => {
+    try {
+      const search = String(req.query.q || req.query.search || '').trim();
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+      const users = await listUsersAdmin({ limit, search });
+      return res.json({ users, count: users.length });
+    } catch (e) {
+      console.error('[admin/users]', e);
+      return res.status(500).json({ message: 'Failed to load users' });
+    }
+  });
+
+  app.get('/admin/api/users/:id', adminAuthMiddleware, async (req, res) => {
+    try {
+      const detail = await getAdminUserDetail(req.params.id);
+      if (!detail) return res.status(404).json({ message: 'User not found' });
+      return res.json(detail);
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Database schema not ready. Run Supabase migrations.' });
+      }
+      console.error('[admin/users/:id]', e);
+      return res.status(500).json({ message: 'Failed to load user' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/wallets/move-to-airfarming', adminAuthMiddleware, async (req, res) => {
+    try {
+      const detail = await getAdminUserDetail(req.params.id);
+      if (!detail) return res.status(404).json({ message: 'User not found' });
+      const amount = Number(req.body?.amount);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return res.status(400).json({ message: 'Valid amount is required' });
+      }
+      const result = await adminMoveCashToAirfarming(req.params.id, amount);
+      return res.json({
+        userId: req.params.id,
+        amount: result.amount,
+        cashBalance: result.cashWallet,
+        airfarmingBalance: result.airfarmingBalance,
+      });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Wallet schema not ready. Run migrations.' });
+      }
+      console.error('[admin/users/move-to-airfarming]', e);
+      return res.status(500).json({ message: 'Failed to move funds' });
+    }
+  });
+
+  app.patch('/admin/api/users/:id/airfarming', adminAuthMiddleware, async (req, res) => {
+    try {
+      const detail = await getAdminUserDetail(req.params.id);
+      if (!detail) return res.status(404).json({ message: 'User not found' });
+      if (req.body?.dropsPaused === undefined) {
+        return res.status(400).json({ message: 'dropsPaused is required' });
+      }
+      const state = await updateAirfarmingDropsPaused(req.params.id, req.body.dropsPaused);
+      return res.json({
+        userId: req.params.id,
+        dropsPaused: Boolean(state.drops_paused),
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming schema not ready. Run migrations.' });
+      }
+      console.error('[admin/users/airfarming]', e);
+      return res.status(500).json({ message: 'Failed to update airfarming settings' });
+    }
+  });
+
+  app.get('/admin/api/support/tickets', adminAuthMiddleware, async (req, res) => {
+    try {
+      const status = String(req.query.status || '').trim() || undefined;
+      const category = String(req.query.category || '').trim() || undefined;
+      const search = String(req.query.q || req.query.search || '').trim() || undefined;
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+      const rows = await listSupportTicketsAdmin({ limit, status, category, search });
+      const users = await getUsersByIds(rows.map((r) => r.user_id));
+      const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
+      const tickets = rows.map((r) => ticketToAdminRow(r, emailByUserId));
+      return res.json({ tickets, count: tickets.length });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Support schema not ready. Run migrations.' });
+      }
+      console.error('[admin/support/tickets]', e);
+      return res.status(500).json({ message: 'Failed to load support tickets' });
+    }
+  });
+
+  app.get('/admin/api/support/tickets/:id', adminAuthMiddleware, async (req, res) => {
+    try {
+      const row = await getSupportTicketById(req.params.id);
+      if (!row) return res.status(404).json({ message: 'Ticket not found' });
+      const users = await getUsersByIds([row.user_id]);
+      const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
+      return res.json({ ticket: ticketToAdminRow(row, emailByUserId) });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: 'Support schema not ready.' });
+      console.error('[admin/support/tickets/:id]', e);
+      return res.status(500).json({ message: 'Failed to load ticket' });
+    }
+  });
+
+  app.patch('/admin/api/support/tickets/:id', adminAuthMiddleware, async (req, res) => {
+    try {
+      const existing = await getSupportTicketById(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Ticket not found' });
+      const status = String(req.body?.status || '').trim();
+      if (!SUPPORT_STATUSES.has(status)) {
+        return res.status(400).json({ message: 'Invalid status' });
+      }
+      const updated = await updateSupportTicketStatus(existing.id, status);
+      const users = await getUsersByIds([updated.user_id]);
+      const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
+      return res.json({ ticket: ticketToAdminRow(updated, emailByUserId) });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: 'Support schema not ready.' });
+      console.error('[admin/support/tickets/patch]', e);
+      return res.status(500).json({ message: 'Failed to update ticket' });
+    }
+  });
+
   app.get('/admin/api/airfarming/drops', adminAuthMiddleware, async (req, res) => {
     try {
       const upcomingOnly = String(req.query.upcoming || '1') !== '0';
       const rows = await listScheduledAirfarmingDropsAdmin({ upcomingOnly, limit: 500 });
-      const users = await getUsersByIds(rows.map((r) => r.user_id));
+      const userIds = rows.map((r) => r.user_id);
+      const users = await getUsersByIds(userIds);
       const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
-      const drops = rows.map((r) => dropToAdminRow(r, emailByUserId));
+      const pausedByUserId = await getAirfarmingDropsPausedByUserIds(userIds);
+      const drops = rows.map((r) => dropToAdminRow(r, emailByUserId, pausedByUserId));
       return res.json({ drops, count: drops.length, maxPercent: MAX_AIRFARMING_PERCENT });
     } catch (e) {
       if (isMissingTableError(e)) {
@@ -126,7 +278,8 @@ function registerAdminRoutes(app) {
       const updated = await updateAirfarmingDrop(existing.id, patch);
       const users = await getUsersByIds([updated.user_id]);
       const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
-      return res.json({ drop: dropToAdminRow(updated, emailByUserId) });
+      const pausedByUserId = await getAirfarmingDropsPausedByUserIds([updated.user_id]);
+      return res.json({ drop: dropToAdminRow(updated, emailByUserId, pausedByUserId) });
     } catch (e) {
       if (isMissingTableError(e)) {
         return res.status(503).json({ message: 'Airfarming drops schema not ready.' });

@@ -25,6 +25,7 @@ type Route = RouteProp<RootStackParamList, 'Support'>;
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Support'>;
 
 const CATEGORIES: { key: SupportCategory; title: string; subtitle: string }[] = [
+  { key: 'general', title: 'General question', subtitle: 'Account, app, or anything else' },
   { key: 'withdraw', title: 'Withdrawal issue', subtitle: 'Crypto or wallet payout problems' },
   { key: 'deposit', title: 'Deposit issue', subtitle: 'Payment not credited or wrong amount' },
   { key: 'daily_earning', title: 'Daily earning issue', subtitle: 'Airfarming, contracts, or yields' },
@@ -66,6 +67,8 @@ export function SupportScreen() {
   const [dateInvested, setDateInvested] = useState('');
   const [additionalInfo, setAdditionalInfo] = useState('');
   const [recipientTransferId, setRecipientTransferId] = useState('');
+  const [subject, setSubject] = useState('');
+  const [message, setMessage] = useState('');
   const [relatedActivityId, setRelatedActivityId] = useState<string | null>(null);
 
   const loadMeta = useCallback(async () => {
@@ -146,6 +149,8 @@ export function SupportScreen() {
         recipientTransferId: recipientTransferId.trim(),
         amount: Number(amount),
       };
+    } else if (category === 'general') {
+      payload = { subject: subject.trim(), message: message.trim() };
     }
 
     setSubmitting(true);
@@ -310,6 +315,28 @@ export function SupportScreen() {
                 value={additionalInfo}
                 onChangeText={setAdditionalInfo}
                 placeholder='Product, expected yield, anything else we should know'
+                placeholderTextColor={palette.textSecondary}
+                multiline
+              />
+            </>
+          ) : null}
+
+          {category === 'general' ? (
+            <>
+              <Text style={styles.fieldLabel}>Subject</Text>
+              <TextInput
+                style={inputStyle}
+                value={subject}
+                onChangeText={setSubject}
+                placeholder='Brief summary'
+                placeholderTextColor={palette.textSecondary}
+              />
+              <Text style={styles.fieldLabel}>Message</Text>
+              <TextInput
+                style={[inputStyle, styles.multiline]}
+                value={message}
+                onChangeText={setMessage}
+                placeholder='Describe your issue or question'
                 placeholderTextColor={palette.textSecondary}
                 multiline
               />

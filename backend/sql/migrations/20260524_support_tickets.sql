@@ -1,7 +1,7 @@
 create table if not exists public.support_tickets (
   id uuid primary key,
   user_id uuid not null references public.users (id) on delete cascade,
-  category text not null check (category in ('withdraw', 'deposit', 'daily_earning', 'transfer')),
+  category text not null check (category in ('withdraw', 'deposit', 'daily_earning', 'transfer', 'general')),
   status text not null default 'under_review'
     check (status in ('under_review', 'in_progress', 'resolved', 'closed')),
   payload jsonb not null default '{}',
