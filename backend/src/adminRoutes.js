@@ -21,9 +21,18 @@ const {
   insertGlobalDropPause,
   endGlobalDropPauseEarly,
   isMissingTableError,
+  listAirfarmingDropBandsAdmin,
+  updateAirfarmingDropBand,
+  getAirfarmingPlatformSettings,
+  updateAirfarmingPlatformSettings,
 } = require('./db');
 const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
-const { clampAirfarmingPercent, MAX_AIRFARMING_PERCENT } = require('./airfarmingDrops');
+const {
+  clampAirfarmingPercent,
+  MAX_AIRFARMING_PERCENT,
+  clearAirfarmingSettingsCache,
+  getEffectiveCaps,
+} = require('./airfarmingDrops');
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 
 const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
@@ -70,14 +79,37 @@ function dropToAdminRow(row, emailByUserId, pausedByUserId) {
   };
 }
 
-function validateDropPatch(body) {
+function bandToAdminRow(row) {
+  return {
+    bandIndex: Number(row.band_index),
+    label: row.label,
+    balanceHint: row.balance_hint,
+    percent: Number(row.percent),
+    minBalance: Number(row.min_balance ?? 0),
+    maxBalance: Number(row.max_balance ?? 0),
+    active: Boolean(row.active),
+    updatedAt: row.updated_at,
+  };
+}
+
+function settingsToAdminRow(row) {
+  return {
+    maxPercent: Number(row.max_percent),
+    maxProfitPerDrop: Number(row.max_profit_per_drop),
+    updatedAt: row.updated_at,
+  };
+}
+
+async function validateDropPatch(body) {
+  const caps = await getEffectiveCaps();
+  const maxPct = caps.maxPercent;
   const patch = {};
   if (body.percent !== undefined) {
     const p = Number(body.percent);
-    if (!Number.isFinite(p) || p < 0.01 || p > MAX_AIRFARMING_PERCENT) {
-      return { error: `Percent must be between 0.01 and ${MAX_AIRFARMING_PERCENT}` };
+    if (!Number.isFinite(p) || p < 0.01 || p > maxPct) {
+      return { error: `Percent must be between 0.01 and ${maxPct}` };
     }
-    patch.percent = clampAirfarmingPercent(p);
+    patch.percent = clampAirfarmingPercent(p, maxPct);
     patch.percent_locked = true;
   }
   if (body.minBalance !== undefined) {
@@ -397,6 +429,115 @@ function registerAdminRoutes(app) {
     }
   });
 
+  app.get('/admin/api/airfarming/settings', adminAuthMiddleware, async (_req, res) => {
+    try {
+      const [settings, bands] = await Promise.all([
+        getAirfarmingPlatformSettings(),
+        listAirfarmingDropBandsAdmin(),
+      ]);
+      const caps = await getEffectiveCaps();
+      return res.json({
+        settings: settingsToAdminRow(settings),
+        bands: bands.map(bandToAdminRow),
+        defaults: { maxPercent: MAX_AIRFARMING_PERCENT, maxProfitPerDrop: 5000 },
+        effectiveCaps: caps,
+      });
+    } catch (e) {
+      console.error('[admin/airfarming/settings GET]', e);
+      return res.status(500).json({ message: e.message || 'Failed to load drop settings' });
+    }
+  });
+
+  app.patch('/admin/api/airfarming/settings', adminAuthMiddleware, async (req, res) => {
+    try {
+      const body = req.body || {};
+      const maxPercent = body.maxPercent !== undefined ? Number(body.maxPercent) : undefined;
+      const maxProfitPerDrop =
+        body.maxProfitPerDrop !== undefined ? Number(body.maxProfitPerDrop) : undefined;
+
+      if (maxPercent !== undefined) {
+        if (!Number.isFinite(maxPercent) || maxPercent < 0.01 || maxPercent > 100) {
+          return res.status(400).json({ message: 'maxPercent must be between 0.01 and 100' });
+        }
+      }
+      if (maxProfitPerDrop !== undefined) {
+        if (!Number.isFinite(maxProfitPerDrop) || maxProfitPerDrop <= 0) {
+          return res.status(400).json({ message: 'maxProfitPerDrop must be greater than 0' });
+        }
+      }
+
+      const settings = await updateAirfarmingPlatformSettings({
+        maxPercent: maxPercent !== undefined ? Math.round(maxPercent * 100) / 100 : undefined,
+        maxProfitPerDrop:
+          maxProfitPerDrop !== undefined ? Math.round(maxProfitPerDrop * 100) / 100 : undefined,
+      });
+      clearAirfarmingSettingsCache();
+      return res.json({ settings: settingsToAdminRow(settings) });
+    } catch (e) {
+      console.error('[admin/airfarming/settings PATCH]', e);
+      return res.status(500).json({ message: e.message || 'Failed to save platform caps' });
+    }
+  });
+
+  app.patch('/admin/api/airfarming/bands/:index', adminAuthMiddleware, async (req, res) => {
+    try {
+      const bandIndex = Number(req.params.index);
+      if (!Number.isInteger(bandIndex) || bandIndex < 0 || bandIndex > 3) {
+        return res.status(400).json({ message: 'band index must be 0–3' });
+      }
+      const body = req.body || {};
+      const caps = await getEffectiveCaps();
+      const patch = {};
+
+      if (body.percent !== undefined) {
+        const p = Number(body.percent);
+        if (!Number.isFinite(p) || p < 0.01 || p > caps.maxPercent) {
+          return res.status(400).json({ message: `percent must be between 0.01 and ${caps.maxPercent}` });
+        }
+        patch.percent = clampAirfarmingPercent(p, caps.maxPercent);
+      }
+      if (body.minBalance !== undefined) {
+        const n = Number(body.minBalance);
+        if (!Number.isFinite(n) || n < 0) return res.status(400).json({ message: 'minBalance must be >= 0' });
+        patch.minBalance = Math.round(n * 100) / 100;
+      }
+      if (body.maxBalance !== undefined) {
+        const n = Number(body.maxBalance);
+        if (!Number.isFinite(n) || n < 0) return res.status(400).json({ message: 'maxBalance must be >= 0' });
+        patch.maxBalance = Math.round(n * 100) / 100;
+      }
+      if (body.label !== undefined) patch.label = body.label;
+      if (body.balanceHint !== undefined) patch.balanceHint = body.balanceHint;
+      if (body.active !== undefined) patch.active = body.active;
+
+      if (patch.minBalance != null && patch.maxBalance != null && patch.maxBalance < patch.minBalance) {
+        return res.status(400).json({ message: 'maxBalance must be >= minBalance' });
+      }
+
+      const existing = (await listAirfarmingDropBandsAdmin()).find((b) => Number(b.band_index) === bandIndex);
+      if (!existing) return res.status(404).json({ message: 'Band not found' });
+
+      const minBal =
+        patch.minBalance != null ? patch.minBalance : Number(existing.min_balance ?? existing.min ?? 0);
+      const maxBal =
+        patch.maxBalance != null ? patch.maxBalance : Number(existing.max_balance ?? existing.max ?? 0);
+      if (Number.isFinite(minBal) && Number.isFinite(maxBal) && maxBal < minBal) {
+        return res.status(400).json({ message: 'maxBalance must be >= minBalance' });
+      }
+
+      if (!Object.keys(patch).length) {
+        return res.status(400).json({ message: 'No valid fields to update' });
+      }
+
+      const updated = await updateAirfarmingDropBand(bandIndex, patch);
+      clearAirfarmingSettingsCache();
+      return res.json({ band: bandToAdminRow(updated) });
+    } catch (e) {
+      console.error('[admin/airfarming/bands PATCH]', e);
+      return res.status(500).json({ message: e.message || 'Failed to update band' });
+    }
+  });
+
   app.get('/admin/api/airfarming/drops', adminAuthMiddleware, async (req, res) => {
     try {
       const upcomingOnly = String(req.query.upcoming || '1') !== '0';
@@ -410,13 +551,15 @@ function registerAdminRoutes(app) {
         rows.length === 0
           ? 'No scheduled drops. If you expect data, run airfarming migrations in Supabase.'
           : undefined;
-      return res.json({ drops, count: drops.length, maxPercent: MAX_AIRFARMING_PERCENT, schemaNote });
+      const caps = await getEffectiveCaps();
+      return res.json({ drops, count: drops.length, maxPercent: caps.maxPercent, schemaNote });
     } catch (e) {
       if (isMissingTableError(e)) {
         return res.json({
           drops: [],
           count: 0,
           maxPercent: MAX_AIRFARMING_PERCENT,
+          maxProfitPerDrop: 5000,
           schemaNote: 'Airfarming drops table missing. Run backend/sql/migrations for airfarming_drops in Supabase.',
         });
       }
@@ -433,7 +576,7 @@ function registerAdminRoutes(app) {
         return res.status(400).json({ message: 'Only scheduled drops can be edited' });
       }
 
-      const { patch, error } = validateDropPatch(req.body || {});
+      const { patch, error } = await validateDropPatch(req.body || {});
       if (error) return res.status(400).json({ message: error });
 
       const minBal = patch.min_balance != null ? patch.min_balance : Number(existing.min_balance);

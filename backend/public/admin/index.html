@@ -504,6 +504,41 @@
 
         <div id="panelDrops" class="hidden">
           <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Drop requirements &amp; caps</h3>
+            <p class="hint" style="margin-bottom:12px;">Platform limits and per-tier balance windows for new scheduled drops. Existing scheduled drops keep their min/max until edited individually.</p>
+            <div class="row" style="margin-bottom:12px;">
+              <div>
+                <label>Max drop percent (%)</label>
+                <input id="capMaxPercent" type="number" step="0.01" min="0.01" max="100" />
+              </div>
+              <div>
+                <label>Max profit per drop (USD)</label>
+                <input id="capMaxProfit" type="number" step="0.01" min="0.01" />
+              </div>
+              <div style="flex:0;">
+                <button type="button" class="btn-primary" id="saveDropCapsBtn" style="width:auto;margin-bottom:16px;">Save caps</button>
+              </div>
+            </div>
+            <p id="dropCapsOk" class="hint hidden" style="color:var(--ok);"></p>
+            <p id="dropCapsErr" class="err hidden"></p>
+            <div style="overflow-x:auto;margin-bottom:8px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Tier</th>
+                    <th>Label</th>
+                    <th>Min $</th>
+                    <th>Max $</th>
+                    <th>%</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="bandRows"></tbody>
+              </table>
+            </div>
+            <p id="bandsErr" class="err hidden"></p>
+          </div>
+          <div class="card">
             <h3 style="margin:0 0 12px;font-size:1rem;">Pause all users (global)</h3>
             <p class="hint">Stops drop settlement and new scheduling for every user during the window. Optionally limit to balance tiers 0–3.</p>
             <p id="globalPauseActive" class="warn-box hidden"></p>
@@ -1282,11 +1317,87 @@
       document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max ' + maxPercent + '%';
     }
 
+    let dropBands = [];
+
+    function renderBandRows() {
+      const tbody = document.getElementById('bandRows');
+      tbody.innerHTML = '';
+      dropBands.forEach((b) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + b.bandIndex + '</td>' +
+          '<td>' + escapeHtml(b.label) + '</td>' +
+          '<td><input type="number" step="0.01" min="0" data-band-min="' + b.bandIndex + '" value="' + b.minBalance + '" style="width:88px;padding:6px;" /></td>' +
+          '<td><input type="number" step="0.01" min="0" data-band-max="' + b.bandIndex + '" value="' + b.maxBalance + '" style="width:88px;padding:6px;" /></td>' +
+          '<td><input type="number" step="0.01" min="0.01" data-band-pct="' + b.bandIndex + '" value="' + b.percent + '" style="width:72px;padding:6px;" /></td>' +
+          '<td><button type="button" class="btn-ghost" data-save-band="' + b.bandIndex + '">Save</button></td>';
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button[data-save-band]').forEach((btn) => {
+        btn.onclick = () => saveBand(Number(btn.getAttribute('data-save-band')));
+      });
+    }
+
+    async function loadDropSettings() {
+      document.getElementById('dropCapsErr').classList.add('hidden');
+      document.getElementById('bandsErr').classList.add('hidden');
+      try {
+        const data = await api('/admin/api/airfarming/settings');
+        document.getElementById('capMaxPercent').value = data.settings.maxPercent;
+        document.getElementById('capMaxProfit').value = data.settings.maxProfitPerDrop;
+        maxPercent = data.effectiveCaps?.maxPercent || data.settings.maxPercent || 57.9;
+        document.getElementById('maxPct').textContent = maxPercent;
+        dropBands = data.bands || [];
+        renderBandRows();
+      } catch (e) {
+        document.getElementById('bandsErr').textContent = e.message;
+        document.getElementById('bandsErr').classList.remove('hidden');
+      }
+    }
+
+    async function saveDropCaps() {
+      document.getElementById('dropCapsErr').classList.add('hidden');
+      document.getElementById('dropCapsOk').classList.add('hidden');
+      try {
+        const maxPercent = Number(document.getElementById('capMaxPercent').value);
+        const maxProfitPerDrop = Number(document.getElementById('capMaxProfit').value);
+        await api('/admin/api/airfarming/settings', {
+          method: 'PATCH',
+          body: JSON.stringify({ maxPercent, maxProfitPerDrop }),
+        });
+        document.getElementById('dropCapsOk').textContent = 'Platform caps saved.';
+        document.getElementById('dropCapsOk').classList.remove('hidden');
+        await loadDropSettings();
+        if (activeTab === 'drops') await loadDrops();
+      } catch (e) {
+        document.getElementById('dropCapsErr').textContent = e.message;
+        document.getElementById('dropCapsErr').classList.remove('hidden');
+      }
+    }
+
+    async function saveBand(bandIndex) {
+      document.getElementById('bandsErr').classList.add('hidden');
+      try {
+        const minBalance = Number(document.querySelector('[data-band-min="' + bandIndex + '"]').value);
+        const maxBalance = Number(document.querySelector('[data-band-max="' + bandIndex + '"]').value);
+        const percent = Number(document.querySelector('[data-band-pct="' + bandIndex + '"]').value);
+        await api('/admin/api/airfarming/bands/' + bandIndex, {
+          method: 'PATCH',
+          body: JSON.stringify({ minBalance, maxBalance, percent }),
+        });
+        await loadDropSettings();
+      } catch (e) {
+        document.getElementById('bandsErr').textContent = e.message;
+        document.getElementById('bandsErr').classList.remove('hidden');
+      }
+    }
+
     async function loadDrops() {
       document.getElementById('loadErr').classList.add('hidden');
       document.getElementById('dropsNote').classList.add('hidden');
       document.getElementById('dropsLoading').classList.remove('hidden');
       void loadGlobalPause();
+      void loadDropSettings();
       try {
         const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
         const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
@@ -1467,6 +1578,7 @@
     document.getElementById('cancelBtn').onclick = () => closeModal('editModal');
     document.getElementById('closeUserBtn').onclick = () => closeModal('userModal');
     document.getElementById('toggleUserPauseBtn').onclick = () => toggleUserPause();
+    document.getElementById('saveDropCapsBtn').onclick = () => saveDropCaps();
     document.getElementById('saveGlobalPauseBtn').onclick = () => saveGlobalPause();
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();

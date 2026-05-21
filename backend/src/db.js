@@ -1138,6 +1138,80 @@ async function getAirfarmingDropBandByIndex(bandIndex) {
   return data;
 }
 
+async function listAirfarmingDropBandsAdmin() {
+  const { data, error } = await supabase
+    .from('airfarming_drop_bands')
+    .select('*')
+    .order('band_index', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function updateAirfarmingDropBand(bandIndex, patch) {
+  const row = { updated_at: new Date().toISOString() };
+  if (patch.label !== undefined) row.label = String(patch.label).trim().slice(0, 120);
+  if (patch.balanceHint !== undefined) row.balance_hint = String(patch.balanceHint).trim().slice(0, 200);
+  if (patch.percent !== undefined) row.percent = patch.percent;
+  if (patch.minBalance !== undefined) row.min_balance = patch.minBalance;
+  if (patch.maxBalance !== undefined) row.max_balance = patch.maxBalance;
+  if (patch.active !== undefined) row.active = Boolean(patch.active);
+
+  let { data, error } = await supabase
+    .from('airfarming_drop_bands')
+    .update(row)
+    .eq('band_index', bandIndex)
+    .select('*')
+    .single();
+  if (error && isMissingColumnError(error, 'min_balance')) {
+    const { min_balance, max_balance, ...rest } = row;
+    ({ data, error } = await supabase
+      .from('airfarming_drop_bands')
+      .update(rest)
+      .eq('band_index', bandIndex)
+      .select('*')
+      .single());
+  }
+  if (error) throw error;
+  return data;
+}
+
+const DEFAULT_PLATFORM_SETTINGS = { id: 'default', max_percent: 57.9, max_profit_per_drop: 5000 };
+
+async function getAirfarmingPlatformSettings() {
+  const { data, error } = await supabase
+    .from('airfarming_platform_settings')
+    .select('*')
+    .eq('id', 'default')
+    .maybeSingle();
+  if (error && isSchemaError(error)) return { ...DEFAULT_PLATFORM_SETTINGS };
+  if (error) throw error;
+  return data || { ...DEFAULT_PLATFORM_SETTINGS };
+}
+
+async function updateAirfarmingPlatformSettings(patch) {
+  const existing = await getAirfarmingPlatformSettings();
+  const row = {
+    id: 'default',
+    max_percent:
+      patch.maxPercent !== undefined ? patch.maxPercent : Number(existing.max_percent) || 57.9,
+    max_profit_per_drop:
+      patch.maxProfitPerDrop !== undefined
+        ? patch.maxProfitPerDrop
+        : Number(existing.max_profit_per_drop) || 5000,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .from('airfarming_platform_settings')
+    .upsert(row, { onConflict: 'id' })
+    .select('*')
+    .single();
+  if (error && isSchemaError(error)) throw new Error('Run migration 20260603_airfarming_drop_settings.sql in Supabase');
+  if (error) throw error;
+  return data;
+}
+
 async function getAirfarmingWalletByUserId(userId) {
   const { data, error } = await supabase.from('airfarming_wallets').select('*').eq('user_id', userId).maybeSingle();
   if (error) throw error;
@@ -1991,7 +2065,11 @@ module.exports = {
   listAirfarmingDropsByUserId,
   listAirfarmingDropsForWeek,
   listAirfarmingDropBands,
+  listAirfarmingDropBandsAdmin,
+  updateAirfarmingDropBand,
   getAirfarmingDropBandByIndex,
+  getAirfarmingPlatformSettings,
+  updateAirfarmingPlatformSettings,
   getAirfarmingWalletByUserId,
   upsertAirfarmingWalletRow,
   insertAirfarmingTransfer,

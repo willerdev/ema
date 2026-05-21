@@ -13,19 +13,78 @@ const {
   upsertAirfarmingWalletRow,
   getAirfarmingDropBandByIndex,
   getAirfarmingStateByUserId,
+  listAirfarmingDropBands,
+  getAirfarmingPlatformSettings,
 } = require('./db');
 const { isDropPausedForUser } = require('./airfarmingPause');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
 const INTERVAL_HOURS = [2, 3, 5];
 const MAX_PROFIT_PER_DROP = 5000;
-/** Maximum airfarming drop interest % (platform cap). */
+/** Default maximum airfarming drop interest % (overridden by platform settings). */
 const MAX_AIRFARMING_PERCENT = 57.9;
 
-function clampAirfarmingPercent(value) {
+const BAND_BALANCE_DEFAULTS = {
+  0: { min: 100, max: 145 },
+  1: { min: 100, max: 112 },
+  2: { min: 1000, max: 2400 },
+  3: { min: 10000, max: 16000 },
+};
+
+let capsCache = null;
+let capsCacheAt = 0;
+let bandRangesCache = null;
+let bandRangesCacheAt = 0;
+const SETTINGS_CACHE_MS = 60_000;
+
+async function getEffectiveCaps() {
+  if (capsCache && Date.now() - capsCacheAt < SETTINGS_CACHE_MS) return capsCache;
+  try {
+    const s = await getAirfarmingPlatformSettings();
+    capsCache = {
+      maxPercent: Number(s?.max_percent) || MAX_AIRFARMING_PERCENT,
+      maxProfit: Number(s?.max_profit_per_drop) || MAX_PROFIT_PER_DROP,
+    };
+  } catch {
+    capsCache = { maxPercent: MAX_AIRFARMING_PERCENT, maxProfit: MAX_PROFIT_PER_DROP };
+  }
+  capsCacheAt = Date.now();
+  return capsCache;
+}
+
+function clearAirfarmingSettingsCache() {
+  capsCache = null;
+  capsCacheAt = 0;
+  bandRangesCache = null;
+  bandRangesCacheAt = 0;
+}
+
+async function getBandRangeMap() {
+  if (bandRangesCache && Date.now() - bandRangesCacheAt < SETTINGS_CACHE_MS) return bandRangesCache;
+  const map = new Map(Object.entries(BAND_BALANCE_DEFAULTS).map(([k, v]) => [Number(k), { ...v }]));
+  try {
+    const bands = await listAirfarmingDropBands();
+    for (const row of bands) {
+      const idx = Number(row.band_index);
+      const min = Number(row.min_balance);
+      const max = Number(row.max_balance);
+      if (Number.isFinite(min) && Number.isFinite(max) && max >= min) {
+        map.set(idx, { min, max });
+      }
+    }
+  } catch {
+    /* bands table or columns may be missing until migration */
+  }
+  bandRangesCache = map;
+  bandRangesCacheAt = Date.now();
+  return map;
+}
+
+function clampAirfarmingPercent(value, maxPercent = MAX_AIRFARMING_PERCENT) {
   const n = Number(value);
+  const cap = Number(maxPercent) || MAX_AIRFARMING_PERCENT;
   if (!Number.isFinite(n)) return 1;
-  return Math.min(MAX_AIRFARMING_PERCENT, Math.max(0.01, Math.round(n * 100) / 100));
+  return Math.min(cap, Math.max(0.01, Math.round(n * 100) / 100));
 }
 
 function newId() {
@@ -67,45 +126,43 @@ function inferBandIndex(minBalance, maxBalance) {
   return 0;
 }
 
-/** Seeded balance window for a drop slot; percent comes from airfarming_drop_bands. */
-function generateDropSpec(userId, weekStart, dropIndex) {
+/** Seeded balance window for a drop slot; ranges from airfarming_drop_bands (admin-editable). */
+async function generateDropSpec(userId, weekStart, dropIndex) {
   const h = hash32(`${userId}:${weekStart}:${dropIndex}:dropSpec`);
   const h2 = hash32(`${userId}:${weekStart}:${dropIndex}:range`);
   const fallbackPercent = 1 + (h % 100);
+  const caps = await getEffectiveCaps();
 
   const band = h2 % 4;
-  let minBalance;
-  let maxBalance;
-  if (band === 0) {
-    minBalance = 100;
-    maxBalance = 100 + 5 + (h % 41);
-  } else if (band === 1) {
-    minBalance = 100;
-    maxBalance = 100 + 4 + (h % 9);
-  } else if (band === 2) {
-    minBalance = 1000;
-    maxBalance = 1000 + 400 + (h % 1001);
-  } else {
-    minBalance = 10000;
-    maxBalance = 10000 + 5000 + (h % 6001);
+  const rangeMap = await getBandRangeMap();
+  const cfg = rangeMap.get(band) || BAND_BALANCE_DEFAULTS[band] || BAND_BALANCE_DEFAULTS[0];
+  const bandMin = cfg.min;
+  const bandMax = cfg.max;
+  let minBalance = bandMin;
+  let maxBalance = bandMax;
+  if (bandMax > bandMin) {
+    const spanCents = Math.floor((bandMax - bandMin) * 100);
+    const offset = spanCents > 0 ? (h % (spanCents + 1)) / 100 : 0;
+    maxBalance = Number((bandMin + offset).toFixed(2));
   }
 
   return {
     band_index: band,
-    percent: Number(fallbackPercent.toFixed(2)),
+    percent: clampAirfarmingPercent(fallbackPercent, caps.maxPercent),
     min_balance: Number(minBalance.toFixed(2)),
     max_balance: Number(maxBalance.toFixed(2)),
   };
 }
 
 async function resolvePercentForBand(bandIndex, fallbackPercent) {
+  const caps = await getEffectiveCaps();
   try {
     const row = await getAirfarmingDropBandByIndex(bandIndex);
-    if (row && row.percent != null) return clampAirfarmingPercent(row.percent);
+    if (row && row.percent != null) return clampAirfarmingPercent(row.percent, caps.maxPercent);
   } catch {
     /* bands table may be missing until migration runs */
   }
-  return clampAirfarmingPercent(fallbackPercent);
+  return clampAirfarmingPercent(fallbackPercent, caps.maxPercent);
 }
 
 /** Apply DB tier percent to a scheduled drop (skipped when percent_locked). */
@@ -128,9 +185,10 @@ function isEligible(balance, minBalance, maxBalance) {
   return b >= Number(minBalance) && b <= Number(maxBalance);
 }
 
-function computeProfit(balance, percent) {
+async function computeProfit(balance, percent) {
+  const caps = await getEffectiveCaps();
   const raw = (Number(balance) * Number(percent)) / 100;
-  const capped = Math.min(raw, MAX_PROFIT_PER_DROP);
+  const capped = Math.min(raw, caps.maxProfit);
   return Math.round(capped * 100) / 100;
 }
 
@@ -138,13 +196,13 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-function toPublicNextDrop(row, airfarmingBalance, nowMs = Date.now()) {
+async function toPublicNextDrop(row, airfarmingBalance, nowMs = Date.now()) {
   if (!row) return null;
   const dueMs = new Date(row.due_at).getTime();
   const secondsRemaining = Math.max(0, Math.floor((dueMs - nowMs) / 1000));
   const bal = Number(airfarmingBalance) || 0;
   const eligibleNow = isEligible(bal, row.min_balance, row.max_balance);
-  const projectedProfit = eligibleNow ? computeProfit(bal, row.percent) : 0;
+  const projectedProfit = eligibleNow ? await computeProfit(bal, row.percent) : 0;
   return {
     id: row.id,
     dropIndex: row.drop_index,
@@ -185,7 +243,7 @@ async function ensureNextScheduledDrop(userId, weekStart) {
   const last = await getLastAirfarmingDropForWeek(userId, weekStart);
   const dropIndex = last ? Number(last.drop_index) + 1 : 0;
   const intervalH = pickIntervalHours(userId, weekStart, dropIndex);
-  const spec = generateDropSpec(userId, weekStart, dropIndex);
+  const spec = await generateDropSpec(userId, weekStart, dropIndex);
   const pauseCheck = await isDropPausedForUser(userId, spec.band_index);
   if (pauseCheck.paused) return null;
 
@@ -318,7 +376,7 @@ async function settleDrop(userId, drop, options = {}) {
   const eligible = isEligible(balance, drop.min_balance, drop.max_balance);
 
   if (eligible) {
-    const profit = computeProfit(balance, drop.percent);
+    const profit = await computeProfit(balance, drop.percent);
     const nextBal = roundMoney(balance + profit);
     await upsertAirfarmingWalletRow({
       user_id: userId,
@@ -384,7 +442,7 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
   }
   const af = await getAirfarmingWalletByUserId(userId);
   const latestBalance = Number.parseFloat(String(af?.balance ?? airfarmingBalance ?? 0)) || 0;
-  const nextDrop = toPublicNextDrop(scheduled, latestBalance);
+  const nextDrop = await toPublicNextDrop(scheduled, latestBalance);
   return { nextDrop };
 }
 
@@ -405,4 +463,6 @@ module.exports = {
   MAX_PROFIT_PER_DROP,
   MAX_AIRFARMING_PERCENT,
   clampAirfarmingPercent,
+  clearAirfarmingSettingsCache,
+  getEffectiveCaps,
 };
