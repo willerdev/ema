@@ -586,6 +586,9 @@ async function ensureAirfarmingStateRow(userId) {
       last_event_at: sameWeek ? row?.last_event_at ?? null : null,
       auto_fund_enabled: Boolean(row?.auto_fund_enabled),
       drops_paused: Boolean(row?.drops_paused),
+      drops_pause_from: row?.drops_pause_from ?? null,
+      drops_pause_until: row?.drops_pause_until ?? null,
+      drops_pause_band_indexes: row?.drops_pause_band_indexes ?? null,
       updated_at: new Date().toISOString(),
     });
   }
@@ -603,6 +606,90 @@ async function updateAirfarmingDropsPaused(userId, paused) {
     .eq('user_id', userId)
     .select('*')
     .single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateAirfarmingUserDropPause(userId, patch) {
+  const { normalizeBandIndexes } = require('./airfarmingPause');
+  await ensureAirfarmingStateRow(userId);
+  const row = { updated_at: new Date().toISOString() };
+
+  if (patch.clearPause) {
+    row.drops_paused = false;
+    row.drops_pause_from = null;
+    row.drops_pause_until = null;
+    row.drops_pause_band_indexes = null;
+  } else {
+    if (patch.indefinitePause !== undefined) row.drops_paused = Boolean(patch.indefinitePause);
+    if (patch.pauseFrom !== undefined) row.drops_pause_from = patch.pauseFrom;
+    if (patch.pauseUntil !== undefined) row.drops_pause_until = patch.pauseUntil;
+    if (patch.bandIndexes !== undefined) {
+      row.drops_pause_band_indexes = normalizeBandIndexes(patch.bandIndexes);
+    }
+    if (patch.pauseFrom || patch.pauseUntil) row.drops_paused = false;
+  }
+
+  const { data, error } = await supabase
+    .from('airfarming_state')
+    .update(row)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function getActiveGlobalDropPauses(now = new Date()) {
+  const iso = now.toISOString();
+  const { data, error } = await supabase
+    .from('airfarming_global_pause')
+    .select('*')
+    .lte('starts_at', iso)
+    .gt('ends_at', iso)
+    .order('starts_at', { ascending: false });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listGlobalDropPauses({ limit = 20 } = {}) {
+  const cap = Math.min(100, Math.max(1, Number(limit) || 20));
+  const { data, error } = await supabase
+    .from('airfarming_global_pause')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(cap);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function insertGlobalDropPause({ startsAt, endsAt, bandIndexes, note }) {
+  const { normalizeBandIndexes } = require('./airfarmingPause');
+  const row = {
+    id: id(),
+    starts_at: startsAt,
+    ends_at: endsAt,
+    band_indexes: normalizeBandIndexes(bandIndexes),
+    note: note ? String(note).trim().slice(0, 500) : null,
+    created_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from('airfarming_global_pause').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function endGlobalDropPauseEarly(pauseId) {
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('airfarming_global_pause')
+    .update({ ends_at: now })
+    .eq('id', pauseId)
+    .gt('ends_at', now)
+    .select('*')
+    .single();
+  if (error?.code === 'PGRST116') return null;
   if (error) throw error;
   return data;
 }
@@ -646,12 +733,14 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
 
     let stateRes = await supabase
       .from('airfarming_state')
-      .select('user_id, drops_paused, auto_fund_enabled, week_start')
+      .select(
+        'user_id, drops_paused, drops_pause_from, drops_pause_until, drops_pause_band_indexes, auto_fund_enabled, week_start'
+      )
       .in('user_id', ids);
     if (stateRes.error && isSchemaError(stateRes.error)) {
       stateRes = await supabase
         .from('airfarming_state')
-        .select('user_id, auto_fund_enabled, week_start')
+        .select('user_id, drops_paused, auto_fund_enabled, week_start')
         .in('user_id', ids);
     }
     if (!stateRes.error) {
@@ -659,8 +748,10 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
     } else if (!isSchemaError(stateRes.error)) throw stateRes.error;
   }
 
+  const { pauseStatusFromState } = require('./airfarmingPause');
   return users.map((u) => {
     const st = stateByUser.get(u.id);
+    const pause = pauseStatusFromState(st);
     return {
       id: u.id,
       email: u.email,
@@ -668,7 +759,8 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
       transferCode: u.transfer_code || null,
       cashBalance: cashByUser.get(u.id) ?? 0,
       airfarmingBalance: afByUser.get(u.id) ?? 0,
-      dropsPaused: Boolean(st?.drops_paused),
+      dropsPaused: pause.dropsPausedNow,
+      dropsPauseUntil: pause.dropsPauseUntil,
       autoFundEnabled: Boolean(st?.auto_fund_enabled),
       airfarmingWeekStart: st?.week_start || null,
     };
@@ -695,6 +787,9 @@ async function getAdminUserDetail(userId) {
 
   if (scheduledDrops.error && !isSchemaError(scheduledDrops.error)) throw scheduledDrops.error;
 
+  const { pauseStatusFromState } = require('./airfarmingPause');
+  const pause = pauseStatusFromState(state);
+
   return {
     user: {
       id: user.id,
@@ -708,7 +803,12 @@ async function getAdminUserDetail(userId) {
     airfarming: state
       ? {
           weekStart: state.week_start,
-          dropsPaused: Boolean(state.drops_paused),
+          dropsPaused: pause.dropsPausedNow,
+          dropsPausedIndefinite: pause.dropsPausedIndefinite,
+          dropsPauseFrom: pause.dropsPauseFrom,
+          dropsPauseUntil: pause.dropsPauseUntil,
+          dropsPauseBandIndexes: pause.dropsPauseBandIndexes,
+          pauseMode: pause.pauseMode,
           autoFundEnabled: Boolean(state.auto_fund_enabled),
           weeklyEventsUsed: Number(state.weekly_events_used || 0),
         }
@@ -733,15 +833,19 @@ async function getAdminUserDetail(userId) {
 }
 
 async function getAirfarmingDropsPausedByUserIds(userIds) {
+  const { pauseStatusFromState } = require('./airfarmingPause');
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (!ids.length) return new Map();
   let { data, error } = await supabase
     .from('airfarming_state')
-    .select('user_id, drops_paused')
+    .select('user_id, drops_paused, drops_pause_from, drops_pause_until, drops_pause_band_indexes')
     .in('user_id', ids);
+  if (error && isSchemaError(error)) {
+    ({ data, error } = await supabase.from('airfarming_state').select('user_id, drops_paused').in('user_id', ids));
+  }
   if (error && isSchemaError(error)) return new Map();
   if (error) throw error;
-  return new Map((data || []).map((r) => [r.user_id, Boolean(r.drops_paused)]));
+  return new Map((data || []).map((r) => [r.user_id, pauseStatusFromState(r).dropsPausedNow]));
 }
 
 async function insertAirfarmingEvent(row) {
@@ -1670,6 +1774,11 @@ module.exports = {
   updateAirfarmingAutoFundSetting,
   ensureAirfarmingStateRow,
   updateAirfarmingDropsPaused,
+  updateAirfarmingUserDropPause,
+  getActiveGlobalDropPauses,
+  listGlobalDropPauses,
+  insertGlobalDropPause,
+  endGlobalDropPauseEarly,
   listUsersAdmin,
   getAdminUserDetail,
   getAirfarmingDropsPausedByUserIds,

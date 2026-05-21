@@ -14,6 +14,7 @@ const {
   getAirfarmingDropBandByIndex,
   getAirfarmingStateByUserId,
 } = require('./db');
+const { isDropPausedForUser } = require('./airfarmingPause');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
 const INTERVAL_HOURS = [2, 3, 5];
@@ -173,14 +174,7 @@ function dropToHistoryRow(row) {
   };
 }
 
-async function isDropsPausedForUser(userId) {
-  const state = await getAirfarmingStateByUserId(userId);
-  return Boolean(state?.drops_paused);
-}
-
 async function ensureNextScheduledDrop(userId, weekStart) {
-  if (await isDropsPausedForUser(userId)) return null;
-
   const existing = await getScheduledAirfarmingDrop(userId, weekStart);
   if (existing) return existing;
 
@@ -192,6 +186,9 @@ async function ensureNextScheduledDrop(userId, weekStart) {
   const dropIndex = last ? Number(last.drop_index) + 1 : 0;
   const intervalH = pickIntervalHours(userId, weekStart, dropIndex);
   const spec = generateDropSpec(userId, weekStart, dropIndex);
+  const pauseCheck = await isDropPausedForUser(userId, spec.band_index);
+  if (pauseCheck.paused) return null;
+
   const percent = await resolvePercentForBand(spec.band_index, spec.percent);
 
   let dueMs;
@@ -350,8 +347,6 @@ async function settleDrop(userId, drop, options = {}) {
 
 /** Process all overdue scheduled drops; schedule the next one after each settlement. */
 async function processDueDrops(userId, weekStart, options = {}) {
-  if (await isDropsPausedForUser(userId)) return 0;
-
   let processed = 0;
   const guardMax = 20;
   while (processed < guardMax) {
@@ -364,6 +359,13 @@ async function processDueDrops(userId, weekStart, options = {}) {
     if (Date.now() < dueMs) break;
 
     scheduled = await syncScheduledDropPercent(scheduled);
+    const bandIndex =
+      scheduled.band_index != null
+        ? Number(scheduled.band_index)
+        : inferBandIndex(scheduled.min_balance, scheduled.max_balance);
+    const pauseCheck = await isDropPausedForUser(userId, bandIndex);
+    if (pauseCheck.paused) break;
+
     await settleDrop(userId, scheduled, options);
     processed += 1;
     await ensureNextScheduledDrop(userId, weekStart);

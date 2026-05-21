@@ -6,16 +6,21 @@ const {
   getUsersByIds,
   listUsersAdmin,
   getAdminUserDetail,
-  updateAirfarmingDropsPaused,
+  updateAirfarmingUserDropPause,
   getAirfarmingDropsPausedByUserIds,
   adminMoveCashToAirfarming,
   listSupportTicketsAdmin,
   getSupportTicketById,
   updateSupportTicketStatus,
+  getActiveGlobalDropPauses,
+  listGlobalDropPauses,
+  insertGlobalDropPause,
+  endGlobalDropPauseEarly,
   isMissingTableError,
 } = require('./db');
 const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
 const { clampAirfarmingPercent, MAX_AIRFARMING_PERCENT } = require('./airfarmingDrops');
+const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 
 const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
 
@@ -169,20 +174,125 @@ function registerAdminRoutes(app) {
     try {
       const detail = await getAdminUserDetail(req.params.id);
       if (!detail) return res.status(404).json({ message: 'User not found' });
-      if (req.body?.dropsPaused === undefined) {
-        return res.status(400).json({ message: 'dropsPaused is required' });
+
+      let state;
+      if (req.body?.clearPause) {
+        state = await updateAirfarmingUserDropPause(req.params.id, { clearPause: true });
+      } else if (req.body?.dropsPaused !== undefined && !req.body?.pauseFrom && !req.body?.pauseUntil) {
+        state = await updateAirfarmingUserDropPause(req.params.id, {
+          indefinitePause: Boolean(req.body.dropsPaused),
+        });
+      } else if (
+        req.body?.pauseFrom !== undefined ||
+        req.body?.pauseUntil !== undefined ||
+        req.body?.bandIndexes !== undefined
+      ) {
+        const range = parsePauseRange(req.body);
+        if (range.error) return res.status(400).json({ message: range.error });
+        state = await updateAirfarmingUserDropPause(req.params.id, {
+          pauseFrom: range.pauseFrom,
+          pauseUntil: range.pauseUntil,
+          bandIndexes: req.body.bandIndexes,
+          indefinitePause: false,
+        });
+      } else {
+        return res.status(400).json({
+          message:
+            'Send clearPause, dropsPaused (indefinite), or pauseFrom/pauseUntil with optional bandIndexes (0–3)',
+        });
       }
-      const state = await updateAirfarmingDropsPaused(req.params.id, req.body.dropsPaused);
+
+      const pause = pauseStatusFromState(state);
       return res.json({
         userId: req.params.id,
-        dropsPaused: Boolean(state.drops_paused),
+        ...pause,
       });
     } catch (e) {
       if (isMissingTableError(e)) {
         return res.status(503).json({ message: 'Airfarming schema not ready. Run migrations.' });
       }
       console.error('[admin/users/airfarming]', e);
-      return res.status(500).json({ message: 'Failed to update airfarming settings' });
+      return res.status(500).json({ message: e.message || 'Failed to update airfarming settings' });
+    }
+  });
+
+  app.get('/admin/api/airfarming/global-pause', adminAuthMiddleware, async (req, res) => {
+    try {
+      const active = await getActiveGlobalDropPauses();
+      const recent = await listGlobalDropPauses({ limit: 15 });
+      const mapRow = (r) => ({
+        id: r.id,
+        startsAt: r.starts_at,
+        endsAt: r.ends_at,
+        bandIndexes: r.band_indexes || [],
+        note: r.note || null,
+        createdAt: r.created_at,
+        activeNow: active.some((a) => a.id === r.id),
+      });
+      return res.json({
+        active: active.map(mapRow),
+        recent: recent.map(mapRow),
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({
+          message: 'Run migration 20260601_airfarming_scheduled_pauses.sql in Supabase.',
+        });
+      }
+      console.error('[admin/global-pause]', e);
+      return res.status(500).json({ message: e.message || 'Failed to load global pause' });
+    }
+  });
+
+  app.post('/admin/api/airfarming/global-pause', adminAuthMiddleware, async (req, res) => {
+    try {
+      const range = parsePauseRange({
+        pauseFrom: req.body?.startsAt,
+        pauseUntil: req.body?.endsAt,
+      });
+      if (range.error) return res.status(400).json({ message: range.error });
+      if (!range.pauseFrom || !range.pauseUntil) {
+        return res.status(400).json({ message: 'startsAt and endsAt are required' });
+      }
+      const row = await insertGlobalDropPause({
+        startsAt: range.pauseFrom,
+        endsAt: range.pauseUntil,
+        bandIndexes: req.body?.bandIndexes,
+        note: req.body?.note,
+      });
+      return res.status(201).json({
+        pause: {
+          id: row.id,
+          startsAt: row.starts_at,
+          endsAt: row.ends_at,
+          bandIndexes: row.band_indexes || [],
+          note: row.note || null,
+        },
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Global pause table missing. Run migrations.' });
+      }
+      console.error('[admin/global-pause/post]', e);
+      return res.status(500).json({ message: e.message || 'Failed to create global pause' });
+    }
+  });
+
+  app.post('/admin/api/airfarming/global-pause/:id/end', adminAuthMiddleware, async (req, res) => {
+    try {
+      const row = await endGlobalDropPauseEarly(req.params.id);
+      if (!row) return res.status(404).json({ message: 'Pause not found or already ended' });
+      return res.json({
+        pause: {
+          id: row.id,
+          startsAt: row.starts_at,
+          endsAt: row.ends_at,
+          bandIndexes: row.band_indexes || [],
+        },
+      });
+    } catch (e) {
+      console.error('[admin/global-pause/end]', e);
+      return res.status(500).json({ message: e.message || 'Failed to end global pause' });
     }
   });
 

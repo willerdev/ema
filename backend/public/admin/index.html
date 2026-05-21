@@ -250,6 +250,9 @@
     .stat .val { font-size: 1.15rem; font-weight: 700; color: var(--gold); }
     .stat .lbl { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; }
     .loading { color: var(--muted); font-size: 0.9rem; padding: 24px 0; text-align: center; }
+    .band-picks { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; margin-bottom: 12px; }
+    .band-picks label { display: inline-flex; align-items: center; gap: 6px; margin: 0; text-transform: none; letter-spacing: 0; font-size: 0.85rem; color: var(--text); font-weight: 500; }
+    .band-picks input { width: auto; margin: 0; }
     .modal-backdrop {
       position: fixed; inset: 0;
       background: rgba(0,0,0,0.65);
@@ -436,6 +439,36 @@
 
         <div id="panelDrops" class="hidden">
           <div class="card">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Pause all users (global)</h3>
+            <p class="hint">Stops drop settlement and new scheduling for every user during the window. Optionally limit to balance tiers 0–3.</p>
+            <p id="globalPauseActive" class="warn-box hidden"></p>
+            <div class="row">
+              <div>
+                <label>From (local)</label>
+                <input id="globalPauseFrom" type="datetime-local" />
+              </div>
+              <div>
+                <label>Until (local)</label>
+                <input id="globalPauseUntil" type="datetime-local" />
+              </div>
+            </div>
+            <div class="band-picks" id="globalBandPicks">
+              <span style="font-size:0.72rem;color:var(--muted);font-weight:700;">Tiers (empty = all):</span>
+              <label><input type="checkbox" class="global-band" value="0" />0</label>
+              <label><input type="checkbox" class="global-band" value="1" />1</label>
+              <label><input type="checkbox" class="global-band" value="2" />2</label>
+              <label><input type="checkbox" class="global-band" value="3" />3</label>
+            </div>
+            <label>Note (optional)</label>
+            <input id="globalPauseNote" type="text" placeholder="Maintenance, holiday, etc." />
+            <div class="row" style="margin-top:8px;">
+              <button type="button" class="btn-warn" id="saveGlobalPauseBtn" style="width:auto;">Schedule global pause</button>
+              <button type="button" class="btn-ghost" id="refreshGlobalPauseBtn" style="width:auto;">Refresh status</button>
+            </div>
+            <div id="globalPauseList" style="margin-top:12px;font-size:0.82rem;"></div>
+            <p id="globalPauseErr" class="err hidden"></p>
+          </div>
+          <div class="card">
             <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;font-size:0.9rem;color:var(--text);text-transform:none;letter-spacing:0;">
               <input type="checkbox" id="upcomingOnly" checked style="width:auto;margin:0;" />
               Upcoming only (due in future)
@@ -472,9 +505,29 @@
       <h2 id="userModalTitle" style="margin:0 0 8px;font-size:1.1rem;">User</h2>
       <p id="userModalMeta" class="hint"></p>
       <div class="stat-grid" id="userStatsGrid"></div>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Drop pause (this user)</h3>
+      <p id="userPauseStatus" class="hint" style="margin-bottom:10px;"></p>
+      <div class="row">
+        <div>
+          <label>Pause from</label>
+          <input id="userPauseFrom" type="datetime-local" />
+        </div>
+        <div>
+          <label>Pause until</label>
+          <input id="userPauseUntil" type="datetime-local" />
+        </div>
+      </div>
+      <div class="band-picks" id="userBandPicks">
+        <span style="font-size:0.72rem;color:var(--muted);font-weight:700;">Tiers (empty = all):</span>
+        <label><input type="checkbox" class="user-band" value="0" />0</label>
+        <label><input type="checkbox" class="user-band" value="1" />1</label>
+        <label><input type="checkbox" class="user-band" value="2" />2</label>
+        <label><input type="checkbox" class="user-band" value="3" />3</label>
+      </div>
       <div class="row" style="margin-bottom:16px;">
-        <button type="button" class="btn-warn" id="pauseDropsBtn">Pause drops</button>
-        <button type="button" class="btn-ghost hidden" id="resumeDropsBtn">Resume drops</button>
+        <button type="button" class="btn-primary" id="saveUserPauseBtn" style="width:auto;">Save scheduled pause</button>
+        <button type="button" class="btn-warn" id="pauseDropsBtn" style="width:auto;">Pause indefinitely</button>
+        <button type="button" class="btn-ghost" id="clearUserPauseBtn" style="width:auto;">Clear pause</button>
       </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Move cash → airfarming</h3>
       <div class="row" style="margin-bottom:16px;">
@@ -646,9 +699,12 @@
       }
       users.forEach((u) => {
         const tr = document.createElement('tr');
-        const pausePill = u.dropsPaused
+        let pausePill = u.dropsPaused
           ? '<span class="pill pill-paused">paused</span>'
           : '<span class="pill pill-ok">active</span>';
+        if (u.dropsPaused && u.dropsPauseUntil) {
+          pausePill += '<br><span style="color:var(--muted);font-size:0.65rem;">until ' + new Date(u.dropsPauseUntil).toLocaleString() + '</span>';
+        }
         tr.innerHTML =
           '<td>' + escapeHtml(u.email) + '<br><span style="color:var(--muted);font-size:0.7rem;">' + escapeHtml(u.id.slice(0, 8)) + '…</span></td>' +
           '<td>' + fmtMoney(u.cashBalance) + '</td>' +
@@ -676,10 +732,22 @@
       }
     }
 
-    function updatePauseButtons() {
-      const paused = Boolean(viewingUserDetail?.airfarming?.dropsPaused);
-      document.getElementById('pauseDropsBtn').classList.toggle('hidden', paused);
-      document.getElementById('resumeDropsBtn').classList.toggle('hidden', !paused);
+    function readBandIndexes(className) {
+      const checked = [...document.querySelectorAll('.' + className + ':checked')].map((el) => Number(el.value));
+      return checked.length ? checked : null;
+    }
+
+    function setBandCheckboxes(className, bands) {
+      const set = new Set((bands || []).map(Number));
+      document.querySelectorAll('.' + className).forEach((el) => {
+        el.checked = set.size ? set.has(Number(el.value)) : false;
+      });
+    }
+
+    function fillDatetimeLocal(id, iso) {
+      const el = document.getElementById(id);
+      if (!iso) { el.value = ''; return; }
+      el.value = toLocalInput(iso);
     }
 
     function renderUserDetail(d) {
@@ -692,9 +760,19 @@
       document.getElementById('userStatsGrid').innerHTML =
         '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
-        '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
+        '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops now</div></div>' +
+        '<div class="stat"><div class="val">' + (af?.pauseMode || 'none') + '</div><div class="lbl">Pause mode</div></div>' +
         '<div class="stat"><div class="val">' + (af?.autoFundEnabled ? 'On' : 'Off') + '</div><div class="lbl">Auto-fund</div></div>';
-      updatePauseButtons();
+      let pauseLine = 'Drops: ' + (af?.dropsPaused ? 'paused now' : 'active');
+      if (af?.dropsPauseFrom || af?.dropsPauseUntil) {
+        pauseLine += ' · window ' + (af.dropsPauseFrom ? new Date(af.dropsPauseFrom).toLocaleString() : '…');
+        pauseLine += ' → ' + (af.dropsPauseUntil ? new Date(af.dropsPauseUntil).toLocaleString() : '…');
+      }
+      if (af?.dropsPauseBandIndexes?.length) pauseLine += ' · tiers ' + af.dropsPauseBandIndexes.join(', ');
+      document.getElementById('userPauseStatus').textContent = pauseLine;
+      fillDatetimeLocal('userPauseFrom', af?.dropsPauseFrom);
+      fillDatetimeLocal('userPauseUntil', af?.dropsPauseUntil);
+      setBandCheckboxes('user-band', af?.dropsPauseBandIndexes);
       const txBody = document.getElementById('userTxRows');
       txBody.innerHTML = '';
       (d.transactions || []).forEach((t) => {
@@ -832,21 +910,140 @@
       }
     }
 
-    async function setDropsPaused(paused) {
+    async function patchUserPause(body) {
       document.getElementById('userModalErr').classList.add('hidden');
+      await api('/admin/api/users/' + viewingUserId + '/airfarming', {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      const d = await api('/admin/api/users/' + viewingUserId);
+      renderUserDetail(d);
+      const u = users.find((x) => x.id === viewingUserId);
+      if (u) {
+        u.dropsPaused = Boolean(d.airfarming?.dropsPaused);
+        u.dropsPauseUntil = d.airfarming?.dropsPauseUntil || null;
+      }
+      renderUsersTable();
+    }
+
+    async function saveUserScheduledPause() {
       try {
-        await api('/admin/api/users/' + viewingUserId + '/airfarming', {
-          method: 'PATCH',
-          body: JSON.stringify({ dropsPaused: paused }),
+        const from = document.getElementById('userPauseFrom').value;
+        const until = document.getElementById('userPauseUntil').value;
+        if (!from || !until) {
+          document.getElementById('userModalErr').textContent = 'Set both pause from and until';
+          document.getElementById('userModalErr').classList.remove('hidden');
+          return;
+        }
+        await patchUserPause({
+          pauseFrom: new Date(from).toISOString(),
+          pauseUntil: new Date(until).toISOString(),
+          bandIndexes: readBandIndexes('user-band'),
         });
-        const d = await api('/admin/api/users/' + viewingUserId);
-        renderUserDetail(d);
-        const u = users.find((x) => x.id === viewingUserId);
-        if (u) u.dropsPaused = paused;
-        renderUsersTable();
       } catch (e) {
         document.getElementById('userModalErr').textContent = e.message;
         document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    async function setDropsPausedIndefinite() {
+      try {
+        await patchUserPause({ dropsPaused: true });
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    async function clearUserPause() {
+      try {
+        await patchUserPause({ clearPause: true });
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    function renderGlobalPause(data) {
+      const activeEl = document.getElementById('globalPauseActive');
+      const listEl = document.getElementById('globalPauseList');
+      if (data.active && data.active.length) {
+        activeEl.classList.remove('hidden');
+        activeEl.textContent =
+          'ACTIVE NOW: ' +
+          data.active
+            .map((p) => {
+              const bands = p.bandIndexes.length ? ' tiers ' + p.bandIndexes.join(',') : ' all tiers';
+              return new Date(p.startsAt).toLocaleString() + ' → ' + new Date(p.endsAt).toLocaleString() + bands;
+            })
+            .join(' | ');
+      } else {
+        activeEl.classList.add('hidden');
+      }
+      listEl.innerHTML = '';
+      (data.recent || []).slice(0, 8).forEach((p) => {
+        const div = document.createElement('div');
+        div.style.marginBottom = '8px';
+        div.style.paddingBottom = '8px';
+        div.style.borderBottom = '1px solid var(--border)';
+        const bands = p.bandIndexes.length ? ' tiers ' + p.bandIndexes.join(',') : ' all tiers';
+        div.innerHTML =
+          '<span>' + new Date(p.startsAt).toLocaleString() + ' → ' + new Date(p.endsAt).toLocaleString() + bands +
+          (p.activeNow ? ' <span class="pill pill-paused">active</span>' : '') + '</span>';
+        if (p.activeNow) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'btn-ghost';
+          btn.style.marginLeft = '8px';
+          btn.textContent = 'End now';
+          btn.onclick = () => endGlobalPause(p.id);
+          div.appendChild(btn);
+        }
+        listEl.appendChild(div);
+      });
+    }
+
+    async function loadGlobalPause() {
+      document.getElementById('globalPauseErr').classList.add('hidden');
+      try {
+        const data = await api('/admin/api/airfarming/global-pause');
+        renderGlobalPause(data);
+      } catch (e) {
+        document.getElementById('globalPauseErr').textContent = e.message;
+        document.getElementById('globalPauseErr').classList.remove('hidden');
+      }
+    }
+
+    async function saveGlobalPause() {
+      document.getElementById('globalPauseErr').classList.add('hidden');
+      try {
+        const from = document.getElementById('globalPauseFrom').value;
+        const until = document.getElementById('globalPauseUntil').value;
+        if (!from || !until) throw new Error('Set global from and until');
+        await api('/admin/api/airfarming/global-pause', {
+          method: 'POST',
+          body: JSON.stringify({
+            startsAt: new Date(from).toISOString(),
+            endsAt: new Date(until).toISOString(),
+            bandIndexes: readBandIndexes('global-band'),
+            note: document.getElementById('globalPauseNote').value.trim() || undefined,
+          }),
+        });
+        await loadGlobalPause();
+      } catch (e) {
+        document.getElementById('globalPauseErr').textContent = e.message;
+        document.getElementById('globalPauseErr').classList.remove('hidden');
+      }
+    }
+
+    async function endGlobalPause(id) {
+      document.getElementById('globalPauseErr').classList.add('hidden');
+      try {
+        await api('/admin/api/airfarming/global-pause/' + id + '/end', { method: 'POST' });
+        await loadGlobalPause();
+      } catch (e) {
+        document.getElementById('globalPauseErr').textContent = e.message;
+        document.getElementById('globalPauseErr').classList.remove('hidden');
       }
     }
 
@@ -879,6 +1076,7 @@
       document.getElementById('loadErr').classList.add('hidden');
       document.getElementById('dropsNote').classList.add('hidden');
       document.getElementById('dropsLoading').classList.remove('hidden');
+      void loadGlobalPause();
       try {
         const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
         const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
@@ -1001,8 +1199,11 @@
     document.getElementById('saveBtn').onclick = () => saveEdit();
     document.getElementById('cancelBtn').onclick = () => document.getElementById('editModal').classList.add('hidden');
     document.getElementById('closeUserBtn').onclick = () => document.getElementById('userModal').classList.add('hidden');
-    document.getElementById('pauseDropsBtn').onclick = () => setDropsPaused(true);
-    document.getElementById('resumeDropsBtn').onclick = () => setDropsPaused(false);
+    document.getElementById('saveUserPauseBtn').onclick = () => saveUserScheduledPause();
+    document.getElementById('pauseDropsBtn').onclick = () => setDropsPausedIndefinite();
+    document.getElementById('clearUserPauseBtn').onclick = () => clearUserPause();
+    document.getElementById('saveGlobalPauseBtn').onclick = () => saveGlobalPause();
+    document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => document.getElementById('ticketModal').classList.add('hidden');

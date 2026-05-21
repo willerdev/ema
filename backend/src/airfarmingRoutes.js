@@ -46,6 +46,9 @@ async function ensureWeekState(userId) {
       last_event_at: row?.last_event_at ?? null,
       auto_fund_enabled: Boolean(row?.auto_fund_enabled),
       drops_paused: Boolean(row?.drops_paused),
+      drops_pause_from: row?.drops_pause_from ?? null,
+      drops_pause_until: row?.drops_pause_until ?? null,
+      drops_pause_band_indexes: row?.drops_pause_band_indexes ?? null,
       updated_at: new Date().toISOString(),
     });
   }
@@ -107,7 +110,7 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         scheduleHours: [],
         lastEventAt: settled[0]?.paid_at || settled[0]?.due_at || null,
         autoFundEnabled,
-        dropsPaused: Boolean(state.drops_paused),
+        dropsPaused: require('./airfarmingPause').pauseStatusFromState(state).dropsPausedNow,
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
         nextDrop,
         history,
