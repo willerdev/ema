@@ -15,6 +15,10 @@ const {
   getAirfarmingStateByUserId,
   listAirfarmingDropBands,
   getAirfarmingPlatformSettings,
+  getActiveAiAllocationForUserToday,
+  getAiDailyPlanByDate,
+  incrementAiDailyBudgetSpent,
+  utcTodayYmd,
 } = require('./db');
 const { isDropPausedForUser } = require('./airfarmingPause');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
@@ -243,11 +247,26 @@ async function ensureNextScheduledDrop(userId, weekStart) {
   const last = await getLastAirfarmingDropForWeek(userId, weekStart);
   const dropIndex = last ? Number(last.drop_index) + 1 : 0;
   const intervalH = pickIntervalHours(userId, weekStart, dropIndex);
-  const spec = await generateDropSpec(userId, weekStart, dropIndex);
+  let spec = await generateDropSpec(userId, weekStart, dropIndex);
+  let percentLocked = false;
+  const { plan: aiPlan, allocation: aiAlloc } = await getActiveAiAllocationForUserToday(userId);
+  if (aiPlan && aiAlloc?.eligible && aiAlloc.percent != null && aiAlloc.min_balance != null) {
+    spec = {
+      band_index: Number(aiAlloc.band_index ?? 0),
+      percent: Number(aiAlloc.percent),
+      min_balance: Number(aiAlloc.min_balance),
+      max_balance: Number(aiAlloc.max_balance),
+    };
+    percentLocked = true;
+  }
+
   const pauseCheck = await isDropPausedForUser(userId, spec.band_index);
   if (pauseCheck.paused) return null;
 
-  const percent = await resolvePercentForBand(spec.band_index, spec.percent);
+  const caps = await getEffectiveCaps();
+  let percent = percentLocked
+    ? clampAirfarmingPercent(spec.percent, caps.maxPercent)
+    : await resolvePercentForBand(spec.band_index, spec.percent);
 
   let dueMs;
   if (!last) {
@@ -268,6 +287,7 @@ async function ensureNextScheduledDrop(userId, weekStart) {
     percent,
     min_balance: spec.min_balance,
     max_balance: spec.max_balance,
+    percent_locked: percentLocked,
     status: 'scheduled',
     profit_amount: 0,
   });
@@ -376,14 +396,52 @@ async function settleDrop(userId, drop, options = {}) {
   const eligible = isEligible(balance, drop.min_balance, drop.max_balance);
 
   if (eligible) {
-    const profit = await computeProfit(balance, drop.percent);
+    const planDate = utcTodayYmd();
+    const dailyPlan = await getAiDailyPlanByDate(planDate);
+    if (dailyPlan && dailyPlan.status !== 'active') {
+      return updateAirfarmingDrop(drop.id, {
+        status: 'missed',
+        eligible_balance: balance,
+        profit_amount: 0,
+        auto_funded_cash: autoFunded.cash,
+        auto_funded_crypto: autoFunded.crypto,
+        paid_at: now,
+      });
+    }
+
+    let profit = await computeProfit(balance, drop.percent);
+    if (dailyPlan?.status === 'active') {
+      const budgetUsd = Number(dailyPlan.budget_usd);
+      const spent = Number(dailyPlan.budget_spent_usd);
+      const remaining = Math.max(0, roundMoney(budgetUsd - spent));
+      if (remaining <= 0) {
+        return updateAirfarmingDrop(drop.id, {
+          status: 'missed',
+          eligible_balance: balance,
+          profit_amount: 0,
+          auto_funded_cash: autoFunded.cash,
+          auto_funded_crypto: autoFunded.crypto,
+          paid_at: now,
+        });
+      }
+      if (profit > remaining) {
+        console.warn('[airfarming] capping drop profit to daily budget remaining', {
+          userId,
+          dropId: drop.id,
+          profit,
+          remaining,
+        });
+        profit = remaining;
+      }
+    }
+
     const nextBal = roundMoney(balance + profit);
     await upsertAirfarmingWalletRow({
       user_id: userId,
       balance: nextBal,
       updated_at: now,
     });
-    return updateAirfarmingDrop(drop.id, {
+    const paid = await updateAirfarmingDrop(drop.id, {
       status: 'paid',
       eligible_balance: balance,
       profit_amount: profit,
@@ -391,6 +449,10 @@ async function settleDrop(userId, drop, options = {}) {
       auto_funded_crypto: autoFunded.crypto,
       paid_at: now,
     });
+    if (dailyPlan?.status === 'active' && profit > 0) {
+      await incrementAiDailyBudgetSpent(planDate, profit);
+    }
+    return paid;
   }
 
   return updateAirfarmingDrop(drop.id, {

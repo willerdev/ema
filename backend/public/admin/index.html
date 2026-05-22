@@ -435,6 +435,9 @@
         <button type="button" class="nav-item" data-tab="withdrawals">
           <span class="nav-icon">💸</span> Withdrawals
         </button>
+        <button type="button" class="nav-item" data-tab="aiearnings">
+          <span class="nav-icon">🤖</span> AI earnings
+        </button>
         <button type="button" class="nav-item" data-tab="tiers">
           <span class="nav-icon">📊</span> Drop tiers
         </button>
@@ -589,6 +592,70 @@
             </div>
             <p id="announceOk" class="hint hidden" style="color:var(--ok);"></p>
             <p id="announceErr" class="err hidden"></p>
+          </div>
+        </div>
+
+        <div id="panelAiEarnings" class="hidden">
+          <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Daily AI earnings planner</h3>
+            <p class="hint" style="margin-bottom:12px;">
+              Set today’s payout budget (UTC). Run the planner to assign per-user drop tiers and windows.
+              Under budget → plan goes <strong>active</strong> automatically; over budget → <strong>pending approval</strong>.
+            </p>
+            <div class="row" style="align-items:flex-end;margin-bottom:12px;">
+              <div>
+                <label>Plan date (UTC)</label>
+                <input id="aiPlanDate" type="date" />
+              </div>
+              <div>
+                <label>Today’s budget (USD)</label>
+                <input id="aiBudgetUsd" type="number" step="0.01" min="0" placeholder="5000" />
+              </div>
+              <div>
+                <label>Market regime</label>
+                <select id="aiRegime">
+                  <option value="calm">Calm</option>
+                  <option value="normal" selected>Normal</option>
+                  <option value="volatile">Volatile</option>
+                  <option value="risk_off">Risk off</option>
+                </select>
+              </div>
+              <div style="flex:2;">
+                <label>Market notes</label>
+                <input id="aiMarketNotes" type="text" placeholder="Optional context for the planner" />
+              </div>
+            </div>
+            <div class="row" style="margin-bottom:12px;">
+              <button type="button" class="btn-primary" id="aiSaveBudgetBtn" style="width:auto;">Save budget</button>
+              <button type="button" class="btn-ghost" id="aiFetchMarketBtn" style="width:auto;">Fetch from Alpaca</button>
+              <button type="button" class="btn-primary" id="aiRunPlannerBtn" style="width:auto;">Run planner</button>
+              <button type="button" class="btn-ghost" id="aiApprovePlanBtn" style="width:auto;" disabled>Approve plan</button>
+            </div>
+            <p id="aiPlanSummary" class="hint"></p>
+            <p id="aiPlanOk" class="hint hidden" style="color:var(--ok);"></p>
+            <p id="aiPlanErr" class="err hidden"></p>
+          </div>
+          <div class="card">
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;">
+              <span id="aiStatusPill" class="badge">—</span>
+              <span class="hint" id="aiBudgetStats">Budget — · Projected — · Spent —</span>
+            </div>
+            <div id="aiPlanLoading" class="loading hidden">Loading plan…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Tier</th>
+                    <th>%</th>
+                    <th>Min–max</th>
+                    <th>Projected</th>
+                    <th>Eligible</th>
+                  </tr>
+                </thead>
+                <tbody id="aiAllocRows"></tbody>
+              </table>
+            </div>
           </div>
         </div>
 
@@ -828,6 +895,7 @@
       users: 'Users',
       support: 'Support tickets',
       withdrawals: 'Withdrawals',
+      aiearnings: 'AI earnings',
       tiers: 'Drop tiers',
       drops: 'Airfarming drops',
       announce: 'Announcements',
@@ -845,6 +913,8 @@
     let chartProfitsInst = null;
     let viewingTicketId = null;
     let pendingWithdrawals = [];
+    let aiPlan = null;
+    let aiAllocations = [];
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -906,6 +976,7 @@
       document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
       document.getElementById('panelSupport').classList.toggle('hidden', tab !== 'support');
       document.getElementById('panelWithdrawals').classList.toggle('hidden', tab !== 'withdrawals');
+      document.getElementById('panelAiEarnings').classList.toggle('hidden', tab !== 'aiearnings');
       document.getElementById('panelTiers').classList.toggle('hidden', tab !== 'tiers');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
       document.getElementById('panelAnnounce').classList.toggle('hidden', tab !== 'announce');
@@ -915,6 +986,7 @@
         if (tab === 'users') showUsersErr(e);
         else if (tab === 'support') showTicketsErr(e);
         else if (tab === 'withdrawals') showWithdrawalsErr(e);
+        else if (tab === 'aiearnings') showAiPlanErr(e);
         else if (tab === 'tiers') showTiersErr(e);
         else if (tab === 'drops') showDropsErr(e);
         else if (tab === 'announce') {
@@ -1813,6 +1885,7 @@
       if (activeTab === 'users') await loadUsers();
       else if (activeTab === 'support') await loadTickets();
       else if (activeTab === 'withdrawals') await loadPendingWithdrawals();
+      else if (activeTab === 'aiearnings') await loadAiPlan();
       else if (activeTab === 'tiers') await loadTiers();
       else if (activeTab === 'drops') await loadDrops();
       else if (activeTab === 'announce') await loadAnnouncements();
@@ -1821,6 +1894,146 @@
     function showTiersErr(e) {
       document.getElementById('tiersErr').textContent = e.message;
       document.getElementById('tiersErr').classList.remove('hidden');
+    }
+
+    function showAiPlanErr(e) {
+      document.getElementById('aiPlanErr').textContent = e.message;
+      document.getElementById('aiPlanErr').classList.remove('hidden');
+    }
+
+    function aiPlanDateValue() {
+      const el = document.getElementById('aiPlanDate');
+      if (el.value) return el.value;
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function statusPillClass(status) {
+      if (status === 'active') return 'badge ok';
+      if (status === 'pending_approval') return 'badge warn';
+      if (status === 'planning') return 'badge';
+      return 'badge muted';
+    }
+
+    function renderAiPlan() {
+      const pill = document.getElementById('aiStatusPill');
+      const stats = document.getElementById('aiBudgetStats');
+      const approveBtn = document.getElementById('aiApprovePlanBtn');
+      const summary = document.getElementById('aiPlanSummary');
+      if (!aiPlan) {
+        pill.textContent = 'No plan';
+        pill.className = 'badge muted';
+        stats.textContent = 'Set a budget and run the planner.';
+        summary.textContent = '';
+        approveBtn.disabled = true;
+        document.getElementById('aiAllocRows').innerHTML = '<tr><td colspan="6" class="hint">No allocations yet.</td></tr>';
+        return;
+      }
+      pill.textContent = aiPlan.status.replace(/_/g, ' ');
+      pill.className = statusPillClass(aiPlan.status);
+      stats.textContent =
+        'Budget ' + fmtMoney(aiPlan.budgetUsd) +
+        ' · Projected ' + fmtMoney(aiPlan.projectedPayoutUsd) +
+        ' · Spent ' + fmtMoney(aiPlan.budgetSpentUsd);
+      summary.textContent = aiPlan.planSummary || '';
+      approveBtn.disabled = aiPlan.status !== 'pending_approval';
+      if (aiPlan.marketSnapshot?.regime) {
+        document.getElementById('aiRegime').value = aiPlan.marketSnapshot.regime;
+      }
+      if (aiPlan.marketSnapshot?.notes) {
+        document.getElementById('aiMarketNotes').value = aiPlan.marketSnapshot.notes;
+      }
+      document.getElementById('aiBudgetUsd').value = aiPlan.budgetUsd;
+      const tbody = document.getElementById('aiAllocRows');
+      if (!aiAllocations.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="hint">No allocations yet. Run the planner.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = aiAllocations.map((a) => {
+        const tier = a.bandIndex != null ? 'Tier ' + a.bandIndex : '—';
+        const pct = a.percent != null ? Number(a.percent).toFixed(2) + '%' : '—';
+        const range = a.minBalance != null
+          ? fmtMoney(a.minBalance) + ' – ' + fmtMoney(a.maxBalance)
+          : '—';
+        return '<tr><td>' + escapeHtml(a.email) + '</td><td>' + tier + '</td><td>' + pct + '</td><td>' + range + '</td><td>' + fmtMoney(a.projectedProfit) + '</td><td>' + (a.eligible ? 'Yes' : 'No') + '</td></tr>';
+      }).join('');
+    }
+
+    async function loadAiPlan() {
+      document.getElementById('aiPlanErr').classList.add('hidden');
+      document.getElementById('aiPlanOk').classList.add('hidden');
+      document.getElementById('aiPlanLoading').classList.remove('hidden');
+      try {
+        const date = aiPlanDateValue();
+        document.getElementById('aiPlanDate').value = date;
+        const data = await api('/admin/api/ai/daily-plan?date=' + encodeURIComponent(date));
+        aiPlan = data.plan;
+        aiAllocations = data.allocations || [];
+        renderAiPlan();
+      } finally {
+        document.getElementById('aiPlanLoading').classList.add('hidden');
+      }
+    }
+
+    async function saveAiBudget() {
+      document.getElementById('aiPlanErr').classList.add('hidden');
+      const data = await api('/admin/api/ai/daily-plan/budget', {
+        method: 'POST',
+        body: JSON.stringify({
+          planDate: aiPlanDateValue(),
+          budgetUsd: Number(document.getElementById('aiBudgetUsd').value),
+          regime: document.getElementById('aiRegime').value,
+          notes: document.getElementById('aiMarketNotes').value.trim(),
+        }),
+      });
+      aiPlan = data.plan;
+      document.getElementById('aiPlanOk').textContent = 'Budget saved.';
+      document.getElementById('aiPlanOk').classList.remove('hidden');
+      renderAiPlan();
+    }
+
+    async function fetchAiMarket() {
+      document.getElementById('aiPlanErr').classList.add('hidden');
+      const data = await api('/admin/api/ai/daily-plan/fetch-market', {
+        method: 'POST',
+        body: JSON.stringify({ planDate: aiPlanDateValue() }),
+      });
+      aiPlan = data.plan;
+      if (data.indicators?.suggestedRegime) {
+        document.getElementById('aiRegime').value = data.indicators.suggestedRegime;
+      }
+      document.getElementById('aiPlanOk').textContent = data.indicators?.note || 'Market snapshot updated.';
+      document.getElementById('aiPlanOk').classList.remove('hidden');
+      renderAiPlan();
+    }
+
+    async function runAiPlanner() {
+      document.getElementById('aiPlanErr').classList.add('hidden');
+      document.getElementById('aiRunPlannerBtn').disabled = true;
+      try {
+        const data = await api('/admin/api/ai/daily-plan/run', {
+          method: 'POST',
+          body: JSON.stringify({ planDate: aiPlanDateValue() }),
+        });
+        aiPlan = data.plan;
+        aiAllocations = data.allocations || [];
+        document.getElementById('aiPlanOk').textContent = 'Planner finished (' + (data.plannerMode || 'ok') + '). Status: ' + aiPlan.status;
+        document.getElementById('aiPlanOk').classList.remove('hidden');
+        renderAiPlan();
+      } finally {
+        document.getElementById('aiRunPlannerBtn').disabled = false;
+      }
+    }
+
+    async function approveAiPlan() {
+      document.getElementById('aiPlanErr').classList.add('hidden');
+      const data = await api('/admin/api/ai/daily-plan/approve', {
+        method: 'POST',
+        body: JSON.stringify({ planDate: aiPlanDateValue() }),
+      });
+      aiPlan = data.plan;
+      document.getElementById('aiPlanOk').textContent = 'Plan approved and applied to scheduled drops.';
+      document.getElementById('aiPlanOk').classList.remove('hidden');
+      await loadAiPlan();
     }
 
     function showUsersErr(e) {
@@ -1891,6 +2104,11 @@
     document.getElementById('toggleUserPauseBtn').onclick = () => toggleUserPause();
     document.getElementById('saveDropCapsBtn').onclick = () => saveDropCaps();
     document.getElementById('saveGlobalPauseBtn').onclick = () => saveGlobalPause();
+    document.getElementById('aiPlanDate').onchange = () => loadAiPlan().catch(showAiPlanErr);
+    document.getElementById('aiSaveBudgetBtn').onclick = () => saveAiBudget().catch(showAiPlanErr);
+    document.getElementById('aiFetchMarketBtn').onclick = () => fetchAiMarket().catch(showAiPlanErr);
+    document.getElementById('aiRunPlannerBtn').onclick = () => runAiPlanner().catch(showAiPlanErr);
+    document.getElementById('aiApprovePlanBtn').onclick = () => approveAiPlan().catch(showAiPlanErr);
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();

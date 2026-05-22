@@ -36,6 +36,7 @@ const {
   getEffectiveCaps,
 } = require('./airfarmingDrops');
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
+const { registerAdminAiRoutes } = require('./adminAiRoutes');
 
 const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
 
@@ -139,6 +140,7 @@ async function validateDropPatch(body) {
 }
 
 function registerAdminRoutes(app) {
+  registerAdminAiRoutes(app);
   app.post('/admin/api/login', (req, res) => {
     const { username, password } = req.body || {};
     const creds = adminCredentials();

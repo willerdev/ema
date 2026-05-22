@@ -69,6 +69,17 @@ After deploy, open:
 
 Sign in with `ADMIN_USERNAME` / `ADMIN_PASSWORD`. You can view all **scheduled** airfarming drops across users and edit percent, min/max balance, and due time. Edited percent is **locked** so automatic band sync does not overwrite your change.
 
+### AI daily earnings planner (Deepseek)
+
+In Render env vars (or local `.env`):
+
+- `AI_PROVIDER=deepseek` (default if omitted)
+- `DEEPSEEK_API_KEY=<from https://platform.deepseek.com/>`
+- `AI_MODEL=deepseek-chat` (optional; default `deepseek-chat`)
+- `INTERNAL_CRON_SECRET=<random>` — optional cron: `POST /internal/ai/daily-plan` with header `x-internal-cron-secret`
+
+Admin tab **AI earnings**: set daily budget, run planner. Without `DEEPSEEK_API_KEY`, the planner uses a built-in deterministic allocator.
+
 ## 5) Point mobile app to production backend
 
 Set the mobile environment variable to your Render URL:

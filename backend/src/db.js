@@ -2111,7 +2111,344 @@ async function upsertNotificationPreferences(userId, patch) {
   return data;
 }
 
+function utcTodayYmd(now = new Date()) {
+  return now.toISOString().slice(0, 10);
+}
+
+function planRowToApi(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    planDate: row.plan_date,
+    budgetUsd: Number(row.budget_usd),
+    budgetSpentUsd: Number(row.budget_spent_usd),
+    projectedPayoutUsd: Number(row.projected_payout_usd),
+    marketSnapshot: row.market_snapshot || {},
+    status: row.status,
+    planSummary: row.plan_summary || null,
+    model: row.model || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function allocationRowToApi(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    planId: row.plan_id,
+    userId: row.user_id,
+    bandIndex: row.band_index != null ? Number(row.band_index) : null,
+    percent: row.percent != null ? Number(row.percent) : null,
+    minBalance: row.min_balance != null ? Number(row.min_balance) : null,
+    maxBalance: row.max_balance != null ? Number(row.max_balance) : null,
+    projectedProfit: Number(row.projected_profit || 0),
+    eligible: Boolean(row.eligible),
+    dropId: row.drop_id || null,
+    appliedAt: row.applied_at || null,
+    createdAt: row.created_at,
+  };
+}
+
+async function getAiDailyPlanByDate(planDate) {
+  const { data, error } = await supabase
+    .from('ai_daily_plans')
+    .select('*')
+    .eq('plan_date', planDate)
+    .maybeSingle();
+  if (error && isSchemaError(error)) return null;
+  if (error) throw error;
+  return data;
+}
+
+async function getAiDailyPlanById(id) {
+  const { data, error } = await supabase.from('ai_daily_plans').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function upsertAiDailyPlan({
+  planDate,
+  budgetUsd,
+  marketSnapshot,
+  status,
+  planSummary,
+  model,
+  projectedPayoutUsd,
+  budgetSpentUsd,
+}) {
+  const date = planDate || utcTodayYmd();
+  const existing = await getAiDailyPlanByDate(date);
+  const now = new Date().toISOString();
+  const row = {
+    plan_date: date,
+    updated_at: now,
+  };
+  if (budgetUsd !== undefined) row.budget_usd = Math.round(Number(budgetUsd) * 100) / 100;
+  if (marketSnapshot !== undefined) row.market_snapshot = marketSnapshot;
+  if (status !== undefined) row.status = status;
+  if (planSummary !== undefined) row.plan_summary = planSummary;
+  if (model !== undefined) row.model = model;
+  if (projectedPayoutUsd !== undefined) row.projected_payout_usd = Math.round(Number(projectedPayoutUsd) * 100) / 100;
+  if (budgetSpentUsd !== undefined) row.budget_spent_usd = Math.round(Number(budgetSpentUsd) * 100) / 100;
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('ai_daily_plans')
+      .update(row)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const insert = {
+    id: id(),
+    plan_date: date,
+    budget_usd: budgetUsd !== undefined ? row.budget_usd : 0,
+    budget_spent_usd: budgetSpentUsd !== undefined ? row.budget_spent_usd : 0,
+    projected_payout_usd: projectedPayoutUsd !== undefined ? row.projected_payout_usd : 0,
+    market_snapshot: marketSnapshot !== undefined ? marketSnapshot : {},
+    status: status || 'draft',
+    plan_summary: planSummary || null,
+    model: model || null,
+    created_at: now,
+    updated_at: now,
+  };
+  const { data, error } = await supabase.from('ai_daily_plans').insert(insert).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateAiDailyPlan(planId, patch) {
+  const row = { updated_at: new Date().toISOString() };
+  if (patch.budgetUsd !== undefined) row.budget_usd = Math.round(Number(patch.budgetUsd) * 100) / 100;
+  if (patch.budgetSpentUsd !== undefined) row.budget_spent_usd = Math.round(Number(patch.budgetSpentUsd) * 100) / 100;
+  if (patch.projectedPayoutUsd !== undefined) row.projected_payout_usd = Math.round(Number(patch.projectedPayoutUsd) * 100) / 100;
+  if (patch.marketSnapshot !== undefined) row.market_snapshot = patch.marketSnapshot;
+  if (patch.status !== undefined) row.status = patch.status;
+  if (patch.planSummary !== undefined) row.plan_summary = patch.planSummary;
+  if (patch.model !== undefined) row.model = patch.model;
+
+  const { data, error } = await supabase
+    .from('ai_daily_plans')
+    .update(row)
+    .eq('id', planId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function clearAiAllocationsForPlan(planId) {
+  const { error } = await supabase.from('ai_user_drop_allocations').delete().eq('plan_id', planId);
+  if (error && isSchemaError(error)) return;
+  if (error) throw error;
+}
+
+async function upsertAiUserAllocation({
+  planId,
+  userId,
+  bandIndex,
+  percent,
+  minBalance,
+  maxBalance,
+  projectedProfit,
+  eligible,
+  dropId,
+  appliedAt,
+}) {
+  const row = {};
+  if (bandIndex !== undefined) row.band_index = bandIndex;
+  if (percent !== undefined) row.percent = percent;
+  if (minBalance !== undefined) row.min_balance = minBalance;
+  if (maxBalance !== undefined) row.max_balance = maxBalance;
+  if (projectedProfit !== undefined) row.projected_profit = projectedProfit;
+  if (eligible !== undefined) row.eligible = Boolean(eligible);
+  if (dropId !== undefined) row.drop_id = dropId;
+  if (appliedAt !== undefined) row.applied_at = appliedAt;
+
+  const { data: existing } = await supabase
+    .from('ai_user_drop_allocations')
+    .select('id')
+    .eq('plan_id', planId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (existing?.id) {
+    const { data, error } = await supabase
+      .from('ai_user_drop_allocations')
+      .update({
+        band_index: row.band_index,
+        percent: row.percent,
+        min_balance: row.min_balance,
+        max_balance: row.max_balance,
+        projected_profit: row.projected_profit,
+        eligible: row.eligible,
+        drop_id: row.drop_id,
+        applied_at: row.applied_at,
+      })
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (error) throw error;
+    return data;
+  }
+
+  const { data, error } = await supabase
+    .from('ai_user_drop_allocations')
+    .insert({
+      id: id(),
+      plan_id: planId,
+      user_id: userId,
+      band_index: bandIndex ?? null,
+      percent: percent ?? null,
+      min_balance: minBalance ?? null,
+      max_balance: maxBalance ?? null,
+      projected_profit: projectedProfit ?? 0,
+      eligible: eligible !== false,
+      drop_id: dropId ?? null,
+      applied_at: appliedAt ?? null,
+      created_at: new Date().toISOString(),
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listAiAllocationsByPlan(planId, { limit = 5000 } = {}) {
+  const { data, error } = await supabase
+    .from('ai_user_drop_allocations')
+    .select('*')
+    .eq('plan_id', planId)
+    .order('projected_profit', { ascending: false })
+    .limit(limit);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function getAiAllocationForUserPlan(planId, userId) {
+  const { data, error } = await supabase
+    .from('ai_user_drop_allocations')
+    .select('*')
+    .eq('plan_id', planId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function getActiveAiAllocationForUserToday(userId, planDate = utcTodayYmd()) {
+  const plan = await getAiDailyPlanByDate(planDate);
+  if (!plan || plan.status !== 'active') return { plan: null, allocation: null };
+  const allocation = await getAiAllocationForUserPlan(plan.id, userId);
+  return { plan, allocation };
+}
+
+async function incrementAiDailyBudgetSpent(planDate, amount) {
+  const plan = await getAiDailyPlanByDate(planDate);
+  if (!plan) return null;
+  const add = Math.round(Number(amount) * 100) / 100;
+  const next = Math.round((Number(plan.budget_spent_usd) + add) * 100) / 100;
+  return updateAiDailyPlan(plan.id, { budgetSpentUsd: next });
+}
+
+async function recalcPlanProjectedTotals(planId) {
+  const rows = await listAiAllocationsByPlan(planId);
+  const total = rows
+    .filter((r) => r.eligible)
+    .reduce((s, r) => s + Number(r.projected_profit || 0), 0);
+  return updateAiDailyPlan(planId, { projectedPayoutUsd: Math.round(total * 100) / 100 });
+}
+
+async function listUsersForAiPlannerBatch({ offset = 0, limit = 50 } = {}) {
+  const cap = Math.min(200, Math.max(1, Number(limit) || 50));
+  const off = Math.max(0, Number(offset) || 0);
+  const { data: users, error } = await supabase
+    .from('users')
+    .select('id, email')
+    .order('created_at', { ascending: true })
+    .range(off, off + cap - 1);
+  if (error) throw error;
+  const list = users || [];
+  const ids = list.map((u) => u.id);
+  if (!ids.length) return { users: [], hasMore: false };
+
+  const cashByUser = new Map();
+  const afByUser = new Map();
+  const { pauseStatusFromState } = require('./airfarmingPause');
+
+  const walletsRes = await supabase.from('wallets').select('user_id, balance').in('user_id', ids);
+  if (!walletsRes.error) {
+    for (const w of walletsRes.data || []) cashByUser.set(w.user_id, Number(w.balance));
+  }
+
+  const afRes = await supabase.from('airfarming_wallets').select('user_id, balance').in('user_id', ids);
+  if (!afRes.error) {
+    for (const w of afRes.data || []) afByUser.set(w.user_id, Number(w.balance));
+  }
+
+  let stateRes = await supabase
+    .from('airfarming_state')
+    .select('user_id, drops_paused, drops_pause_from, drops_pause_until, drops_pause_band_indexes')
+    .in('user_id', ids);
+  if (stateRes.error && isSchemaError(stateRes.error)) {
+    stateRes = await supabase.from('airfarming_state').select('user_id, drops_paused').in('user_id', ids);
+  }
+
+  const stateByUser = new Map();
+  if (!stateRes.error) {
+    for (const s of stateRes.data || []) stateByUser.set(s.user_id, s);
+  }
+
+  const weekStart = (() => {
+    const d = new Date();
+    const utc = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dow = utc.getUTCDay();
+    utc.setUTCDate(utc.getUTCDate() - ((dow + 6) % 7));
+    return utc.toISOString().slice(0, 10);
+  })();
+
+  const paidByUser = new Map();
+  const paidRes = await supabase
+    .from('airfarming_drops')
+    .select('user_id')
+    .eq('week_start', weekStart)
+    .eq('status', 'paid')
+    .in('user_id', ids);
+  if (!paidRes.error) {
+    for (const r of paidRes.data || []) {
+      paidByUser.set(r.user_id, (paidByUser.get(r.user_id) || 0) + 1);
+    }
+  }
+
+  const mapped = list.map((u) => {
+    const st = stateByUser.get(u.id);
+    const pause = pauseStatusFromState(st);
+    return {
+      id: u.id,
+      email: u.email,
+      cashBalance: cashByUser.get(u.id) ?? 0,
+      airfarmingBalance: afByUser.get(u.id) ?? 0,
+      dropsPaused: pause.dropsPausedNow,
+      paidDropsThisWeek: paidByUser.get(u.id) || 0,
+    };
+  });
+
+  return { users: mapped, hasMore: list.length === cap };
+}
+
+async function countUsersForAiPlanner() {
+  const { count, error } = await supabase.from('users').select('id', { count: 'exact', head: true });
+  if (error) throw error;
+  return count || 0;
+}
+
 module.exports = {
+  utcTodayYmd,
   getUserByEmail,
   getUserById,
   updateUserPasswordHash,
@@ -2247,6 +2584,21 @@ module.exports = {
   getLocalMoneyOrderById,
   getLocalMoneyOrderForUser,
   listPendingWithdrawalsAdmin,
+  planRowToApi,
+  allocationRowToApi,
+  getAiDailyPlanByDate,
+  getAiDailyPlanById,
+  upsertAiDailyPlan,
+  updateAiDailyPlan,
+  clearAiAllocationsForPlan,
+  upsertAiUserAllocation,
+  listAiAllocationsByPlan,
+  getAiAllocationForUserPlan,
+  getActiveAiAllocationForUserToday,
+  incrementAiDailyBudgetSpent,
+  recalcPlanProjectedTotals,
+  listUsersForAiPlannerBatch,
+  countUsersForAiPlanner,
   getLocalMoneyOrderByReference,
   getLocalMoneyOrderByChargeId,
   listLocalMoneyOrdersByUserId,
