@@ -655,26 +655,53 @@
             <p id="aiPlanErr" class="err hidden"></p>
           </div>
           <div class="card">
-            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:12px;">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Plan history</h3>
+            <p class="hint" style="margin-bottom:10px;">Click a date to load that plan. Status shows whether the day&apos;s budget was approved and how much was paid out.</p>
+            <div style="overflow-x:auto;max-height:200px;margin-bottom:16px;">
+              <table class="tier-ref-table">
+                <thead>
+                  <tr>
+                    <th>Date (UTC)</th>
+                    <th>Status</th>
+                    <th>Budget</th>
+                    <th>Projected</th>
+                    <th>Spent</th>
+                    <th>Left</th>
+                  </tr>
+                </thead>
+                <tbody id="aiPlansListRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:8px;">
               <span id="aiStatusPill" class="badge">—</span>
               <span class="hint" id="aiBudgetStats">Budget — · Projected — · Spent —</span>
             </div>
+            <p id="aiServeSummary" class="hint" style="margin-bottom:12px;"></p>
             <div id="aiPlanLoading" class="loading hidden">Loading plan…</div>
             <div style="overflow-x:auto;">
               <table>
                 <thead>
                   <tr>
                     <th>User</th>
-                    <th>Tier</th>
-                    <th>%</th>
-                    <th>Min–max</th>
+                    <th>AF balance</th>
+                    <th>Tier · %</th>
+                    <th>Window</th>
                     <th>Projected</th>
-                    <th>Eligible</th>
+                    <th>Potential now</th>
+                    <th>Drops (plan day)</th>
+                    <th>Week</th>
+                    <th>Service status</th>
                   </tr>
                 </thead>
                 <tbody id="aiAllocRows"></tbody>
               </table>
             </div>
+            <p class="hint" style="margin-top:10px;">
+              <strong>Projected</strong> = estimate at plan time. <strong>Potential now</strong> = profit if balance is in window today.
+              <strong>Drops (plan day)</strong> = due or paid on this UTC date. <strong>Served</strong> = paid drop on plan date with profit credited.
+            </p>
           </div>
         </div>
 
@@ -934,6 +961,8 @@
     let pendingWithdrawals = [];
     let aiPlan = null;
     let aiAllocations = [];
+    let aiPlanSummary = null;
+    let aiPlansList = [];
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -1933,27 +1962,89 @@
       return 'badge muted';
     }
 
+    const AI_SERVICE_LABELS = {
+      served: 'Served',
+      missed: 'Missed',
+      due_today: 'Due today',
+      scheduled: 'Scheduled',
+      applied: 'Applied',
+      waiting: 'Waiting',
+      not_eligible: 'Not eligible',
+      paused: 'Paused',
+    };
+
+    function renderAiPlansList() {
+      const tbody = document.getElementById('aiPlansListRows');
+      const selected = aiPlanDateValue();
+      if (!aiPlansList.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="hint">No plans yet.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = aiPlansList.map((p) => {
+        const sel = p.planDate === selected ? ' style="background:rgba(234,179,8,0.12);cursor:pointer;"' : ' style="cursor:pointer;"';
+        return '<tr data-plan-date="' + escapeHtml(p.planDate) + '"' + sel + '>' +
+          '<td><strong>' + escapeHtml(p.planDate) + '</strong></td>' +
+          '<td>' + escapeHtml(String(p.status).replace(/_/g, ' ')) + '</td>' +
+          '<td>' + fmtMoney(p.budgetUsd) + '</td>' +
+          '<td>' + fmtMoney(p.projectedPayoutUsd) + '</td>' +
+          '<td>' + fmtMoney(p.budgetSpentUsd) + '</td>' +
+          '<td>' + fmtMoney(p.budgetRemainingUsd != null ? p.budgetRemainingUsd : Math.max(0, p.budgetUsd - p.budgetSpentUsd)) + '</td>' +
+          '</tr>';
+      }).join('');
+      tbody.querySelectorAll('tr[data-plan-date]').forEach((tr) => {
+        tr.onclick = () => {
+          document.getElementById('aiPlanDate').value = tr.getAttribute('data-plan-date');
+          loadAiPlan().catch(showAiPlanErr);
+        };
+      });
+    }
+
+    function dropsPlanDayLabel(a) {
+      const parts = [];
+      if (a.dropsDueOnPlanDate > 0) parts.push(a.dropsDueOnPlanDate + ' due');
+      if (a.dropsPaidOnPlanDate > 0) parts.push(a.dropsPaidOnPlanDate + ' paid');
+      if (a.profitPaidOnPlanDate > 0) parts.push(fmtMoney(a.profitPaidOnPlanDate) + ' earned');
+      if (!parts.length) return a.eligible ? '0 (waiting)' : '—';
+      return parts.join(' · ');
+    }
+
     function renderAiPlan() {
       const pill = document.getElementById('aiStatusPill');
       const stats = document.getElementById('aiBudgetStats');
       const approveBtn = document.getElementById('aiApprovePlanBtn');
-      const summary = document.getElementById('aiPlanSummary');
+      const summaryEl = document.getElementById('aiPlanSummary');
+      const serveEl = document.getElementById('aiServeSummary');
       if (!aiPlan) {
         pill.textContent = 'No plan';
         pill.className = 'badge muted';
         stats.textContent = 'Set a budget and run the planner.';
-        summary.textContent = '';
+        summaryEl.textContent = '';
+        serveEl.textContent = '';
         approveBtn.disabled = true;
-        document.getElementById('aiAllocRows').innerHTML = '<tr><td colspan="6" class="hint">No allocations yet.</td></tr>';
+        document.getElementById('aiAllocRows').innerHTML = '<tr><td colspan="9" class="hint">No allocations yet.</td></tr>';
+        renderAiPlansList();
         return;
       }
       pill.textContent = aiPlan.status.replace(/_/g, ' ');
       pill.className = statusPillClass(aiPlan.status);
+      const remaining = aiPlan.budgetRemainingUsd != null
+        ? aiPlan.budgetRemainingUsd
+        : Math.max(0, aiPlan.budgetUsd - aiPlan.budgetSpentUsd);
       stats.textContent =
         'Budget ' + fmtMoney(aiPlan.budgetUsd) +
         ' · Projected ' + fmtMoney(aiPlan.projectedPayoutUsd) +
-        ' · Spent ' + fmtMoney(aiPlan.budgetSpentUsd);
-      summary.textContent = aiPlan.planSummary || '';
+        ' · Spent ' + fmtMoney(aiPlan.budgetSpentUsd) +
+        ' · Remaining ' + fmtMoney(remaining);
+      summaryEl.textContent = aiPlan.planSummary || '';
+      if (aiPlanSummary) {
+        serveEl.textContent =
+          aiPlanSummary.eligibleCount + ' eligible · ' +
+          aiPlanSummary.servedCount + ' served on plan date · ' +
+          aiPlanSummary.appliedCount + ' applied to scheduled drops · ' +
+          aiPlanSummary.waitingCount + ' waiting';
+      } else {
+        serveEl.textContent = '';
+      }
       approveBtn.disabled = aiPlan.status !== 'pending_approval';
       if (aiPlan.marketSnapshot?.regime) {
         document.getElementById('aiRegime').value = aiPlan.marketSnapshot.regime;
@@ -1962,19 +2053,41 @@
         document.getElementById('aiMarketNotes').value = aiPlan.marketSnapshot.notes;
       }
       document.getElementById('aiBudgetUsd').value = aiPlan.budgetUsd;
+      renderAiPlansList();
       const tbody = document.getElementById('aiAllocRows');
       if (!aiAllocations.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="hint">No allocations yet. Run the planner.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="hint">No allocations yet. Run the planner.</td></tr>';
         return;
       }
       tbody.innerHTML = aiAllocations.map((a) => {
-        const tier = a.bandIndex != null ? 'Tier ' + a.bandIndex : '—';
-        const pct = a.percent != null ? Number(a.percent).toFixed(2) + '%' : '—';
+        const tierPct = (a.bandIndex != null ? 'T' + a.bandIndex : '—') +
+          (a.percent != null ? ' · ' + Number(a.percent).toFixed(2) + '%' : '');
         const range = a.minBalance != null
           ? fmtMoney(a.minBalance) + ' – ' + fmtMoney(a.maxBalance)
           : '—';
-        return '<tr><td>' + escapeHtml(a.email) + '</td><td>' + tier + '</td><td>' + pct + '</td><td>' + range + '</td><td>' + fmtMoney(a.projectedProfit) + '</td><td>' + (a.eligible ? 'Yes' : 'No') + '</td></tr>';
+        const winHint = a.inBalanceWindow ? '' : ' <span style="color:var(--muted);font-size:11px;">(out of window)</span>';
+        const week = (a.weekDrops ? a.weekDrops.paid : 0) + ' paid / ' +
+          (a.weekDrops ? a.weekDrops.scheduled : 0) + ' sched';
+        const statusLabel = AI_SERVICE_LABELS[a.serviceStatus] || a.serviceStatus || '—';
+        const statusClass = a.serviceStatus === 'served' ? 'color:var(--ok);font-weight:700;' :
+          a.serviceStatus === 'missed' || a.serviceStatus === 'paused' ? 'color:#f87171;' :
+          a.serviceStatus === 'due_today' ? 'color:#fbbf24;font-weight:700;' : '';
+        return '<tr><td>' + escapeHtml(a.email) + '</td>' +
+          '<td>' + fmtMoney(a.airfarmingBalance || 0) + '</td>' +
+          '<td>' + tierPct + '</td>' +
+          '<td>' + range + winHint + '</td>' +
+          '<td>' + fmtMoney(a.projectedProfit) + '</td>' +
+          '<td>' + fmtMoney(a.potentialProfitNow || 0) + '</td>' +
+          '<td>' + dropsPlanDayLabel(a) + '</td>' +
+          '<td>' + week + '</td>' +
+          '<td style="' + statusClass + '">' + escapeHtml(statusLabel) + '</td></tr>';
       }).join('');
+    }
+
+    async function loadAiPlansList() {
+      const data = await api('/admin/api/ai/plans?limit=45');
+      aiPlansList = data.plans || [];
+      renderAiPlansList();
     }
 
     async function loadAiPlan() {
@@ -1984,9 +2097,13 @@
       try {
         const date = aiPlanDateValue();
         document.getElementById('aiPlanDate').value = date;
-        const data = await api('/admin/api/ai/daily-plan?date=' + encodeURIComponent(date));
-        aiPlan = data.plan;
-        aiAllocations = data.allocations || [];
+        const [planData] = await Promise.all([
+          api('/admin/api/ai/daily-plan?date=' + encodeURIComponent(date)),
+          loadAiPlansList().catch(() => {}),
+        ]);
+        aiPlan = planData.plan;
+        aiAllocations = planData.allocations || [];
+        aiPlanSummary = planData.summary || null;
         renderAiPlan();
       } finally {
         document.getElementById('aiPlanLoading').classList.add('hidden');
@@ -2005,6 +2122,8 @@
         }),
       });
       aiPlan = data.plan;
+      aiAllocations = data.allocations || [];
+      aiPlanSummary = data.summary || null;
       document.getElementById('aiPlanOk').textContent = 'Budget saved.';
       document.getElementById('aiPlanOk').classList.remove('hidden');
       renderAiPlan();
@@ -2017,6 +2136,8 @@
         body: JSON.stringify({ planDate: aiPlanDateValue() }),
       });
       aiPlan = data.plan;
+      aiAllocations = data.allocations || [];
+      aiPlanSummary = data.summary || null;
       if (data.indicators?.suggestedRegime) {
         document.getElementById('aiRegime').value = data.indicators.suggestedRegime;
       }
@@ -2035,6 +2156,8 @@
         });
         aiPlan = data.plan;
         aiAllocations = data.allocations || [];
+        aiPlanSummary = data.summary || null;
+        if (data.plans) aiPlansList = data.plans;
         document.getElementById('aiPlanOk').textContent = 'Planner finished (' + (data.plannerMode || 'ok') + '). Status: ' + aiPlan.status;
         document.getElementById('aiPlanOk').classList.remove('hidden');
         renderAiPlan();
@@ -2050,6 +2173,8 @@
         body: JSON.stringify({ planDate: aiPlanDateValue() }),
       });
       aiPlan = data.plan;
+      aiAllocations = data.allocations || [];
+      aiPlanSummary = data.summary || null;
       document.getElementById('aiPlanOk').textContent = 'Plan approved and applied to scheduled drops.';
       document.getElementById('aiPlanOk').classList.remove('hidden');
       await loadAiPlan();

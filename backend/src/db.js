@@ -2447,6 +2447,58 @@ async function countUsersForAiPlanner() {
   return count || 0;
 }
 
+async function listAiDailyPlansAdmin({ limit = 45 } = {}) {
+  const lim = Math.min(90, Math.max(1, Number(limit) || 45));
+  const { data, error } = await supabase
+    .from('ai_daily_plans')
+    .select('*')
+    .order('plan_date', { ascending: false })
+    .limit(lim);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listAirfarmingDropsForUserIdsWeek(userIds, weekStart) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select(
+      'id, user_id, week_start, drop_index, due_at, paid_at, status, percent, min_balance, max_balance, profit_amount, percent_locked, band_index'
+    )
+    .eq('week_start', weekStart)
+    .in('user_id', ids)
+    .order('due_at', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listAirfarmingWalletsByUserIds(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('airfarming_wallets').select('user_id, balance').in('user_id', ids);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listAirfarmingStatesByUserIds(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (!ids.length) return [];
+  let res = await supabase
+    .from('airfarming_state')
+    .select('user_id, drops_paused, drops_pause_from, drops_pause_until, drops_pause_band_indexes')
+    .in('user_id', ids);
+  if (res.error && isSchemaError(res.error)) {
+    res = await supabase.from('airfarming_state').select('user_id, drops_paused').in('user_id', ids);
+  }
+  if (res.error && isSchemaError(res.error)) return [];
+  if (res.error) throw res.error;
+  return res.data || [];
+}
+
 module.exports = {
   utcTodayYmd,
   getUserByEmail,
@@ -2599,6 +2651,10 @@ module.exports = {
   recalcPlanProjectedTotals,
   listUsersForAiPlannerBatch,
   countUsersForAiPlanner,
+  listAiDailyPlansAdmin,
+  listAirfarmingDropsForUserIdsWeek,
+  listAirfarmingWalletsByUserIds,
+  listAirfarmingStatesByUserIds,
   getLocalMoneyOrderByReference,
   getLocalMoneyOrderByChargeId,
   listLocalMoneyOrdersByUserId,

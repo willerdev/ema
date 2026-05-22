@@ -3,16 +3,16 @@ const {
   getAiDailyPlanByDate,
   upsertAiDailyPlan,
   updateAiDailyPlan,
-  listAiAllocationsByPlan,
   planRowToApi,
-  allocationRowToApi,
   getUsersByIds,
   isMissingTableError,
+  listAiDailyPlansAdmin,
 } = require('./db');
 const { adminAuthMiddleware } = require('./middleware/adminAuth');
 const { runDailyPlanner } = require('./ai/earningsPlanner');
 const { applyActivePlan } = require('./ai/applyPlan');
 const { fetchMarketIndicators } = require('./ai/earningsTools');
+const { buildAiPlanAdminDetail } = require('./ai/planAdminView');
 
 const REGIMES = new Set(['calm', 'normal', 'volatile', 'risk_off']);
 
@@ -20,28 +20,33 @@ function registerAdminAiRoutes(app) {
   const schemaMsg =
     'AI daily plans schema missing. Run backend/sql/migrations/20260604_ai_daily_earnings.sql in Supabase.';
 
+  app.get('/admin/api/ai/plans', adminAuthMiddleware, async (req, res) => {
+    try {
+      const limit = Number(req.query.limit) || 45;
+      const rows = await listAiDailyPlansAdmin({ limit });
+      return res.json({
+        plans: rows.map((row) => {
+          const budgetUsd = Number(row.budget_usd);
+          const spent = Number(row.budget_spent_usd);
+          return {
+            ...planRowToApi(row),
+            budgetRemainingUsd: Math.max(0, Math.round((budgetUsd - spent) * 100) / 100),
+          };
+        }),
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      console.error('[admin/ai/plans]', e);
+      return res.status(500).json({ message: e.message || 'Failed to list plans' });
+    }
+  });
+
   app.get('/admin/api/ai/daily-plan', adminAuthMiddleware, async (req, res) => {
     try {
       const planDate = String(req.query.date || utcTodayYmd()).slice(0, 10);
       const plan = await getAiDailyPlanByDate(planDate);
-      if (!plan) {
-        return res.json({ plan: null, allocations: [], planDate });
-      }
-      const allocations = await listAiAllocationsByPlan(plan.id);
-      const users = await getUsersByIds(allocations.map((a) => a.user_id));
-      const emailById = new Map(users.map((u) => [u.id, u.email]));
-      const balanceById = new Map();
-      for (const a of allocations) {
-        balanceById.set(a.user_id, null);
-      }
-      return res.json({
-        planDate,
-        plan: planRowToApi(plan),
-        allocations: allocations.map((row) => ({
-          ...allocationRowToApi(row),
-          email: emailById.get(row.user_id) || '—',
-        })),
-      });
+      const detail = await buildAiPlanAdminDetail(plan, planDate);
+      return res.json(detail);
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       console.error('[admin/ai/daily-plan]', e);
@@ -72,7 +77,8 @@ function registerAdminAiRoutes(app) {
         marketSnapshot: snapshot,
         status: existing?.status === 'active' ? 'active' : existing?.status || 'draft',
       });
-      return res.json({ plan: planRowToApi(plan) });
+      const detail = await buildAiPlanAdminDetail(plan, planDate);
+      return res.json({ plan: detail.plan, ...detail });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e.message || 'Failed to save budget' });
@@ -96,7 +102,8 @@ function registerAdminAiRoutes(app) {
         marketSnapshot: snapshot,
         status: existing?.status || 'draft',
       });
-      return res.json({ plan: planRowToApi(plan), indicators });
+      const detail = await buildAiPlanAdminDetail(plan, planDate);
+      return res.json({ plan: detail.plan, indicators, ...detail });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e.message || 'Market fetch failed' });
@@ -110,7 +117,9 @@ function registerAdminAiRoutes(app) {
         forceDeterministic: Boolean(req.body?.deterministic),
       });
       if (!result.ok) return res.status(400).json({ message: result.error });
-      return res.json(result);
+      const plan = await getAiDailyPlanByDate(planDate);
+      const detail = await buildAiPlanAdminDetail(plan, planDate);
+      return res.json({ ...result, ...detail });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       console.error('[admin/ai/run]', e);
@@ -133,7 +142,8 @@ function registerAdminAiRoutes(app) {
       await updateAiDailyPlan(plan.id, { status: 'active', planSummary: summary });
       const apply = await applyActivePlan(planDate);
       const updated = await getAiDailyPlanByDate(planDate);
-      return res.json({ plan: planRowToApi(updated), apply });
+      const detail = await buildAiPlanAdminDetail(updated, planDate);
+      return res.json({ apply, ...detail });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e.message || 'Approve failed' });
