@@ -26,7 +26,10 @@ const {
   getAirfarmingPlatformSettings,
   updateAirfarmingPlatformSettings,
   listPendingWithdrawalsAdmin,
+  createAppNotification,
+  getUserByEmail,
 } = require('./db');
+const { normalizeTargetUserId } = require('./notificationRoutes');
 const { approveWithdrawal, rejectWithdrawal } = require('./adminWithdrawals');
 const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
 const {
@@ -641,6 +644,56 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/airfarming/drops/patch]', e);
       return res.status(500).json({ message: 'Failed to update drop' });
+    }
+  });
+
+  const notificationsSchemaMsg =
+    'Notifications schema missing. Run backend/sql/migrations/20260518_app_notifications.sql in Supabase.';
+
+  function notificationToAdmin(row) {
+    return {
+      id: row.id,
+      userId: row.user_id || null,
+      audience: row.user_id ? 'user' : 'broadcast',
+      title: row.title,
+      body: row.body,
+      createdAt: row.created_at,
+    };
+  }
+
+  app.post('/admin/api/notifications', adminAuthMiddleware, async (req, res) => {
+    try {
+      const title = String(req.body?.title || '').trim();
+      const body = String(req.body?.body || '').trim();
+      if (!title || !body) {
+        return res.status(400).json({ message: 'title and body are required' });
+      }
+
+      const broadcast = Boolean(req.body?.broadcast);
+      let userId = null;
+      if (!broadcast) {
+        userId = normalizeTargetUserId(req.body?.userId ?? req.body?.user_id);
+        const email = String(req.body?.userEmail || req.body?.email || '')
+          .trim()
+          .toLowerCase();
+        if (!userId && email) {
+          const user = await getUserByEmail(email);
+          if (!user) return res.status(404).json({ message: 'User not found for that email' });
+          userId = user.id;
+        }
+        if (!userId) {
+          return res.status(400).json({
+            message: 'Provide userEmail or userId, or set broadcast to send to all users',
+          });
+        }
+      }
+
+      const row = await createAppNotification({ userId, title, body });
+      return res.status(201).json({ notification: notificationToAdmin(row) });
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: notificationsSchemaMsg });
+      console.error('[admin/notifications]', e);
+      return res.status(500).json({ message: e.message || 'Failed to send notification' });
     }
   });
 }

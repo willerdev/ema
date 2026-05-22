@@ -445,7 +445,7 @@
           <span class="nav-icon">📉</span> Drops
         </button>
         <button type="button" class="nav-item" data-tab="announce">
-          <span class="nav-icon">📢</span> Announce
+          <span class="nav-icon">📢</span> Notify
         </button>
       </nav>
       <div class="sidebar-foot">
@@ -580,7 +580,7 @@
         <div id="panelAnnounce" class="hidden">
           <div class="card">
             <h3 style="margin:0 0 8px;font-size:1rem;">In-app announcement</h3>
-            <p class="hint">Shown on the Home screen when published. Users can dismiss it; a new announcement shows again after you publish.</p>
+            <p class="hint">Shown on the Home screen banner when published. Users can dismiss it; publishing again replaces the active banner.</p>
             <p id="announceActive" class="warn-box hidden"></p>
             <label>Title</label>
             <input id="announceTitle" type="text" placeholder="e.g. Scheduled maintenance" />
@@ -592,6 +592,25 @@
             </div>
             <p id="announceOk" class="hint hidden" style="color:var(--ok);"></p>
             <p id="announceErr" class="err hidden"></p>
+          </div>
+          <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Push notifications (inbox)</h3>
+            <p class="hint" style="margin-bottom:12px;">
+              Appears in the app <strong>Notifications</strong> screen (bell icon). Leave email empty and check broadcast to notify every user; otherwise enter one user&apos;s email for a targeted message.
+            </p>
+            <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:0;margin-bottom:12px;">
+              <input id="notifyBroadcast" type="checkbox" style="width:auto;margin:0;" />
+              Broadcast to all users
+            </label>
+            <label>User email (targeted)</label>
+            <input id="notifyUserEmail" type="email" placeholder="user@example.com" />
+            <label>Title</label>
+            <input id="notifyTitle" type="text" placeholder="e.g. Withdrawal approved" />
+            <label>Message</label>
+            <textarea id="notifyBody" rows="3" placeholder="Short message for the notification inbox…" style="width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;margin-bottom:12px;"></textarea>
+            <button type="button" class="btn-primary" id="sendNotifyBtn" style="width:auto;">Send notification</button>
+            <p id="notifyOk" class="hint hidden" style="color:var(--ok);"></p>
+            <p id="notifyErr" class="err hidden"></p>
           </div>
         </div>
 
@@ -898,7 +917,7 @@
       aiearnings: 'AI earnings',
       tiers: 'Drop tiers',
       drops: 'Airfarming drops',
-      announce: 'Announcements',
+      announce: 'Announce & notify',
     };
     let drops = [];
     let users = [];
@@ -2114,6 +2133,47 @@
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
+    async function sendAdminNotification() {
+      document.getElementById('notifyErr').classList.add('hidden');
+      document.getElementById('notifyOk').classList.add('hidden');
+      const broadcast = document.getElementById('notifyBroadcast').checked;
+      const title = document.getElementById('notifyTitle').value.trim();
+      const body = document.getElementById('notifyBody').value.trim();
+      const userEmail = document.getElementById('notifyUserEmail').value.trim();
+      if (!title || !body) {
+        document.getElementById('notifyErr').textContent = 'Title and message are required.';
+        document.getElementById('notifyErr').classList.remove('hidden');
+        return;
+      }
+      if (!broadcast && !userEmail) {
+        document.getElementById('notifyErr').textContent = 'Enter a user email or enable broadcast.';
+        document.getElementById('notifyErr').classList.remove('hidden');
+        return;
+      }
+      try {
+        const data = await api('/admin/api/notifications', {
+          method: 'POST',
+          body: JSON.stringify({ broadcast, userEmail, title, body }),
+        });
+        const aud = data.notification?.audience === 'broadcast' ? 'all users' : (userEmail || 'user');
+        document.getElementById('notifyOk').textContent = 'Sent to ' + aud + '.';
+        document.getElementById('notifyOk').classList.remove('hidden');
+        document.getElementById('notifyTitle').value = '';
+        document.getElementById('notifyBody').value = '';
+        if (!broadcast) document.getElementById('notifyUserEmail').value = '';
+      } catch (e) {
+        document.getElementById('notifyErr').textContent = e.message;
+        document.getElementById('notifyErr').classList.remove('hidden');
+      }
+    }
+
+    document.getElementById('notifyBroadcast').onchange = () => {
+      const on = document.getElementById('notifyBroadcast').checked;
+      document.getElementById('notifyUserEmail').disabled = on;
+      if (on) document.getElementById('notifyUserEmail').value = '';
+    };
+
+    document.getElementById('sendNotifyBtn').onclick = () => sendAdminNotification();
     document.getElementById('publishAnnounceBtn').onclick = () => publishAnnouncement();
     document.getElementById('clearAnnounceBtn').onclick = () => clearAnnouncement();
 

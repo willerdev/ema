@@ -29,7 +29,7 @@ const {
   notifyWithdrawalOutcome,
   payoutOutcomeAlreadyNotified,
 } = require('./depositNotifications');
-const { getCombinedWithdrawable } = require('./walletFunding');
+const { getCombinedWithdrawable, getCashWalletUsd } = require('./walletFunding');
 const { createPayoutAwaitingApproval } = require('./nowpaymentsPayoutFlow');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
