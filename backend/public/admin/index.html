@@ -285,6 +285,62 @@
       color: var(--muted);
       font-weight: 700;
     }
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .tier-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+    }
+    .tier-card h4 {
+      margin: 0 0 6px;
+      font-size: 1rem;
+      color: var(--gold);
+    }
+    .tier-card .tier-index {
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 8px;
+    }
+    .tier-card .tier-hint {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin: 0 0 12px;
+      line-height: 1.4;
+    }
+    .tier-kv {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px 12px;
+      margin-bottom: 12px;
+      font-size: 0.85rem;
+    }
+    .tier-kv dt { color: var(--muted); margin: 0; }
+    .tier-kv dd { margin: 0; font-weight: 600; color: var(--text); }
+    .tier-edit {
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+      margin-top: 4px;
+    }
+    .tier-edit label { font-size: 0.7rem; margin-bottom: 4px; }
+    .tier-edit input { padding: 8px 10px; font-size: 0.9rem; margin-bottom: 8px; }
+    .tier-ref-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-bottom: 16px; }
+    .tier-ref-table th, .tier-ref-table td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tier-ref-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; }
+    .tier-ref-table tr:hover td { background: rgba(255,255,255,0.02); }
+    .tier-pct-big { font-size: 1.35rem; font-weight: 800; color: var(--ok); }
     .modal-header {
       display: flex;
       align-items: flex-start;
@@ -375,6 +431,12 @@
         </button>
         <button type="button" class="nav-item" data-tab="support">
           <span class="nav-icon">💬</span> Support
+        </button>
+        <button type="button" class="nav-item" data-tab="withdrawals">
+          <span class="nav-icon">💸</span> Withdrawals
+        </button>
+        <button type="button" class="nav-item" data-tab="tiers">
+          <span class="nav-icon">📊</span> Drop tiers
         </button>
         <button type="button" class="nav-item" data-tab="drops">
           <span class="nav-icon">📉</span> Drops
@@ -484,6 +546,34 @@
           </div>
         </div>
 
+        <div id="panelWithdrawals" class="hidden">
+          <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Pending withdrawals</h3>
+            <p class="hint" style="margin-bottom:12px;">
+              All user withdrawals stay <strong>pending</strong> until you approve them here. Rejecting refunds the user
+              (cash wallet, crypto, or mobile money). Crypto payouts are sent to NOWPayments only after approval.
+            </p>
+            <p id="withdrawStats" class="hint"></p>
+            <div id="withdrawalsLoading" class="loading hidden">Loading withdrawals…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Type</th>
+                    <th>Amount</th>
+                    <th>Destination</th>
+                    <th>Requested</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="withdrawRows"></tbody>
+              </table>
+            </div>
+            <p id="withdrawalsErr" class="err hidden"></p>
+          </div>
+        </div>
+
         <div id="panelAnnounce" class="hidden">
           <div class="card">
             <h3 style="margin:0 0 8px;font-size:1rem;">In-app announcement</h3>
@@ -502,10 +592,35 @@
           </div>
         </div>
 
-        <div id="panelDrops" class="hidden">
+        <div id="panelTiers" class="hidden">
           <div class="card">
-            <h3 style="margin:0 0 8px;font-size:1rem;">Drop requirements &amp; caps</h3>
-            <p class="hint" style="margin-bottom:12px;">Platform limits and per-tier balance windows for new scheduled drops. Existing scheduled drops keep their min/max until edited individually.</p>
+            <h3 style="margin:0 0 8px;font-size:1rem;">What each drop tier means</h3>
+            <p class="hint" style="margin-bottom:12px;">
+              Every new scheduled drop is assigned <strong>one tier (0–3)</strong> automatically. That tier defines the
+              <strong>airfarming balance window</strong> the user must be in to qualify, and the <strong>default drop %</strong>.
+              Users do not pick a tier — it is set per drop. Use this page to see and edit what each tier contains.
+            </p>
+            <p id="tiersSummary" class="hint"></p>
+            <div id="tiersLoading" class="loading hidden">Loading tiers…</div>
+            <div style="overflow-x:auto;">
+              <table class="tier-ref-table">
+                <thead>
+                  <tr>
+                    <th>Tier #</th>
+                    <th>Name</th>
+                    <th>Balance required</th>
+                    <th>Drop %</th>
+                    <th>Example profit</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="tierRefRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card">
+            <h3 style="margin:0 0 8px;font-size:1rem;">Platform caps (all tiers)</h3>
+            <p class="hint" style="margin-bottom:12px;">Hard limits applied on top of each tier’s percent and payout.</p>
             <div class="row" style="margin-bottom:12px;">
               <div>
                 <label>Max drop percent (%)</label>
@@ -521,23 +636,13 @@
             </div>
             <p id="dropCapsOk" class="hint hidden" style="color:var(--ok);"></p>
             <p id="dropCapsErr" class="err hidden"></p>
-            <div style="overflow-x:auto;margin-bottom:8px;">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Tier</th>
-                    <th>Label</th>
-                    <th>Min $</th>
-                    <th>Max $</th>
-                    <th>%</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="bandRows"></tbody>
-              </table>
-            </div>
-            <p id="bandsErr" class="err hidden"></p>
           </div>
+          <div id="tierCards" class="tier-grid"></div>
+          <p id="tiersErr" class="err hidden"></p>
+        </div>
+
+        <div id="panelDrops" class="hidden">
+          <p class="hint" style="margin:0 0 12px;">Tier rules and percentages are configured under <strong>Drop tiers</strong> in the sidebar.</p>
           <div class="card">
             <h3 style="margin:0 0 12px;font-size:1rem;">Pause all users (global)</h3>
             <p class="hint">Stops drop settlement and new scheduling for every user during the window. Optionally limit to balance tiers 0–3.</p>
@@ -554,10 +659,10 @@
             </div>
             <div class="band-picks" id="globalBandPicks">
               <span style="font-size:0.72rem;color:var(--muted);font-weight:700;">Tiers (empty = all):</span>
-              <label><input type="checkbox" class="global-band" value="0" />0</label>
-              <label><input type="checkbox" class="global-band" value="1" />1</label>
-              <label><input type="checkbox" class="global-band" value="2" />2</label>
-              <label><input type="checkbox" class="global-band" value="3" />3</label>
+              <label><input type="checkbox" class="global-band" value="0" /><span data-band-label="0">Tier 0</span></label>
+              <label><input type="checkbox" class="global-band" value="1" /><span data-band-label="1">Tier 1</span></label>
+              <label><input type="checkbox" class="global-band" value="2" /><span data-band-label="2">Tier 2</span></label>
+              <label><input type="checkbox" class="global-band" value="3" /><span data-band-label="3">Tier 3</span></label>
             </div>
             <label>Note (optional)</label>
             <input id="globalPauseNote" type="text" placeholder="Maintenance, holiday, etc." />
@@ -586,7 +691,7 @@
                     <th>%</th>
                     <th>Min $</th>
                     <th>Max $</th>
-                    <th>Band</th>
+                    <th>Tier</th>
                     <th></th>
                   </tr>
                 </thead>
@@ -650,7 +755,7 @@
       <h3 style="font-size:0.95rem;margin:16px 0 8px;">Scheduled drops</h3>
       <div style="overflow-x:auto;">
         <table>
-          <thead><tr><th>#</th><th>Due</th><th>%</th><th>Range</th></tr></thead>
+          <thead><tr><th>#</th><th>Due</th><th>%</th><th>Tier &amp; balance window</th></tr></thead>
           <tbody id="userDropRows"></tbody>
         </table>
       </div>
@@ -719,18 +824,27 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script>
     const TOKEN_KEY = 'ema_admin_token';
-    const PAGE_TITLES = { users: 'Users', support: 'Support tickets', drops: 'Airfarming drops', announce: 'Announcements' };
+    const PAGE_TITLES = {
+      users: 'Users',
+      support: 'Support tickets',
+      withdrawals: 'Withdrawals',
+      tiers: 'Drop tiers',
+      drops: 'Airfarming drops',
+      announce: 'Announcements',
+    };
     let drops = [];
     let users = [];
     let tickets = [];
     let editingId = null;
     let maxPercent = 57.9;
+    let maxProfitPerDrop = 5000;
     let activeTab = 'users';
     let viewingUserId = null;
     let viewingUserDetail = null;
     let chartDepositsInst = null;
     let chartProfitsInst = null;
     let viewingTicketId = null;
+    let pendingWithdrawals = [];
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -791,6 +905,8 @@
       });
       document.getElementById('panelUsers').classList.toggle('hidden', tab !== 'users');
       document.getElementById('panelSupport').classList.toggle('hidden', tab !== 'support');
+      document.getElementById('panelWithdrawals').classList.toggle('hidden', tab !== 'withdrawals');
+      document.getElementById('panelTiers').classList.toggle('hidden', tab !== 'tiers');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
       document.getElementById('panelAnnounce').classList.toggle('hidden', tab !== 'announce');
       document.getElementById('pageTitle').textContent = PAGE_TITLES[tab] || 'Admin';
@@ -798,7 +914,13 @@
       refreshActive().catch((e) => {
         if (tab === 'users') showUsersErr(e);
         else if (tab === 'support') showTicketsErr(e);
-        else showDropsErr(e);
+        else if (tab === 'withdrawals') showWithdrawalsErr(e);
+        else if (tab === 'tiers') showTiersErr(e);
+        else if (tab === 'drops') showDropsErr(e);
+        else if (tab === 'announce') {
+          document.getElementById('announceErr').textContent = e.message;
+          document.getElementById('announceErr').classList.remove('hidden');
+        }
       });
     }
 
@@ -904,7 +1026,9 @@
         const tr = document.createElement('tr');
         tr.innerHTML =
           '<td>' + drop.dropIndex + '</td><td>' + new Date(drop.dueAt).toLocaleString() + '</td>' +
-          '<td>' + drop.percent + '%</td><td>$' + drop.minBalance + ' – $' + drop.maxBalance + '</td>';
+          '<td>' + drop.percent + '%</td>' +
+          '<td>' + escapeHtml(bandTierLabel(drop.bandIndex)) + '<br><span style="color:var(--muted);font-size:0.7rem;">$' +
+          drop.minBalance + ' – $' + drop.maxBalance + '</span></td>';
         dropBody.appendChild(tr);
       });
       if (!(d.scheduledDrops || []).length) {
@@ -1307,7 +1431,7 @@
           '<td>' + fmtCountdown(d.secondsRemaining) + '</td>' +
           '<td><strong>' + d.percent + '%</strong>' + (d.percentLocked ? ' <span class="pill">locked</span>' : '') + '</td>' +
           '<td>$' + d.minBalance + '</td><td>$' + d.maxBalance + '</td>' +
-          '<td>' + (d.bandIndex != null ? d.bandIndex : '—') + '</td>' +
+          '<td>' + escapeHtml(bandTierLabel(d.bandIndex)) + '</td>' +
           '<td><button type="button" class="btn-ghost" data-id="' + d.id + '">Edit</button></td>';
         tbody.appendChild(tr);
       });
@@ -1319,39 +1443,130 @@
 
     let dropBands = [];
 
-    function renderBandRows() {
-      const tbody = document.getElementById('bandRows');
-      tbody.innerHTML = '';
+    function inferBandFromRange(minBalance, maxBalance) {
+      const minN = Number(minBalance);
+      const maxN = Number(maxBalance);
+      if (minN >= 10000) return 3;
+      if (minN >= 1000) return 2;
+      if (minN >= 100 && maxN <= 112) return 1;
+      if (minN >= 100) return 0;
+      return null;
+    }
+
+    function getBandMeta(bandIndex, minBalance, maxBalance) {
+      let idx = bandIndex != null && bandIndex !== '' ? Number(bandIndex) : null;
+      if (idx == null || Number.isNaN(idx)) idx = inferBandFromRange(minBalance, maxBalance);
+      if (idx == null) return null;
+      return dropBands.find((x) => x.bandIndex === idx) || { bandIndex: idx, label: 'Tier ' + idx, percent: '—', minBalance: 0, maxBalance: 0 };
+    }
+
+    function bandTierLabel(bandIndex, minBalance, maxBalance) {
+      const b = getBandMeta(bandIndex, minBalance, maxBalance);
+      if (!b) return '—';
+      return 'Tier ' + b.bandIndex + ' · ' + b.label;
+    }
+
+    function exampleProfit(balance, percent) {
+      const raw = (Number(balance) * Number(percent)) / 100;
+      return Math.min(raw, maxProfitPerDrop || 5000);
+    }
+
+    function updateGlobalBandLabels() {
       dropBands.forEach((b) => {
+        const span = document.querySelector('[data-band-label="' + b.bandIndex + '"]');
+        if (span) {
+          span.textContent = 'Tier ' + b.bandIndex + ' · ' + b.label + ' (' + b.percent + '%)';
+        }
+      });
+    }
+
+    function renderTierReferenceTable() {
+      const tbody = document.getElementById('tierRefRows');
+      tbody.innerHTML = '';
+      const sorted = [...dropBands].sort((a, b) => a.bandIndex - b.bandIndex);
+      if (!sorted.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No tiers loaded. Run migration 20260603 in Supabase.</td></tr>';
+        return;
+      }
+      sorted.forEach((b) => {
+        const profitMin = exampleProfit(b.minBalance, b.percent);
+        const profitMax = exampleProfit(b.maxBalance, b.percent);
         const tr = document.createElement('tr');
         tr.innerHTML =
-          '<td>' + b.bandIndex + '</td>' +
-          '<td>' + escapeHtml(b.label) + '</td>' +
-          '<td><input type="number" step="0.01" min="0" data-band-min="' + b.bandIndex + '" value="' + b.minBalance + '" style="width:88px;padding:6px;" /></td>' +
-          '<td><input type="number" step="0.01" min="0" data-band-max="' + b.bandIndex + '" value="' + b.maxBalance + '" style="width:88px;padding:6px;" /></td>' +
-          '<td><input type="number" step="0.01" min="0.01" data-band-pct="' + b.bandIndex + '" value="' + b.percent + '" style="width:72px;padding:6px;" /></td>' +
-          '<td><button type="button" class="btn-ghost" data-save-band="' + b.bandIndex + '">Save</button></td>';
+          '<td><strong>Tier ' + b.bandIndex + '</strong></td>' +
+          '<td>' + escapeHtml(b.label) + '<br><span style="color:var(--muted);font-size:0.72rem;">' + escapeHtml(b.balanceHint) + '</span></td>' +
+          '<td>' + fmtMoney(b.minBalance) + ' – ' + fmtMoney(b.maxBalance) + '</td>' +
+          '<td><span class="tier-pct-big">' + b.percent + '%</span></td>' +
+          '<td>' + fmtMoney(profitMin) + ' – ' + fmtMoney(profitMax) + '<br><span style="color:var(--muted);font-size:0.7rem;">at min / max balance</span></td>' +
+          '<td>' + (b.active ? '<span class="pill pill-ok">active</span>' : '<span class="pill pill-paused">off</span>') + '</td>';
         tbody.appendChild(tr);
       });
-      tbody.querySelectorAll('button[data-save-band]').forEach((btn) => {
+    }
+
+    function renderTierCards() {
+      const grid = document.getElementById('tierCards');
+      grid.innerHTML = '';
+      const sorted = [...dropBands].sort((a, b) => a.bandIndex - b.bandIndex);
+      sorted.forEach((b) => {
+        const profitMin = exampleProfit(b.minBalance, b.percent);
+        const profitMax = exampleProfit(b.maxBalance, b.percent);
+        const card = document.createElement('div');
+        card.className = 'tier-card';
+        card.innerHTML =
+          '<div class="tier-index">Tier ' + b.bandIndex + ' (band index ' + b.bandIndex + ')</div>' +
+          '<h4>' + escapeHtml(b.label) + '</h4>' +
+          '<p class="tier-hint">' + escapeHtml(b.balanceHint) + '</p>' +
+          '<dl class="tier-kv">' +
+          '<dt>Drop percent</dt><dd class="tier-pct-big" style="font-size:1.1rem;">' + b.percent + '%</dd>' +
+          '<dt>Min balance</dt><dd>' + fmtMoney(b.minBalance) + '</dd>' +
+          '<dt>Max balance</dt><dd>' + fmtMoney(b.maxBalance) + '</dd>' +
+          '<dt>Profit if at min</dt><dd>' + fmtMoney(profitMin) + '</dd>' +
+          '<dt>Profit if at max</dt><dd>' + fmtMoney(profitMax) + '</dd>' +
+          '</dl>' +
+          '<p class="hint" style="margin:0 0 10px;font-size:0.78rem;">User must hold airfarming balance between min and max when the drop settles. New drops assigned to this tier use a random max within this window.</p>' +
+          '<div class="tier-edit">' +
+          '<label>Min balance (USD)</label><input type="number" step="0.01" min="0" data-band-min="' + b.bandIndex + '" value="' + b.minBalance + '" />' +
+          '<label>Max balance (USD)</label><input type="number" step="0.01" min="0" data-band-max="' + b.bandIndex + '" value="' + b.maxBalance + '" />' +
+          '<label>Drop percent (%)</label><input type="number" step="0.01" min="0.01" data-band-pct="' + b.bandIndex + '" value="' + b.percent + '" />' +
+          '<button type="button" class="btn-primary" data-save-band="' + b.bandIndex + '" style="width:auto;margin-top:4px;">Save tier ' + b.bandIndex + '</button>' +
+          '</div>';
+        grid.appendChild(card);
+      });
+      grid.querySelectorAll('button[data-save-band]').forEach((btn) => {
         btn.onclick = () => saveBand(Number(btn.getAttribute('data-save-band')));
       });
     }
 
     async function loadDropSettings() {
       document.getElementById('dropCapsErr').classList.add('hidden');
-      document.getElementById('bandsErr').classList.add('hidden');
+      document.getElementById('tiersErr').classList.add('hidden');
       try {
         const data = await api('/admin/api/airfarming/settings');
         document.getElementById('capMaxPercent').value = data.settings.maxPercent;
         document.getElementById('capMaxProfit').value = data.settings.maxProfitPerDrop;
         maxPercent = data.effectiveCaps?.maxPercent || data.settings.maxPercent || 57.9;
+        maxProfitPerDrop = data.settings.maxProfitPerDrop || 5000;
         document.getElementById('maxPct').textContent = maxPercent;
         dropBands = data.bands || [];
-        renderBandRows();
+        document.getElementById('tiersSummary').textContent =
+          dropBands.length +
+          ' tiers configured · platform max ' + maxPercent + '% · max profit ' + fmtMoney(maxProfitPerDrop) + ' per drop';
+        renderTierReferenceTable();
+        renderTierCards();
+        updateGlobalBandLabels();
+        if (activeTab === 'drops' && drops.length) renderDropsTable();
       } catch (e) {
-        document.getElementById('bandsErr').textContent = e.message;
-        document.getElementById('bandsErr').classList.remove('hidden');
+        document.getElementById('tiersErr').textContent = e.message;
+        document.getElementById('tiersErr').classList.remove('hidden');
+      }
+    }
+
+    async function loadTiers() {
+      document.getElementById('tiersLoading').classList.remove('hidden');
+      try {
+        await loadDropSettings();
+      } finally {
+        document.getElementById('tiersLoading').classList.add('hidden');
       }
     }
 
@@ -1387,8 +1602,8 @@
         });
         await loadDropSettings();
       } catch (e) {
-        document.getElementById('bandsErr').textContent = e.message;
-        document.getElementById('bandsErr').classList.remove('hidden');
+        document.getElementById('tiersErr').textContent = e.message;
+        document.getElementById('tiersErr').classList.remove('hidden');
       }
     }
 
@@ -1397,7 +1612,7 @@
       document.getElementById('dropsNote').classList.add('hidden');
       document.getElementById('dropsLoading').classList.remove('hidden');
       void loadGlobalPause();
-      void loadDropSettings();
+      if (!dropBands.length) void loadDropSettings();
       try {
         const upcoming = document.getElementById('upcomingOnly').checked ? '1' : '0';
         const data = await api('/admin/api/airfarming/drops?upcoming=' + upcoming);
@@ -1505,11 +1720,107 @@
       }
     }
 
+    function showWithdrawalsErr(e) {
+      document.getElementById('withdrawalsErr').textContent = e.message;
+      document.getElementById('withdrawalsErr').classList.remove('hidden');
+    }
+
+    function formatWithdrawAmount(w) {
+      const n = Number(w.amount);
+      if (w.source === 'cash_wallet') return fmtMoney(n);
+      if (w.fiatAmount && w.fiatCurrency) {
+        return n.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + w.asset +
+          ' (~' + w.fiatAmount + ' ' + w.fiatCurrency + ')';
+      }
+      return n.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + (w.asset || '');
+    }
+
+    function renderWithdrawalsTable() {
+      const tbody = document.getElementById('withdrawRows');
+      tbody.innerHTML = '';
+      if (!pendingWithdrawals.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No pending withdrawals</td></tr>';
+      }
+      pendingWithdrawals.forEach((w) => {
+        const tr = document.createElement('tr');
+        const dest = w.source === 'local_money'
+          ? escapeHtml(String(w.destination || '')) + (w.countryCode ? ' · ' + w.countryCode : '')
+          : escapeHtml(String(w.destination || '—').slice(0, 48));
+        tr.innerHTML =
+          '<td>' + escapeHtml(w.userEmail) + '</td>' +
+          '<td><span class="pill">' + escapeHtml(w.sourceLabel) + '</span></td>' +
+          '<td><strong>' + formatWithdrawAmount(w) + '</strong></td>' +
+          '<td style="font-size:0.78rem;max-width:220px;word-break:break-all;">' + dest + '</td>' +
+          '<td>' + new Date(w.createdAt).toLocaleString() + '</td>' +
+          '<td style="white-space:nowrap;">' +
+          '<button type="button" class="btn-primary" data-approve-withdraw="' + w.source + ':' + w.id + '" style="width:auto;margin-right:6px;font-size:0.75rem;padding:6px 10px;">Approve</button>' +
+          '<button type="button" class="btn-danger" data-reject-withdraw="' + w.source + ':' + w.id + '" style="width:auto;font-size:0.75rem;padding:6px 10px;">Reject</button></td>';
+        tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('button[data-approve-withdraw]').forEach((btn) => {
+        btn.onclick = () => actOnWithdraw(btn.getAttribute('data-approve-withdraw'), 'approve', btn);
+      });
+      tbody.querySelectorAll('button[data-reject-withdraw]').forEach((btn) => {
+        btn.onclick = () => actOnWithdraw(btn.getAttribute('data-reject-withdraw'), 'reject', btn);
+      });
+      document.getElementById('withdrawStats').textContent =
+        pendingWithdrawals.length + ' withdrawal(s) awaiting your approval';
+    }
+
+    async function loadPendingWithdrawals() {
+      document.getElementById('withdrawalsErr').classList.add('hidden');
+      document.getElementById('withdrawalsLoading').classList.remove('hidden');
+      try {
+        const data = await api('/admin/api/withdrawals/pending');
+        pendingWithdrawals = data.withdrawals || [];
+        renderWithdrawalsTable();
+      } finally {
+        document.getElementById('withdrawalsLoading').classList.add('hidden');
+      }
+    }
+
+    async function actOnWithdraw(key, action, btnEl) {
+      const colon = key.indexOf(':');
+      const source = key.slice(0, colon);
+      const id = key.slice(colon + 1);
+      if (!source || !id) return;
+
+      let rejectNote = '';
+      if (action === 'reject') {
+        const noteInput = window.prompt('Optional note for rejection:', '');
+        if (noteInput === null) return;
+        rejectNote = noteInput;
+      } else if (!window.confirm('Approve this withdrawal?')) {
+        return;
+      }
+
+      document.getElementById('withdrawalsErr').classList.add('hidden');
+      try {
+        if (btnEl) btnEl.disabled = true;
+        await api('/admin/api/withdrawals/' + source + '/' + id + '/' + action, {
+          method: 'POST',
+          body: action === 'reject' ? JSON.stringify({ note: rejectNote }) : undefined,
+        });
+        await loadPendingWithdrawals();
+      } catch (e) {
+        showWithdrawalsErr(e);
+      } finally {
+        if (btnEl) btnEl.disabled = false;
+      }
+    }
+
     async function refreshActive() {
       if (activeTab === 'users') await loadUsers();
       else if (activeTab === 'support') await loadTickets();
+      else if (activeTab === 'withdrawals') await loadPendingWithdrawals();
+      else if (activeTab === 'tiers') await loadTiers();
       else if (activeTab === 'drops') await loadDrops();
       else if (activeTab === 'announce') await loadAnnouncements();
+    }
+
+    function showTiersErr(e) {
+      document.getElementById('tiersErr').textContent = e.message;
+      document.getElementById('tiersErr').classList.remove('hidden');
     }
 
     function showUsersErr(e) {

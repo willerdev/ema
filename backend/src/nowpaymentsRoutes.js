@@ -29,12 +29,8 @@ const {
   notifyWithdrawalOutcome,
   payoutOutcomeAlreadyNotified,
 } = require('./depositNotifications');
-const {
-  getCashWalletUsd,
-  getCombinedWithdrawable,
-  fundPayoutFromCashWallet,
-  refundCashFundingForPayout,
-} = require('./walletFunding');
+const { getCombinedWithdrawable } = require('./walletFunding');
+const { createPayoutAwaitingApproval } = require('./nowpaymentsPayoutFlow');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -207,6 +203,7 @@ function publicPayoutStatus(internal) {
   const s = String(internal || '').toLowerCase();
   if (s === 'finished') return 'finished';
   if (FAILED_PAYOUT_STATUSES.includes(s)) return 'failed';
+  if (s === 'awaiting_approval') return 'pending';
   return 'in_progress';
 }
 
@@ -594,134 +591,34 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         });
       }
 
-      const payoutId = newId();
-      const uniqueExternalId = newId().replace(/-/g, '').slice(0, 24);
-      let cashFunded = 0;
-      let payoutRow = null;
-
+      let payoutRow;
       try {
-        const funding = await fundPayoutFromCashWallet({
+        payoutRow = await createPayoutAwaitingApproval({
           userId: req.userId,
-          asset: currency,
-          amount,
-          payoutId,
-        });
-        cashFunded = funding.cashFunded;
-
-        const available = await getAvailableForAsset(req.userId, currency);
-        if (available < amount) {
-          if (cashFunded > 0) {
-            await refundCashFundingForPayout({
-              id: payoutId,
-              user_id: req.userId,
-              currency,
-              cash_funded_amount: cashFunded,
-            });
-          }
-          return res.status(400).json({
-            message: 'Insufficient balance after funding',
-            available,
-            requested: amount,
-          });
-        }
-
-        payoutRow = await insertNowpaymentsPayout({
-          id: payoutId,
-          user_id: req.userId,
-          payout_id: null,
-          unique_external_id: uniqueExternalId,
           currency,
           address,
           amount,
-          cash_funded_amount: cashFunded,
-          status: 'pending',
-          reserve_released: false,
-          raw_last_ipn: null,
-        });
-      } catch (fundErr) {
-        if (cashFunded > 0) {
-          await refundCashFundingForPayout({
-            id: payoutId,
-            user_id: req.userId,
-            currency,
-            cash_funded_amount: cashFunded,
-          });
-        }
-        throw fundErr;
-      }
-
-      const ipnUrl = payoutIpnUrl();
-
-      let npResult;
-      try {
-        npResult = await np.createPayout({
-          ipnCallbackUrl: ipnUrl || undefined,
-          withdrawals: [
-            {
-              uniqueExternalId,
-              address,
-              currency,
-              amount,
-            },
-          ],
         });
       } catch (e) {
-        await refundCashFundingForPayout(payoutRow);
-        await updateNowpaymentsPayout(payoutRow.id, {
-          status: 'failed',
-          reserve_released: true,
-          raw_last_ipn: { error: e.message },
-        });
+        if (e.details) {
+          return res.status(400).json({
+            message: e.message || 'Insufficient balance after funding',
+            ...e.details,
+          });
+        }
         throw e;
       }
 
-      const { withdrawalId, batchId } = np.extractPayoutIds(npResult);
-      if (!withdrawalId) {
-        await refundCashFundingForPayout(payoutRow);
-        await updateNowpaymentsPayout(payoutRow.id, {
-          status: 'failed',
-          reserve_released: true,
-          raw_last_ipn: { error: 'No withdrawal id in payout response', npResult },
-        });
-        return res.status(502).json({
-          message: 'Withdrawal was created at the provider but could not be tracked. Contact support.',
-          code: 'PAYOUT_ID_MISSING',
-        });
-      }
-
-      const npStatus = String(npResult.status || 'processing').toLowerCase();
-      let status = npStatus === 'finished' ? 'finished' : 'in_progress';
-      let verifyRaw = null;
-
-      if (process.env.NOWPAYMENTS_AUTO_VERIFY_PAYOUT === '1' && np.payoutVerifyConfigured()) {
-        try {
-          const verificationCode = np.generatePayoutVerificationCode();
-          verifyRaw = await np.verifyPayout(withdrawalId, verificationCode);
-          const verifiedStatus = String(verifyRaw?.status || npStatus).toLowerCase();
-          status = verifiedStatus === 'finished' ? 'finished' : 'in_progress';
-        } catch (verifyErr) {
-          console.warn('Payout auto-verify failed; payout queued for provider processing', verifyErr.message);
-          status = 'in_progress';
-        }
-      }
-
-      const updated = await updateNowpaymentsPayout(payoutRow.id, {
-        payout_id: withdrawalId,
-        batch_payout_id: batchId,
-        status,
-        raw_last_ipn: verifyRaw ? { create: npResult, verify: verifyRaw } : npResult,
-      });
-
       return res.json({
-        id: updated.id,
-        payoutId: updated.payout_id,
-        batchPayoutId: updated.batch_payout_id,
-        status: publicPayoutStatus(updated.status),
-        currency: updated.currency,
-        address: updated.address,
-        amount: updated.amount,
-        cashFunded: Number(updated.cash_funded_amount || 0),
-        message: 'Withdrawal is in progress',
+        id: payoutRow.id,
+        payoutId: null,
+        batchPayoutId: null,
+        status: publicPayoutStatus(payoutRow.status),
+        currency: payoutRow.currency,
+        address: payoutRow.address,
+        amount: payoutRow.amount,
+        cashFunded: Number(payoutRow.cash_funded_amount || 0),
+        message: 'Withdrawal submitted for approval. You will be notified when it is processed.',
       });
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaErrorMessage });

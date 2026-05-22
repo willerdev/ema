@@ -25,7 +25,9 @@ const {
   updateAirfarmingDropBand,
   getAirfarmingPlatformSettings,
   updateAirfarmingPlatformSettings,
+  listPendingWithdrawalsAdmin,
 } = require('./db');
+const { approveWithdrawal, rejectWithdrawal } = require('./adminWithdrawals');
 const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
 const {
   clampAirfarmingPercent,
@@ -535,6 +537,47 @@ function registerAdminRoutes(app) {
     } catch (e) {
       console.error('[admin/airfarming/bands PATCH]', e);
       return res.status(500).json({ message: e.message || 'Failed to update band' });
+    }
+  });
+
+  app.get('/admin/api/withdrawals/pending', adminAuthMiddleware, async (req, res) => {
+    try {
+      const withdrawals = await listPendingWithdrawalsAdmin({
+        limit: Number(req.query.limit) || 200,
+      });
+      return res.json({ withdrawals, count: withdrawals.length });
+    } catch (e) {
+      console.error('[admin/withdrawals/pending]', e);
+      return res.status(500).json({ message: e.message || 'Failed to load pending withdrawals' });
+    }
+  });
+
+  app.post('/admin/api/withdrawals/:source/:id/approve', adminAuthMiddleware, async (req, res) => {
+    try {
+      const result = await approveWithdrawal({
+        source: req.params.source,
+        id: req.params.id,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (e) {
+      const status = e.status || 500;
+      if (status >= 500) console.error('[admin/withdrawals/approve]', e);
+      return res.status(status).json({ message: e.message || 'Failed to approve withdrawal' });
+    }
+  });
+
+  app.post('/admin/api/withdrawals/:source/:id/reject', adminAuthMiddleware, async (req, res) => {
+    try {
+      const result = await rejectWithdrawal({
+        source: req.params.source,
+        id: req.params.id,
+        note: req.body?.note,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (e) {
+      const status = e.status || 500;
+      if (status >= 500) console.error('[admin/withdrawals/reject]', e);
+      return res.status(status).json({ message: e.message || 'Failed to reject withdrawal' });
     }
   });
 

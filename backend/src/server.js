@@ -837,7 +837,11 @@ app.post('/wallet/withdraw', authMiddleware, requireComplianceProfile, async (re
       status: `pending:${statusMeta}`,
     });
 
-    return res.json({ balance: nextBalance, transaction });
+    return res.json({
+      balance: nextBalance,
+      transaction,
+      message: 'Withdrawal submitted for approval. Funds are held until an admin approves the request.',
+    });
   } catch {
     return res.status(500).json({ message: 'Withdraw failed' });
   }

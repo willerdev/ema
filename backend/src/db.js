@@ -256,6 +256,18 @@ async function getTransactionsByUserId(userId) {
   return data || [];
 }
 
+async function getTransactionById(id) {
+  const { data, error } = await supabase.from('transactions').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function updateTransaction(id, patch) {
+  const { data, error } = await supabase.from('transactions').update(patch).eq('id', id).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
 async function clearTransactionsByUserId(userId) {
   const { error } = await supabase.from('transactions').delete().eq('user_id', userId);
   if (error) throw error;
@@ -924,7 +936,7 @@ async function getAdminUserDetail(userId) {
     getTransactionsByUserId(userId),
     supabase
       .from('airfarming_drops')
-      .select('id, drop_index, due_at, percent, min_balance, max_balance, status')
+      .select('id, drop_index, due_at, percent, min_balance, max_balance, band_index, status')
       .eq('user_id', userId)
       .eq('status', 'scheduled')
       .order('due_at', { ascending: true })
@@ -1399,6 +1411,12 @@ async function getNowpaymentsPayoutForUser(userId, id) {
   return data;
 }
 
+async function getNowpaymentsPayoutById(id) {
+  const { data, error } = await supabase.from('nowpayments_payouts').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function updateNowpaymentsPayout(id, patch) {
   const { data, error } = await supabase
     .from('nowpayments_payouts')
@@ -1429,6 +1447,7 @@ async function listPendingNowpaymentsPayoutsByUserId(userId) {
     .eq('reserve_released', false)
     .in('status', [
       'pending',
+      'awaiting_approval',
       'processing',
       'creating',
       'sending',
@@ -1707,6 +1726,12 @@ async function updateLocalMoneyOrder(id, patch) {
   return data;
 }
 
+async function getLocalMoneyOrderById(id) {
+  const { data, error } = await supabase.from('local_money_orders').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function getLocalMoneyOrderForUser(id, userId) {
   const { data, error } = await supabase
     .from('local_money_orders')
@@ -1763,6 +1788,97 @@ async function listPendingLocalMoneyWithdrawalsByUserId(userId) {
     .in('status', ['pending', 'awaiting_approval', 'processing']);
   if (error) throw error;
   return data || [];
+}
+
+/** All withdrawals awaiting manual admin approval. */
+async function listPendingWithdrawalsAdmin({ limit = 200 } = {}) {
+  const cap = Math.min(500, Math.max(1, Number(limit) || 200));
+  const items = [];
+
+  const [txRes, npRes, localRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('*')
+      .eq('type', 'withdraw')
+      .like('status', 'pending%')
+      .order('created_at', { ascending: false })
+      .limit(cap),
+    supabase
+      .from('nowpayments_payouts')
+      .select('*')
+      .eq('status', 'awaiting_approval')
+      .eq('reserve_released', false)
+      .order('created_at', { ascending: false })
+      .limit(cap),
+    supabase
+      .from('local_money_orders')
+      .select('*')
+      .eq('type', 'withdraw')
+      .eq('status', 'awaiting_approval')
+      .order('created_at', { ascending: false })
+      .limit(cap),
+  ]);
+
+  if (txRes.error && !isSchemaError(txRes.error)) throw txRes.error;
+  if (npRes.error && !isSchemaError(npRes.error)) throw npRes.error;
+  if (localRes.error && !isSchemaError(localRes.error)) throw localRes.error;
+
+  for (const t of txRes.data || []) {
+    items.push({
+      source: 'cash_wallet',
+      id: t.id,
+      userId: t.user_id,
+      amount: Number(t.amount),
+      asset: 'USD',
+      status: t.status,
+      destination: t.status.replace(/^pending:/, ''),
+      createdAt: t.created_at,
+    });
+  }
+  for (const p of npRes.data || []) {
+    items.push({
+      source: 'nowpayments',
+      id: p.id,
+      userId: p.user_id,
+      amount: Number(p.amount),
+      asset: String(p.currency || '').toUpperCase(),
+      status: p.status,
+      destination: p.address,
+      createdAt: p.created_at,
+    });
+  }
+  for (const o of localRes.data || []) {
+    items.push({
+      source: 'local_money',
+      id: o.id,
+      userId: o.user_id,
+      amount: Number(o.crypto_amount),
+      asset: String(o.crypto_asset || 'usdt').toUpperCase(),
+      status: o.status,
+      destination: o.phone,
+      fiatAmount: Number(o.fiat_amount),
+      fiatCurrency: o.fiat_currency,
+      countryCode: o.country_code,
+      createdAt: o.created_at,
+    });
+  }
+
+  items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  const userIds = [...new Set(items.map((i) => i.userId))];
+  const users = await getUsersByIds(userIds);
+  const emailByUserId = new Map(users.map((u) => [u.id, u.email]));
+
+  return items.slice(0, cap).map((row) => ({
+    ...row,
+    userEmail: emailByUserId.get(row.userId) || '—',
+    sourceLabel:
+      row.source === 'cash_wallet'
+        ? 'Cash wallet'
+        : row.source === 'nowpayments'
+          ? 'Crypto (NOWPayments)'
+          : 'Mobile money',
+  }));
 }
 
 async function insertSupportTicket(row) {
@@ -2012,6 +2128,8 @@ module.exports = {
   ensureUserTransferCode,
   rpcWalletPeerTransfer,
   createTransaction,
+  getTransactionById,
+  updateTransaction,
   getTransactionsByUserId,
   clearTransactionsByUserId,
   listMt5AccountsByUserId,
@@ -2093,6 +2211,7 @@ module.exports = {
   getNowpaymentsPayoutByNpId,
   updateNowpaymentsPayout,
   getNowpaymentsPayoutForUser,
+  getNowpaymentsPayoutById,
   listNowpaymentsPayoutsByUserId,
   listPendingNowpaymentsPayoutsByUserId,
   insertCryptoLedgerEntry,
@@ -2125,7 +2244,9 @@ module.exports = {
   upsertNotificationPreferences,
   insertLocalMoneyOrder,
   updateLocalMoneyOrder,
+  getLocalMoneyOrderById,
   getLocalMoneyOrderForUser,
+  listPendingWithdrawalsAdmin,
   getLocalMoneyOrderByReference,
   getLocalMoneyOrderByChargeId,
   listLocalMoneyOrdersByUserId,

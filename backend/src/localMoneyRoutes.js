@@ -297,7 +297,7 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
           crypto_asset: 'usdt',
           crypto_amount: cryptoAmount,
           phone,
-          status: 'processing',
+          status: 'awaiting_approval',
           provider_reference: orderId,
         });
 
@@ -312,21 +312,11 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
         });
         order = await updateLocalMoneyOrder(orderId, { ledger_posted: true });
 
-        const smsInit = `Ema: Withdrawal of ${cryptoAmount} USDT (~${fiatAmount} ${region.fiatLabel}) to ${maskPhone(phone)} has been initiated.`;
-        try {
-          await sendSms(phone, smsInit);
-        } catch {
-          /* ignore */
-        }
-
-        // Payout to mobile wallet is fulfilled operationally / via provider transfer; mark processing.
-        order = await updateLocalMoneyOrder(orderId, { status: 'processing' });
-
         return res.status(201).json({
           order: toPublicOrder(order),
           fiatAmount,
           fiatLabel: region.fiatLabel,
-          message: `Withdrawal initiated. About ${fiatAmount} ${region.fiatLabel} will be sent to your mobile number.`,
+          message: `Withdrawal submitted for approval. About ${fiatAmount} ${region.fiatLabel} will be sent to ${maskPhone(phone)} after admin approval.`,
         });
       } catch (e) {
         if (isMissingTableError(e)) return res.status(503).json({ message: SCHEMA_MSG });
