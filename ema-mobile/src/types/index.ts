@@ -10,6 +10,7 @@ export type ExtraStackParamList = {
 
 export type RootTabParamList = {
   Home: undefined;
+  Journal: undefined;
   Trades: undefined;
   Wallet: undefined;
   MT5: undefined;
@@ -20,6 +21,7 @@ export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<RootTabParamList> | undefined;
   AlpacaTrade: undefined;
   AirfarmingTrade: undefined;
+  VipFarmersTrade: undefined;
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
   Notifications: undefined;

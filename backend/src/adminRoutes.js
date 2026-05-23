@@ -41,6 +41,7 @@ const {
 } = require('./airfarmingDrops');
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 const { registerAdminAiRoutes } = require('./adminAiRoutes');
+const { getJournalMonth, getJournalDay } = require('./journalService');
 
 const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
 
@@ -202,6 +203,42 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/users/:id/charts]', e);
       return res.status(500).json({ message: e.message || 'Failed to load charts' });
+    }
+  });
+
+  app.get('/admin/api/users/:id/journal/month', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const now = new Date();
+      const year = Number(req.query.year) || now.getUTCFullYear();
+      const month = Number(req.query.month) || now.getUTCMonth() + 1;
+      if (month < 1 || month > 12) return res.status(400).json({ message: 'Invalid month' });
+      const data = await getJournalMonth(req.params.id, year, month);
+      return res.json(data);
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Journal schema not ready.' });
+      }
+      return res.status(500).json({ message: e.message || 'Failed to load journal' });
+    }
+  });
+
+  app.get('/admin/api/users/:id/journal/day', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const date = String(req.query.date || '').slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ message: 'date query required (YYYY-MM-DD)' });
+      }
+      const data = await getJournalDay(req.params.id, date);
+      return res.json(data);
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Journal schema not ready.' });
+      }
+      return res.status(500).json({ message: e.message || 'Failed to load journal day' });
     }
   });
 

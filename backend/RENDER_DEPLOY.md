@@ -114,11 +114,15 @@ Optional: `TATUM_ETH_MASTER_XPUB` is no longer required for the app runtime (xpu
 
 Smoke test after deploy: `npm run check:tatum` from `backend` with `CHECK_BASE_URL`, `CHECK_EMAIL`, and `CHECK_PASSWORD` set.
 
-## 7) Airfarming, contracts, and daily accrual cron
+## 7) Airfarming, contracts, VIP Farmers, and daily accrual cron
 
 Run `backend/sql/schema.sql` (or `backend/sql/migrate_airfarming_contracts.sql` on an existing DB) so these tables exist: `airfarming_state`, `airfarming_events`, `contract_wallets`, `contract_accruals`.
 
-- **`INTERNAL_CRON_SECRET`** — shared secret for `POST /internal/contracts/daily-accrue`. Send header `x-internal-cron-secret: <value>` or JSON body `{ "secret": "<value>" }`. Configure a Render **Cron Job** (or external scheduler) to call this once per day in UTC so contract balances accrue **2%** per day (idempotent per user per UTC date).
+Run `backend/sql/migrations/20260605_vip_farmers.sql` in Supabase for `vip_investments` and `vip_accruals` (Journal aggregates VIP + airfarming + contracts).
+
+- **`INTERNAL_CRON_SECRET`** — shared secret for internal cron routes. Send header `x-internal-cron-secret: <value>` or JSON body `{ "secret": "<value>" }`.
+- **`POST /internal/contracts/daily-accrue`** — once per day UTC; contract balances accrue **2%** per day (idempotent per user per UTC date).
+- **`POST /internal/vip-farmers/daily-accrue`** — once per day UTC (~00:15 UTC, after contracts); credits **9% of principal** to cash per active VIP investment for up to 30 days (idempotent per investment per UTC date).
 
 ## 8) NOWPayments (crypto wallet)
 

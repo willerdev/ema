@@ -1,27 +1,34 @@
-export type TradeHubItemId = 'forex' | 'airfarming' | 'contracts' | 'expert';
+export type TradeHubItemId = 'forex' | 'airfarming' | 'vip' | 'contracts' | 'expert';
 
 export type TradeHubItem = {
   id: TradeHubItemId;
   title: string;
   meta: string;
   roi: string;
-  route: 'AlpacaTrade' | 'AirfarmingTrade' | 'ContractsTrade' | 'ExpertAutoTrading';
+  route: 'AlpacaTrade' | 'AirfarmingTrade' | 'VipFarmersTrade' | 'ContractsTrade' | 'ExpertAutoTrading';
 };
 
 export const TRADE_HUB_ITEMS: TradeHubItem[] = [
+  {
+    id: 'airfarming',
+    title: 'Airfarmers',
+    meta: 'Normal drop opportunities (2–4 per week)',
+    roi: 'Event range: 20% to 85%',
+    route: 'AirfarmingTrade',
+  },
+  {
+    id: 'vip',
+    title: 'Live VIP Farmers',
+    meta: '30-day lock · 9% daily on principal to cash',
+    roi: 'Locked yield program',
+    route: 'VipFarmersTrade',
+  },
   {
     id: 'forex',
     title: 'Trade on forex market',
     meta: 'Stocks and crypto via your linked broker',
     roi: 'Illustrative ROI range: -1% to +100%',
     route: 'AlpacaTrade',
-  },
-  {
-    id: 'airfarming',
-    title: 'Trade Airfarming',
-    meta: 'Tracked yield events (2–4 per week)',
-    roi: 'Event range: 20% to 85%',
-    route: 'AirfarmingTrade',
   },
   {
     id: 'contracts',
@@ -39,4 +46,5 @@ export const TRADE_HUB_ITEMS: TradeHubItem[] = [
   },
 ];
 
-export const TRADE_HUB_HIDDEN_STORAGE_KEY = 'ema_trade_hub_hidden_v1';
+export const TRADE_HUB_HIDDEN_STORAGE_KEY = 'ema_trade_hub_hidden_v2';
+export const TRADE_HUB_DEFAULT_HIDDEN: TradeHubItemId[] = ['forex', 'contracts', 'expert'];

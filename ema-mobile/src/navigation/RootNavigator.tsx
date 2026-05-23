@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { MainTabNavigator } from './MainTabNavigator';
 import { AlpacaTradeScreen } from '../screens/AlpacaTradeScreen';
 import { AirfarmingTradeScreen } from '../screens/AirfarmingTradeScreen';
+import { VipFarmersTradeScreen } from '../screens/VipFarmersTradeScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
@@ -43,7 +44,8 @@ export function RootNavigator() {
     >
       <Stack.Screen name='MainTabs' component={MainTabNavigator} options={{ headerShown: false }} />
       <Stack.Screen name='AlpacaTrade' component={AlpacaTradeScreen} options={{ title: 'Forex market' }} />
-      <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarming' }} />
+      <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarmers' }} />
+      <Stack.Screen name='VipFarmersTrade' component={VipFarmersTradeScreen} options={{ title: 'Live VIP Farmers' }} />
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
       <Stack.Screen name='Notifications' component={NotificationsScreen} options={{ title: 'Notifications' }} />

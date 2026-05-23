@@ -2672,6 +2672,183 @@ async function listAirfarmingStatesByUserIds(userIds) {
   return res.data || [];
 }
 
+const VIP_DAILY_RATE = 0.09;
+const VIP_LOCK_DAYS = 30;
+const VIP_MIN_INVEST_USD = 100;
+const VIP_EARLY_PENALTY_RATE = 0.3;
+
+function roundWalletUsd(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function vipInvestmentToApi(row) {
+  if (!row) return null;
+  const now = Date.now();
+  const maturesMs = new Date(row.matures_at).getTime();
+  const daysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
+  return {
+    id: row.id,
+    userId: row.user_id,
+    principalUsd: Number(row.principal_usd),
+    startedAt: row.started_at,
+    maturesAt: row.matures_at,
+    status: row.status,
+    totalAccruedUsd: Number(row.total_accrued_usd),
+    daysAccrued: Number(row.days_accrued),
+    daysLeft,
+    matured: now >= maturesMs,
+    dailyRate: VIP_DAILY_RATE,
+    lockDays: VIP_LOCK_DAYS,
+  };
+}
+
+async function getActiveVipInvestmentForUser(userId) {
+  const { data, error } = await supabase
+    .from('vip_investments')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error && isSchemaError(error)) return null;
+  if (error) throw error;
+  return data;
+}
+
+async function getVipInvestmentById(id) {
+  const { data, error } = await supabase.from('vip_investments').select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function createVipInvestment({ userId, principalUsd, startedAt, maturesAt }) {
+  const now = new Date().toISOString();
+  const row = {
+    id: id(),
+    user_id: userId,
+    principal_usd: roundWalletUsd(principalUsd),
+    started_at: startedAt || now,
+    matures_at: maturesAt,
+    status: 'active',
+    total_accrued_usd: 0,
+    days_accrued: 0,
+    created_at: now,
+    updated_at: now,
+  };
+  const { data, error } = await supabase.from('vip_investments').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateVipInvestment(investmentId, patch) {
+  const row = { updated_at: new Date().toISOString() };
+  if (patch.status !== undefined) row.status = patch.status;
+  if (patch.totalAccruedUsd !== undefined) row.total_accrued_usd = roundWalletUsd(patch.totalAccruedUsd);
+  if (patch.daysAccrued !== undefined) row.days_accrued = Number(patch.daysAccrued);
+  const { data, error } = await supabase
+    .from('vip_investments')
+    .update(row)
+    .eq('id', investmentId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listActiveVipInvestments() {
+  const { data, error } = await supabase
+    .from('vip_investments')
+    .select('*')
+    .eq('status', 'active')
+    .lt('days_accrued', VIP_LOCK_DAYS);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function getVipAccrualForInvestmentDay(investmentId, accrualDateYmd) {
+  const { data, error } = await supabase
+    .from('vip_accruals')
+    .select('*')
+    .eq('investment_id', investmentId)
+    .eq('accrual_date', accrualDateYmd)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function insertVipAccrual(row) {
+  const { data, error } = await supabase.from('vip_accruals').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listVipAccrualsForUserBetween(userId, startYmd, endYmd) {
+  const { data, error } = await supabase
+    .from('vip_accruals')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('accrual_date', startYmd)
+    .lte('accrual_date', endYmd)
+    .order('accrual_date', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listVipAccrualsForUserOnDate(userId, dateYmd) {
+  const { data, error } = await supabase
+    .from('vip_accruals')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('accrual_date', dateYmd)
+    .order('created_at', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .select('id, profit_amount, paid_at, percent, status')
+    .eq('user_id', userId)
+    .eq('status', 'paid')
+    .not('paid_at', 'is', null)
+    .gte('paid_at', startIso)
+    .lte('paid_at', endIso)
+    .order('paid_at', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listContractAccrualsForUserBetween(userId, startYmd, endYmd) {
+  const { data, error } = await supabase
+    .from('contract_accruals')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('accrual_date', startYmd)
+    .lte('accrual_date', endYmd)
+    .order('accrual_date', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listContractAccrualsForUserOnDate(userId, dateYmd) {
+  const { data, error } = await supabase
+    .from('contract_accruals')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('accrual_date', dateYmd)
+    .order('created_at', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
 module.exports = {
   utcTodayYmd,
   getUserByEmail,
@@ -2833,4 +3010,21 @@ module.exports = {
   getLocalMoneyOrderByChargeId,
   listLocalMoneyOrdersByUserId,
   listPendingLocalMoneyWithdrawalsByUserId,
+  VIP_DAILY_RATE,
+  VIP_LOCK_DAYS,
+  VIP_MIN_INVEST_USD,
+  VIP_EARLY_PENALTY_RATE,
+  vipInvestmentToApi,
+  getActiveVipInvestmentForUser,
+  getVipInvestmentById,
+  createVipInvestment,
+  updateVipInvestment,
+  listActiveVipInvestments,
+  getVipAccrualForInvestmentDay,
+  insertVipAccrual,
+  listVipAccrualsForUserBetween,
+  listVipAccrualsForUserOnDate,
+  listPaidAirfarmingDropsForUserBetween,
+  listContractAccrualsForUserBetween,
+  listContractAccrualsForUserOnDate,
 };

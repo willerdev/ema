@@ -7,7 +7,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { TRADE_HUB_HIDDEN_STORAGE_KEY, TRADE_HUB_ITEMS, TradeHubItem, TradeHubItemId } from '../content/tradeHubItems';
+import { TRADE_HUB_HIDDEN_STORAGE_KEY, TRADE_HUB_ITEMS, TRADE_HUB_DEFAULT_HIDDEN, TradeHubItem, TradeHubItemId } from '../content/tradeHubItems';
 import { RootStackParamList } from '../types';
 import { palette } from '../theme/colors';
 
@@ -16,11 +16,20 @@ type Nav = NativeStackNavigationProp<RootStackParamList>;
 async function loadHiddenIds(): Promise<TradeHubItemId[]> {
   try {
     const raw = await AsyncStorage.getItem(TRADE_HUB_HIDDEN_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as TradeHubItemId[]) : [];
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as TradeHubItemId[]) : TRADE_HUB_DEFAULT_HIDDEN;
+    }
+    const legacy = await AsyncStorage.getItem('ema_trade_hub_hidden_v1');
+    if (legacy) {
+      const parsed = JSON.parse(legacy);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed as TradeHubItemId[];
+      }
+    }
+    return TRADE_HUB_DEFAULT_HIDDEN;
   } catch {
-    return [];
+    return TRADE_HUB_DEFAULT_HIDDEN;
   }
 }
 

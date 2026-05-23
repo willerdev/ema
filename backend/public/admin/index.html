@@ -285,6 +285,52 @@
       color: var(--muted);
       font-weight: 700;
     }
+    .journal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(0, 1fr));
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .journal-weekday {
+      text-align: center;
+      font-size: 0.65rem;
+      color: var(--muted);
+      font-weight: 700;
+      padding: 2px 0 4px;
+    }
+    .journal-cell {
+      min-height: 44px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      padding: 4px 2px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 1px;
+    }
+    .journal-cell.empty { visibility: hidden; pointer-events: none; }
+    .journal-cell.profit {
+      border-color: rgba(74, 222, 128, 0.55);
+      background: rgba(74, 222, 128, 0.12);
+    }
+    .journal-cell.selected {
+      outline: 2px solid var(--gold);
+      outline-offset: 0;
+    }
+    .journal-cell .day-num { font-weight: 700; line-height: 1.1; }
+    .journal-cell .day-amt {
+      font-size: 0.58rem;
+      color: var(--ok);
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .tier-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -848,6 +894,21 @@
           <canvas id="chartProfits"></canvas>
         </div>
       </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Performance journal (UTC)</h3>
+      <p id="userJournalSummary" class="hint" style="margin-bottom:8px;"></p>
+      <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <button type="button" class="btn-ghost" id="userJournalPrev" style="width:auto;">←</button>
+        <strong id="userJournalMonthLabel">—</strong>
+        <button type="button" class="btn-ghost" id="userJournalNext" style="width:auto;">→</button>
+      </div>
+      <div id="userJournalGrid" class="journal-grid"></div>
+      <p id="userJournalDayTitle" class="hint" style="margin:12px 0 6px;font-weight:700;"></p>
+      <div style="overflow-x:auto;max-height:160px;">
+        <table>
+          <thead><tr><th>Source</th><th>Detail</th><th>Amount</th></tr></thead>
+          <tbody id="userJournalDayRows"></tbody>
+        </table>
+      </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Adjust wallet balance</h3>
       <p class="hint" style="margin-bottom:10px;">Set a new balance or add/subtract. A reason is required and recorded. Use carefully.</p>
       <div class="row" style="align-items:flex-end;margin-bottom:8px;">
@@ -984,6 +1045,10 @@
     let viewingUserDetail = null;
     let chartDepositsInst = null;
     let chartProfitsInst = null;
+    let userJournalYear = null;
+    let userJournalMonth = null;
+    let userJournalSelectedDate = null;
+    let userJournalMonthData = null;
     let viewingTicketId = null;
     let pendingWithdrawals = [];
     let aiPlan = null;
@@ -1299,6 +1364,145 @@
       }
     }
 
+    const JOURNAL_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    function journalSourceLabel(source) {
+      if (source === 'airfarming') return 'Airfarming';
+      if (source === 'vip') return 'VIP Farmers';
+      if (source === 'contracts') return 'Contracts';
+      return source;
+    }
+
+    function journalMonthLabel(year, month) {
+      return new Date(Date.UTC(year, month - 1, 1)).toLocaleString(undefined, {
+        month: 'long',
+        year: 'numeric',
+        timeZone: 'UTC',
+      });
+    }
+
+    function buildJournalCalendarCells(year, month) {
+      const first = new Date(Date.UTC(year, month - 1, 1));
+      const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      const startDow = (first.getUTCDay() + 6) % 7;
+      const cells = [];
+      for (let i = 0; i < startDow; i += 1) cells.push({ day: null, ymd: null });
+      for (let d = 1; d <= daysInMonth; d += 1) {
+        const ymd = year + '-' + String(month).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        cells.push({ day: d, ymd });
+      }
+      return cells;
+    }
+
+    function renderUserJournalGrid() {
+      const grid = document.getElementById('userJournalGrid');
+      if (!grid || userJournalYear == null || userJournalMonth == null) return;
+      document.getElementById('userJournalMonthLabel').textContent =
+        journalMonthLabel(userJournalYear, userJournalMonth);
+      const cells = buildJournalCalendarCells(userJournalYear, userJournalMonth);
+      let html = JOURNAL_WEEKDAYS.map((w) => '<div class="journal-weekday">' + w + '</div>').join('');
+      for (const cell of cells) {
+        if (!cell.day || !cell.ymd) {
+          html += '<div class="journal-cell empty"></div>';
+          continue;
+        }
+        const info = userJournalMonthData?.days?.[cell.ymd];
+        const hasProfit = Boolean(info?.hasProfit);
+        const selected = cell.ymd === userJournalSelectedDate;
+        const cls = ['journal-cell', hasProfit ? 'profit' : '', selected ? 'selected' : ''].filter(Boolean).join(' ');
+        const amt = hasProfit ? fmtMoney(info.totalUsd).replace('$', '') : '';
+        html += '<button type="button" class="' + cls + '" data-journal-date="' + cell.ymd + '">' +
+          '<span class="day-num">' + cell.day + '</span>' +
+          (amt ? '<span class="day-amt">' + amt + '</span>' : '') +
+          '</button>';
+      }
+      grid.innerHTML = html;
+      grid.querySelectorAll('[data-journal-date]').forEach((btn) => {
+        btn.onclick = () => {
+          userJournalSelectedDate = btn.getAttribute('data-journal-date');
+          renderUserJournalGrid();
+          void loadUserJournalDay();
+        };
+      });
+    }
+
+    async function loadUserJournalDay() {
+      const titleEl = document.getElementById('userJournalDayTitle');
+      const rowsEl = document.getElementById('userJournalDayRows');
+      if (!viewingUserId || !userJournalSelectedDate) {
+        if (titleEl) titleEl.textContent = '';
+        if (rowsEl) rowsEl.innerHTML = '';
+        return;
+      }
+      if (titleEl) titleEl.textContent = userJournalSelectedDate + ' (UTC) — loading…';
+      if (rowsEl) rowsEl.innerHTML = '';
+      try {
+        const day = await api('/admin/api/users/' + viewingUserId + '/journal/day?date=' + userJournalSelectedDate);
+        if (titleEl) {
+          titleEl.textContent = userJournalSelectedDate + ' (UTC) — ' +
+            (day.hasProfit ? fmtMoney(day.totalUsd) : 'No earnings');
+        }
+        if (rowsEl) {
+          if (!day.items || day.items.length === 0) {
+            rowsEl.innerHTML = '<tr><td colspan="3" class="hint">No line items</td></tr>';
+          } else {
+            rowsEl.innerHTML = day.items.map((item) =>
+              '<tr><td>' + escapeHtml(journalSourceLabel(item.source)) + '</td>' +
+              '<td>' + escapeHtml(item.label || '—') + '</td>' +
+              '<td>' + fmtMoney(item.amountUsd) + '</td></tr>'
+            ).join('');
+          }
+        }
+      } catch (e) {
+        if (titleEl) titleEl.textContent = userJournalSelectedDate + ' (UTC) — unavailable';
+        if (rowsEl) rowsEl.innerHTML = '<tr><td colspan="3" class="hint">' + escapeHtml(e.message) + '</td></tr>';
+      }
+    }
+
+    async function loadUserJournal(userId) {
+      const summaryEl = document.getElementById('userJournalSummary');
+      const grid = document.getElementById('userJournalGrid');
+      if (!grid) return;
+      const now = new Date();
+      if (userJournalYear == null) userJournalYear = now.getUTCFullYear();
+      if (userJournalMonth == null) userJournalMonth = now.getUTCMonth() + 1;
+      if (!userJournalSelectedDate) userJournalSelectedDate = now.toISOString().slice(0, 10);
+      if (summaryEl) summaryEl.textContent = 'Loading journal…';
+      grid.innerHTML = '';
+      try {
+        const data = await api('/admin/api/users/' + userId + '/journal/month?year=' + userJournalYear + '&month=' + userJournalMonth);
+        userJournalMonthData = data;
+        if (summaryEl) {
+          let text = 'Month total ' + fmtMoney(data.monthTotalUsd) + ' · ' + data.profitDays + ' profit day' +
+            (data.profitDays === 1 ? '' : 's');
+          if (data.bestDay) text += ' · Best ' + fmtMoney(data.bestDay.totalUsd) + ' on ' + data.bestDay.date;
+          summaryEl.textContent = text;
+        }
+        renderUserJournalGrid();
+        await loadUserJournalDay();
+      } catch (e) {
+        userJournalMonthData = null;
+        if (summaryEl) summaryEl.textContent = 'Journal unavailable: ' + e.message;
+        grid.innerHTML = '';
+      }
+    }
+
+    function shiftUserJournalMonth(delta) {
+      let m = userJournalMonth + delta;
+      let y = userJournalYear;
+      if (m < 1) {
+        m = 12;
+        y -= 1;
+      } else if (m > 12) {
+        m = 1;
+        y += 1;
+      }
+      userJournalYear = y;
+      userJournalMonth = m;
+      userJournalSelectedDate = y + '-' + String(m).padStart(2, '0') + '-01';
+      if (viewingUserId) void loadUserJournal(viewingUserId);
+    }
+
     function updatePauseButton(af) {
       const btn = document.getElementById('toggleUserPauseBtn');
       if (!btn) return;
@@ -1317,12 +1521,17 @@
       document.getElementById('userNewPassword').value = '';
       document.getElementById('userNewPasswordConfirm').value = '';
       viewingUserId = id;
+      userJournalYear = null;
+      userJournalMonth = null;
+      userJournalSelectedDate = null;
+      userJournalMonthData = null;
       chartDepositsInst = destroyChart(chartDepositsInst);
       chartProfitsInst = destroyChart(chartProfitsInst);
       const d = await api('/admin/api/users/' + id);
       renderUserDetail(d);
       document.getElementById('userModal').classList.remove('hidden');
       void loadUserCharts(id);
+      void loadUserJournal(id);
     }
 
     async function applyWalletAdjust() {
@@ -2330,6 +2539,8 @@
     document.getElementById('aiApprovePlanBtn').onclick = () => approveAiPlan().catch(showAiPlanErr);
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('applyAdjustBtn').onclick = () => applyWalletAdjust();
+    document.getElementById('userJournalPrev').onclick = () => shiftUserJournalMonth(-1);
+    document.getElementById('userJournalNext').onclick = () => shiftUserJournalMonth(1);
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');

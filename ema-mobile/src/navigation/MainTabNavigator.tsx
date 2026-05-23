@@ -3,6 +3,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { HomeScreen } from '../screens/HomeScreen';
+import { JournalScreen } from '../screens/JournalScreen';
 import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
 import { MT5Screen } from '../screens/MT5Screen';
@@ -14,6 +15,7 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 
 const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
   Home: 'home',
+  Journal: 'calendar',
   Trades: 'stats-chart',
   Wallet: 'wallet',
   MT5: 'analytics',
@@ -22,6 +24,7 @@ const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyph
 
 const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
   Home: 'home-outline',
+  Journal: 'calendar-outline',
   Trades: 'stats-chart-outline',
   Wallet: 'wallet-outline',
   MT5: 'analytics-outline',
@@ -69,6 +72,7 @@ export function MainTabNavigator() {
           ),
         })}
       />
+      <Tab.Screen name='Journal' component={JournalScreen} options={{ tabBarLabel: 'Journal', title: 'Journal' }} />
       <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
       <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
       <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
