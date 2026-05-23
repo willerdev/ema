@@ -13,6 +13,7 @@ const {
   updateAirfarmingUserDropPause,
   getAirfarmingDropsPausedByUserIds,
   adminMoveCashToAirfarming,
+  adminAdjustUserWallet,
   listSupportTicketsAdmin,
   getSupportTicketById,
   updateSupportTicketStatus,
@@ -224,6 +225,42 @@ function registerAdminRoutes(app) {
     } catch (e) {
       console.error('[admin/users/password]', e);
       return res.status(500).json({ message: e.message || 'Failed to update password' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/wallets/adjust', adminAuthMiddleware, async (req, res) => {
+    try {
+      const detail = await getAdminUserDetail(req.params.id);
+      if (!detail) return res.status(404).json({ message: 'User not found' });
+
+      const wallet = String(req.body?.wallet || '').toLowerCase();
+      const mode = req.body?.mode === 'adjust' ? 'adjust' : 'set';
+      const amount = Number(req.body?.amount);
+      const reason = String(req.body?.reason || req.body?.note || '').trim();
+
+      const result = await adminAdjustUserWallet(req.params.id, {
+        wallet,
+        mode,
+        amount,
+        reason,
+      });
+
+      const updated = await getAdminUserDetail(req.params.id);
+      return res.json({
+        ok: true,
+        adjustment: result,
+        cashBalance: updated.cashBalance,
+        airfarmingBalance: updated.airfarmingBalance,
+        usdtBalance: updated.usdtBalance,
+        user: updated.user,
+      });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Wallet schema not ready. Run migrations.' });
+      }
+      console.error('[admin/users/wallets/adjust]', e);
+      return res.status(500).json({ message: e.message || 'Failed to adjust balance' });
     }
   });
 

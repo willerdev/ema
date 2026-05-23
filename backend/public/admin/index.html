@@ -848,7 +848,34 @@
           <canvas id="chartProfits"></canvas>
         </div>
       </div>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Move cash → airfarming</h3>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Adjust wallet balance</h3>
+      <p class="hint" style="margin-bottom:10px;">Set a new balance or add/subtract. A reason is required and recorded. Use carefully.</p>
+      <div class="row" style="align-items:flex-end;margin-bottom:8px;">
+        <div>
+          <label>Wallet</label>
+          <select id="adjustWallet">
+            <option value="cash">Cash (USD)</option>
+            <option value="airfarming">Airfarming (USD)</option>
+            <option value="usdt">Crypto USDT</option>
+          </select>
+        </div>
+        <div>
+          <label>Action</label>
+          <select id="adjustMode">
+            <option value="set">Set balance to</option>
+            <option value="adjust">Add or subtract</option>
+          </select>
+        </div>
+        <div>
+          <label>Amount (USD)</label>
+          <input id="adjustAmount" type="number" step="0.01" placeholder="0.00" />
+        </div>
+      </div>
+      <label>Reason (required)</label>
+      <input id="adjustReason" type="text" placeholder="e.g. Manual correction per support ticket #123" style="margin-bottom:10px;" />
+      <button type="button" class="btn-warn" id="applyAdjustBtn" style="width:auto;margin-bottom:8px;">Apply adjustment</button>
+      <p id="adjustOk" class="hint hidden" style="color:var(--ok);"></p>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Move cash → airfarming</h3>
       <div class="row" style="margin-bottom:16px;">
         <div style="flex:2;">
           <label>Amount (USD)</label>
@@ -1119,6 +1146,7 @@
       document.getElementById('userStatsGrid').innerHTML =
         '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
+        '<div class="stat"><div class="val">' + fmtMoney(d.usdtBalance || 0) + '</div><div class="lbl">USDT</div></div>' +
         '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
         '<div class="stat"><div class="val" id="statDeposits90">—</div><div class="lbl">Deposits 90d</div></div>' +
         '<div class="stat"><div class="val" id="statProfits90">—</div><div class="lbl">Profits 90d</div></div>' +
@@ -1295,6 +1323,53 @@
       renderUserDetail(d);
       document.getElementById('userModal').classList.remove('hidden');
       void loadUserCharts(id);
+    }
+
+    async function applyWalletAdjust() {
+      document.getElementById('userModalErr').classList.add('hidden');
+      document.getElementById('adjustOk').classList.add('hidden');
+      const amount = Number(document.getElementById('adjustAmount').value);
+      const reason = document.getElementById('adjustReason').value.trim();
+      if (!Number.isFinite(amount)) {
+        document.getElementById('userModalErr').textContent = 'Enter a valid amount';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      if (!reason) {
+        document.getElementById('userModalErr').textContent = 'Reason is required';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      const mode = document.getElementById('adjustMode').value;
+      const wallet = document.getElementById('adjustWallet').value;
+      const label = mode === 'adjust'
+        ? (amount >= 0 ? 'Add ' : 'Subtract ') + fmtMoney(Math.abs(amount)) + ' to ' + wallet + '?'
+        : 'Set ' + wallet + ' balance to ' + fmtMoney(amount) + '?';
+      if (!confirm(label + '\n\nReason: ' + reason)) return;
+      try {
+        const res = await api('/admin/api/users/' + viewingUserId + '/wallets/adjust', {
+          method: 'POST',
+          body: JSON.stringify({ wallet, mode, amount, reason }),
+        });
+        const adj = res.adjustment;
+        document.getElementById('adjustOk').textContent =
+          'Updated: ' + fmtMoney(adj.previousBalance) + ' → ' + fmtMoney(adj.newBalance) +
+          (adj.change !== 0 ? ' (change ' + (adj.change > 0 ? '+' : '') + fmtMoney(adj.change) + ')' : '');
+        document.getElementById('adjustOk').classList.remove('hidden');
+        document.getElementById('adjustAmount').value = '';
+        document.getElementById('adjustReason').value = '';
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        const u = users.find((x) => x.id === viewingUserId);
+        if (u) {
+          u.cashBalance = d.cashBalance;
+          u.airfarmingBalance = d.airfarmingBalance;
+        }
+        renderUsersTable();
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
     }
 
     async function moveToAirfarming() {
@@ -2254,6 +2329,7 @@
     document.getElementById('aiRunPlannerBtn').onclick = () => runAiPlanner().catch(showAiPlanErr);
     document.getElementById('aiApprovePlanBtn').onclick = () => approveAiPlan().catch(showAiPlanErr);
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
+    document.getElementById('applyAdjustBtn').onclick = () => applyWalletAdjust();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');

@@ -929,7 +929,7 @@ async function getAdminUserDetail(userId) {
   const user = await getUserById(userId);
   if (!user) return null;
 
-  const [wallet, afWallet, state, transactions, scheduledDrops] = await Promise.all([
+  const [wallet, afWallet, state, transactions, scheduledDrops, cryptoBalances] = await Promise.all([
     getWalletByUserId(userId),
     getAirfarmingWalletByUserId(userId),
     getAirfarmingStateByUserId(userId),
@@ -941,9 +941,15 @@ async function getAdminUserDetail(userId) {
       .eq('status', 'scheduled')
       .order('due_at', { ascending: true })
       .limit(10),
+    getCryptoBalancesByUserId(userId).catch(() => []),
   ]);
 
   if (scheduledDrops.error && !isSchemaError(scheduledDrops.error)) throw scheduledDrops.error;
+
+  const usdtRow = (cryptoBalances || []).find(
+    (b) => b.asset === 'usdttrc20' || b.asset === 'usdt'
+  );
+  const usdtAvailable = usdtRow ? Number.parseFloat(String(usdtRow.available)) || 0 : 0;
 
   const { pauseStatusFromState } = require('./airfarmingPause');
   const pause = pauseStatusFromState(state);
@@ -958,6 +964,11 @@ async function getAdminUserDetail(userId) {
     },
     cashBalance: Number.parseFloat(String(wallet?.balance ?? 0)) || 0,
     airfarmingBalance: Number.parseFloat(String(afWallet?.balance ?? 0)) || 0,
+    usdtBalance: usdtAvailable,
+    cryptoBalances: (cryptoBalances || []).map((b) => ({
+      asset: b.asset,
+      available: Number.parseFloat(String(b.available)) || 0,
+    })),
     airfarming: state
       ? {
           weekStart: state.week_start,
@@ -2001,6 +2012,168 @@ async function adminMoveCashToAirfarming(userId, amount) {
   return { cashWallet: cash - amt, airfarmingBalance: nextAf, amount: amt };
 }
 
+function roundWalletUsd(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+/**
+ * Admin set or adjust user wallet (cash, airfarming, or USDT ledger).
+ * @param {'cash'|'airfarming'|'usdt'} wallet
+ * @param {'set'|'adjust'} mode - set absolute balance, or add/subtract amount
+ */
+async function adminAdjustUserWallet(userId, { wallet, mode = 'set', amount, reason }) {
+  const note = String(reason || '').trim();
+  if (!note) {
+    const err = new Error('A reason is required for balance adjustments');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const w = String(wallet || '').toLowerCase();
+  if (!['cash', 'airfarming', 'usdt'].includes(w)) {
+    const err = new Error('wallet must be cash, airfarming, or usdt');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const raw = Number(amount);
+  if (!Number.isFinite(raw)) {
+    const err = new Error('Valid amount is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const m = mode === 'adjust' ? 'adjust' : 'set';
+  const now = new Date().toISOString();
+  const auditId = id();
+
+  if (w === 'cash') {
+    await ensureWalletForUser(userId);
+    const row = await getWalletByUserId(userId);
+    const previous = roundWalletUsd(row?.balance);
+    const next =
+      m === 'adjust' ? roundWalletUsd(previous + raw) : roundWalletUsd(raw);
+    if (next < 0) {
+      const err = new Error('Cash balance cannot be negative');
+      err.statusCode = 400;
+      throw err;
+    }
+    await setWalletBalance(userId, next);
+    const change = roundWalletUsd(next - previous);
+    if (change > 0) {
+      await createTransaction({
+        userId,
+        type: 'deposit',
+        amount: change,
+        status: 'completed',
+      });
+    } else if (change < 0) {
+      await createTransaction({
+        userId,
+        type: 'withdraw',
+        amount: Math.abs(change),
+        status: 'completed',
+      });
+    }
+    return {
+      wallet: 'cash',
+      mode: m,
+      previousBalance: previous,
+      newBalance: next,
+      change,
+      reason: note,
+      auditId,
+    };
+  }
+
+  if (w === 'airfarming') {
+    const af = await getAirfarmingWalletByUserId(userId);
+    const previous = roundWalletUsd(af?.balance);
+    const next =
+      m === 'adjust' ? roundWalletUsd(previous + raw) : roundWalletUsd(raw);
+    if (next < 0) {
+      const err = new Error('Airfarming balance cannot be negative');
+      err.statusCode = 400;
+      throw err;
+    }
+    await upsertAirfarmingWalletRow({
+      user_id: userId,
+      balance: next,
+      updated_at: now,
+    });
+    const change = roundWalletUsd(next - previous);
+    if (change > 0) {
+      await insertAirfarmingTransfer({
+        id: id(),
+        user_id: userId,
+        direction: 'to_airfarming',
+        amount: change,
+        created_at: now,
+      });
+    } else if (change < 0) {
+      await insertAirfarmingTransfer({
+        id: id(),
+        user_id: userId,
+        direction: 'to_cash',
+        amount: Math.abs(change),
+        created_at: now,
+      });
+    }
+    return {
+      wallet: 'airfarming',
+      mode: m,
+      previousBalance: previous,
+      newBalance: next,
+      change,
+      reason: note,
+      auditId,
+    };
+  }
+
+  const asset = 'usdttrc20';
+  const balances = await getCryptoBalancesByUserId(userId);
+  const row = balances.find((b) => b.asset === asset || b.asset === 'usdt');
+  const previous = roundWalletUsd(row?.available ?? 0);
+  const next = m === 'adjust' ? roundWalletUsd(previous + raw) : roundWalletUsd(raw);
+  if (next < 0) {
+    const err = new Error('USDT balance cannot be negative');
+    err.statusCode = 400;
+    throw err;
+  }
+  const change = roundWalletUsd(next - previous);
+  if (change > 0) {
+    await insertCryptoLedgerEntry({
+      id: id(),
+      user_id: userId,
+      asset,
+      direction: 'in',
+      amount: change,
+      source: 'admin_adjustment',
+      source_id: auditId,
+    });
+  } else if (change < 0) {
+    await insertCryptoLedgerEntry({
+      id: id(),
+      user_id: userId,
+      asset,
+      direction: 'out',
+      amount: Math.abs(change),
+      source: 'admin_adjustment',
+      source_id: auditId,
+    });
+  }
+  return {
+    wallet: 'usdt',
+    asset,
+    mode: m,
+    previousBalance: previous,
+    newBalance: next,
+    change,
+    reason: note,
+    auditId,
+  };
+}
+
 async function getActiveAppAnnouncement() {
   const { data, error } = await supabase
     .from('app_announcements')
@@ -2629,6 +2802,7 @@ module.exports = {
   listSupportTicketsAdmin,
   updateSupportTicketStatus,
   adminMoveCashToAirfarming,
+  adminAdjustUserWallet,
   getNotificationPreferencesByUserId,
   upsertNotificationPreferences,
   insertLocalMoneyOrder,
