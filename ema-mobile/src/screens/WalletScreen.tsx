@@ -9,7 +9,10 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
 import { NetworkGridCompact } from '../components/NetworkGridCompact';
@@ -33,23 +36,28 @@ import { formatNetworkLabel, sanitizeUserFacingError } from '../utils/userFacing
 import { ActivityListSkeleton, BalanceSkeleton } from '../components/Skeleton';
 import { WalletActivityList } from '../components/WalletActivityList';
 import {
-  aggregateBalancesForDisplay,
   combinedWithdrawableForNetwork,
   maxWithdrawableAmount,
+  sumUsdtFamilyAvailable,
 } from '../utils/walletDisplay';
 import {
+  navigateToAirfarmingTrade,
   navigateToCryptoDepositPayment,
+  navigateToSendById,
   navigateToSupport,
   navigateToTransactionDetail,
   navigateToTransactionHistory,
+  navigateToVipFarmersTrade,
 } from '../utils/navigationHelpers';
 import { mergeAllWalletActivity } from '../utils/walletActivity';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
+const GAS_BANNER_DISMISS_PREFIX = 'ema_wallet_gas_banner_dismissed_';
 
 export function WalletScreen() {
   const navigation = useNavigation();
+  const { user } = useAuth();
   const { showToast } = useToast();
 
   const [totpEnabled, setTotpEnabled] = useState(false);
@@ -75,7 +83,11 @@ export function WalletScreen() {
   const [withdrawModalMax, setWithdrawModalMax] = useState(0);
   const [withdrawModalCurrencyLabel, setWithdrawModalCurrencyLabel] = useState('USDT (TRC20)');
   const [complianceComplete, setComplianceComplete] = useState(false);
+  const [gasBannerDismissed, setGasBannerDismissed] = useState(false);
+  const [transferModalOpen, setTransferModalOpen] = useState(false);
   const clientIpLoaded = useRef(false);
+
+  const gasDismissKey = user?.id ? `${GAS_BANNER_DISMISS_PREFIX}${user.id}` : null;
 
   const alertComplianceRequired = () => {
     Alert.alert(
@@ -132,7 +144,20 @@ export function WalletScreen() {
     await Promise.all([loadCompliance(), loadWhitelistedWallets(), refreshNowpayments()]);
   }, [loadCompliance, loadWhitelistedWallets, refreshNowpayments]);
 
-  usePolling(refresh, 60000, !withdrawModalOpen && !depositModalOpen);
+  usePolling(refresh, 60000, !withdrawModalOpen && !depositModalOpen && !transferModalOpen);
+
+  useEffect(() => {
+    if (!gasDismissKey) {
+      setGasBannerDismissed(false);
+      return;
+    }
+    void AsyncStorage.getItem(gasDismissKey).then((v) => setGasBannerDismissed(v === '1'));
+  }, [gasDismissKey]);
+
+  const dismissGasBanner = async () => {
+    if (gasDismissKey) await AsyncStorage.setItem(gasDismissKey, '1');
+    setGasBannerDismissed(true);
+  };
 
   useEffect(() => {
     if (clientIpLoaded.current) return;
@@ -262,6 +287,21 @@ export function WalletScreen() {
   );
   const recentActivity = useMemo(() => allActivity.slice(0, 5), [allActivity]);
   const walletLoading = npLoading && !npSummary && !npError;
+  const totalUsd = useMemo(
+    () => sumUsdtFamilyAvailable(npSummary?.balances, npSummary?.cashWalletUsd),
+    [npSummary]
+  );
+  const reservedUsd = useMemo(() => {
+    let r = 0;
+    for (const b of npSummary?.balances || []) {
+      if (b.asset.toLowerCase().includes('usdt') || b.asset === 'usdt') {
+        r += Number(b.reserved ?? 0) || 0;
+      }
+    }
+    return r;
+  }, [npSummary]);
+
+  const openTransferChooser = () => setTransferModalOpen(true);
 
   const inputStyle = {
     backgroundColor: palette.surfaceElevated,
@@ -294,46 +334,63 @@ export function WalletScreen() {
           </Card>
         ) : null}
 
-        <Card style={styles.gasCard}>
-          <Text style={styles.gasTitle}>Network fee reserve</Text>
-          <Text style={styles.gasText}>
-            Leave at least 5% of your wallet balance for blockchain gas fees. If you withdraw everything at once, you may not be
-            able to deposit again until you add funds back to cover fees.
-          </Text>
-          {!totpEnabled ? (
-            <Text style={styles.gasText}>Enable two-factor authentication in Settings for stronger withdrawal protection.</Text>
-          ) : null}
-        </Card>
+        {!gasBannerDismissed ? (
+          <Card style={styles.gasCard}>
+            <View style={styles.gasHeader}>
+              <Text style={styles.gasTitle}>Network fee reserve</Text>
+              <Pressable onPress={() => void dismissGasBanner()} hitSlop={12} accessibilityLabel='Dismiss'>
+                <Ionicons name='close' size={20} color={palette.textSecondary} />
+              </Pressable>
+            </View>
+            <Text style={styles.gasText}>
+              Leave at least 5% of your wallet balance for blockchain gas fees. If you withdraw everything at once, you may not be
+              able to deposit again until you add funds back to cover fees.
+            </Text>
+            {!totpEnabled ? (
+              <Text style={styles.gasText}>Enable two-factor authentication in Settings for stronger withdrawal protection.</Text>
+            ) : null}
+          </Card>
+        ) : null}
 
         {walletLoading ? (
           <BalanceSkeleton />
         ) : (
           <Card style={styles.heroCard}>
-            <Text style={styles.heroCaption}>Wallet balances</Text>
-            {npSummary?.balances?.length || (npSummary?.cashWalletUsd ?? 0) > 0 ? (
-              <>
-                {aggregateBalancesForDisplay(npSummary?.balances, npSummary?.cashWalletUsd).map((b) => (
-                  <View key={b.asset} style={styles.balanceRow}>
-                    <Text style={styles.assetLabel}>{b.asset.toUpperCase()}</Text>
-                    <Text style={styles.assetValue}>{b.available}</Text>
-                    {b.reserved && Number(b.reserved) > 0 ? (
-                      <Text style={styles.assetSub}>Reserved: {b.reserved}</Text>
-                    ) : null}
-                  </View>
-                ))}
-              </>
-            ) : (
+            <Text style={styles.heroCaption}>Total balance</Text>
+            <Text style={styles.totalBalance}>
+              {totalUsd > 0 ? `$${totalUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'}
+            </Text>
+            <Text style={styles.totalSub}>USD · USDT</Text>
+            {reservedUsd > 0 ? (
+              <Text style={styles.assetSub}>Reserved for pending payouts: {Math.floor(reservedUsd)}</Text>
+            ) : null}
+            {totalUsd <= 0 ? (
               <Text style={styles.item}>No balance yet. Deposit crypto to get started.</Text>
-            )}
-            <View style={styles.quickActionsRow}>
-              <PrimaryButton label='Deposit' onPress={() => setDepositModalOpen(true)} style={{ flex: 1 }} />
-              <View style={{ width: 8 }} />
-              <PrimaryButton
-                label='Withdraw'
+            ) : null}
+            <View style={styles.actionRow}>
+              <Pressable
+                style={styles.actionItem}
                 onPress={openWithdrawModal}
-                style={{ flex: 1 }}
                 disabled={!complianceComplete}
-              />
+                accessibilityLabel='Withdraw'
+              >
+                <View style={[styles.actionCircle, !complianceComplete && styles.actionCircleDisabled]}>
+                  <Ionicons name='arrow-up' size={22} color={palette.textPrimary} />
+                </View>
+                <Text style={styles.actionLabel}>Withdraw</Text>
+              </Pressable>
+              <Pressable style={styles.actionItem} onPress={() => setDepositModalOpen(true)} accessibilityLabel='Deposit'>
+                <View style={[styles.actionCircle, styles.actionCirclePrimary]}>
+                  <Ionicons name='arrow-down' size={22} color='#fff' />
+                </View>
+                <Text style={styles.actionLabel}>Deposit</Text>
+              </Pressable>
+              <Pressable style={styles.actionItem} onPress={openTransferChooser} accessibilityLabel='Transfer'>
+                <View style={styles.actionCircle}>
+                  <Ionicons name='swap-horizontal' size={22} color={palette.textPrimary} />
+                </View>
+                <Text style={styles.actionLabel}>Transfer</Text>
+              </Pressable>
             </View>
           </Card>
         )}
@@ -416,7 +473,6 @@ export function WalletScreen() {
             Having trouble withdrawing? <Text style={styles.supportLinkAccent}>Get help in Support</Text>
           </Text>
         </Pressable>
-        <Text style={styles.ruleNote}>Rule : 1 . when a lion is hungry he eats</Text>
         <TextInput
           style={inputStyle}
           value={withdrawAmount}
@@ -472,6 +528,52 @@ export function WalletScreen() {
           disabled={!withdrawReady || withdrawSubmitting}
         />
       </FormModal>
+
+      <FormModal visible={transferModalOpen} title='Transfer' onClose={() => setTransferModalOpen(false)}>
+        <Text style={styles.hint}>Move funds between products or send to another member.</Text>
+        <Pressable
+          style={styles.transferOption}
+          onPress={() => {
+            setTransferModalOpen(false);
+            navigateToSendById(navigation);
+          }}
+        >
+          <Ionicons name='person-outline' size={22} color={palette.primary} />
+          <View style={styles.transferOptionText}>
+            <Text style={styles.transferOptionTitle}>Send to member</Text>
+            <Text style={styles.transferOptionSub}>Transfer ID · trading USD balance</Text>
+          </View>
+          <Ionicons name='chevron-forward' size={20} color={palette.textSecondary} />
+        </Pressable>
+        <Pressable
+          style={styles.transferOption}
+          onPress={() => {
+            setTransferModalOpen(false);
+            navigateToAirfarmingTrade(navigation);
+          }}
+        >
+          <Ionicons name='leaf-outline' size={22} color={palette.primary} />
+          <View style={styles.transferOptionText}>
+            <Text style={styles.transferOptionTitle}>Airfarmers</Text>
+            <Text style={styles.transferOptionSub}>Move cash to or from airfarming</Text>
+          </View>
+          <Ionicons name='chevron-forward' size={20} color={palette.textSecondary} />
+        </Pressable>
+        <Pressable
+          style={styles.transferOption}
+          onPress={() => {
+            setTransferModalOpen(false);
+            navigateToVipFarmersTrade(navigation);
+          }}
+        >
+          <Ionicons name='diamond-outline' size={22} color={palette.primary} />
+          <View style={styles.transferOptionText}>
+            <Text style={styles.transferOptionTitle}>Live VIP Farmers</Text>
+            <Text style={styles.transferOptionSub}>Invest from your cash wallet</Text>
+          </View>
+          <Ionicons name='chevron-forward' size={20} color={palette.textSecondary} />
+        </Pressable>
+      </FormModal>
     </View>
   );
 }
@@ -487,13 +589,39 @@ const styles = StyleSheet.create({
   item: { color: palette.textPrimary, marginBottom: 6 },
   hint: { color: palette.textSecondary, marginTop: 4, marginBottom: 8, fontSize: 12 },
   errorText: { color: '#f87171', marginBottom: 8 },
-  heroCard: { paddingTop: 18, paddingBottom: 18 },
-  heroCaption: { color: palette.textSecondary, marginBottom: 12, fontSize: 15 },
-  balanceRow: { marginBottom: 10 },
-  assetLabel: { color: palette.textSecondary, fontSize: 13 },
-  assetValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '700' },
-  assetSub: { color: palette.textSecondary, fontSize: 12 },
-  quickActionsRow: { flexDirection: 'row', marginTop: 12 },
+  heroCard: { paddingTop: 18, paddingBottom: 20 },
+  heroCaption: { color: palette.textSecondary, marginBottom: 8, fontSize: 14 },
+  totalBalance: { color: palette.textPrimary, fontSize: 34, fontWeight: '700', letterSpacing: -0.5 },
+  totalSub: { color: palette.textSecondary, fontSize: 13, marginBottom: 4 },
+  assetSub: { color: palette.textSecondary, fontSize: 12, marginBottom: 8 },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 20, paddingHorizontal: 4 },
+  actionItem: { alignItems: 'center', minWidth: 72 },
+  actionCircle: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: palette.surfaceElevated,
+    borderWidth: 1,
+    borderColor: palette.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  actionCirclePrimary: { backgroundColor: palette.primary, borderColor: palette.primary },
+  actionCircleDisabled: { opacity: 0.45 },
+  actionLabel: { color: palette.textSecondary, fontSize: 12, fontWeight: '600' },
+  transferOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+    gap: 12,
+  },
+  transferOptionText: { flex: 1 },
+  transferOptionTitle: { color: palette.textPrimary, fontSize: 15, fontWeight: '600' },
+  transferOptionSub: { color: palette.textSecondary, fontSize: 12, marginTop: 2 },
+  gasHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   mono: { color: palette.textPrimary, fontFamily: 'Menlo', fontSize: 12, marginBottom: 8 },
   complianceBanner: { marginBottom: 12, borderColor: '#f59e0b' },
   complianceBannerText: { color: palette.textPrimary, fontSize: 13, lineHeight: 18 },
@@ -504,13 +632,6 @@ const styles = StyleSheet.create({
   supportLinkWrap: { marginBottom: 8 },
   supportLinkText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16 },
   supportLinkAccent: { color: palette.primary, fontWeight: '600' },
-  ruleNote: {
-    color: palette.textSecondary,
-    fontSize: 11,
-    lineHeight: 16,
-    fontStyle: 'italic',
-    marginBottom: 12,
-  },
   ipSlot: { minHeight: 52, marginBottom: 10, justifyContent: 'center' },
   ipText: { color: palette.textSecondary, fontSize: 11, lineHeight: 16 },
 });

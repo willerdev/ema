@@ -4,6 +4,10 @@ import { api } from './api';
 export const walletService = {
   getWallet: () => api.get<{ balance: number; transactions: WalletTransaction[] }>('/wallet'),
   getTransferCode: () => api.get<{ transferCode: string }>('/wallet/transfer-code'),
+  lookupTransferCode: (code: string) =>
+    api.get<{ found: boolean; recipientFirstName?: string | null; self?: boolean }>(
+      `/wallet/transfer-lookup?code=${encodeURIComponent(code.trim())}`
+    ),
   transferToCode: (
     toTransferCode: string,
     amount: number,

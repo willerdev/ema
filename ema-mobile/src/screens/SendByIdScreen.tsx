@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   RefreshControl,
@@ -36,7 +36,11 @@ export function SendByIdScreen() {
   const [peerAmount, setPeerAmount] = useState('');
   const [peerTotpCode, setPeerTotpCode] = useState('');
   const [peerSubmitting, setPeerSubmitting] = useState(false);
+  const [recipientFirstName, setRecipientFirstName] = useState<string | null>(null);
+  const [recipientLookupPending, setRecipientLookupPending] = useState(false);
+  const [recipientLookupError, setRecipientLookupError] = useState<string | null>(null);
   const peerIdempotencyKeyRef = useRef<string | null>(null);
+  const lookupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const alertComplianceRequired = () => {
     Alert.alert(
@@ -95,9 +99,51 @@ export function SendByIdScreen() {
     setPeerRecipient('');
     setPeerAmount('');
     setPeerTotpCode('');
+    setRecipientFirstName(null);
+    setRecipientLookupError(null);
     setPeerSubmitting(false);
     setPeerModalOpen(true);
   };
+
+  useEffect(() => {
+    if (!peerModalOpen) return;
+    const code = peerRecipient.trim();
+    if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current);
+    if (code.length < 6) {
+      setRecipientFirstName(null);
+      setRecipientLookupError(null);
+      setRecipientLookupPending(false);
+      return;
+    }
+    setRecipientLookupPending(true);
+    setRecipientLookupError(null);
+    lookupTimerRef.current = setTimeout(() => {
+      void walletService
+        .lookupTransferCode(code)
+        .then((res) => {
+          if (res.self) {
+            setRecipientFirstName(null);
+            setRecipientLookupError('You cannot send to your own transfer ID.');
+            return;
+          }
+          if (!res.found) {
+            setRecipientFirstName(null);
+            setRecipientLookupError('No member found with this transfer ID.');
+            return;
+          }
+          setRecipientLookupError(null);
+          setRecipientFirstName(res.recipientFirstName?.trim() || null);
+        })
+        .catch(() => {
+          setRecipientFirstName(null);
+          setRecipientLookupError(null);
+        })
+        .finally(() => setRecipientLookupPending(false));
+    }, 400);
+    return () => {
+      if (lookupTimerRef.current) clearTimeout(lookupTimerRef.current);
+    };
+  }, [peerRecipient, peerModalOpen]);
 
   const onCopyTransferId = async () => {
     if (!transferCode) return;
@@ -217,6 +263,17 @@ export function SendByIdScreen() {
           placeholderTextColor={palette.textSecondary}
           autoCapitalize='characters'
         />
+        {recipientLookupPending ? (
+          <Text style={styles.recipientHint}>Looking up recipient…</Text>
+        ) : recipientLookupError ? (
+          <Text style={styles.recipientError}>{recipientLookupError}</Text>
+        ) : recipientFirstName ? (
+          <Text style={styles.recipientHint}>
+            Sending to <Text style={styles.recipientName}>{recipientFirstName}</Text>
+          </Text>
+        ) : peerRecipient.trim().length >= 6 ? (
+          <Text style={styles.recipientHint}>Member found</Text>
+        ) : null}
         <Text style={styles.fieldLabel}>Amount (USD)</Text>
         <TextInput
           style={inputStyle}
@@ -259,4 +316,7 @@ const styles = StyleSheet.create({
   balanceLabel: { color: palette.textSecondary, fontSize: 12, marginTop: 8, marginBottom: 4 },
   balanceValue: { color: palette.textPrimary, fontSize: 20, fontWeight: '700' },
   copyRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+  recipientHint: { color: palette.textSecondary, fontSize: 13, marginBottom: 8, marginTop: -4 },
+  recipientName: { color: palette.textPrimary, fontWeight: '700' },
+  recipientError: { color: '#f87171', fontSize: 13, marginBottom: 8, marginTop: -4 },
 });

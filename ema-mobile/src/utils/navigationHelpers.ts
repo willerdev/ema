@@ -49,3 +49,15 @@ export function navigateToSupport(
   const root = getRootNavigation(navigation);
   root.navigate('Support', params);
 }
+
+export function navigateToSendById(navigation: NavLike) {
+  navigation.navigate('Extra', { screen: 'SendById' });
+}
+
+export function navigateToAirfarmingTrade(navigation: NavLike) {
+  getRootNavigation(navigation).navigate('AirfarmingTrade');
+}
+
+export function navigateToVipFarmersTrade(navigation: NavLike) {
+  getRootNavigation(navigation).navigate('VipFarmersTrade');
+}

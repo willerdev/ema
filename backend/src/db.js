@@ -221,6 +221,26 @@ async function ensureUserTransferCode(userId) {
   throw new Error('Failed to assign transfer code');
 }
 
+async function getUserIdByTransferCode(transferCode) {
+  const code = String(transferCode || '').trim();
+  if (!code) return null;
+  const { data, error } = await supabase.from('users').select('id').eq('transfer_code', code).maybeSingle();
+  if (error) throw error;
+  return data?.id ? String(data.id) : null;
+}
+
+/** Resolve peer transfer ID to recipient first name (compliance profile only). */
+async function lookupPeerTransferRecipient(fromUserId, transferCode) {
+  const code = String(transferCode || '').trim();
+  if (!code) return { found: false };
+  const toUserId = await getUserIdByTransferCode(code);
+  if (!toUserId) return { found: false };
+  if (toUserId === String(fromUserId)) return { found: false, self: true };
+  const profile = await getComplianceProfileByUserId(toUserId);
+  const first = profile?.legal_first_name ? String(profile.legal_first_name).trim() : '';
+  return { found: true, recipientFirstName: first || null };
+}
+
 async function rpcWalletPeerTransfer({ fromUserId, toTransferCode, amount, idempotencyKey }) {
   const { data, error } = await supabase.rpc('wallet_peer_transfer', {
     p_from_user_id: fromUserId,
@@ -2941,6 +2961,7 @@ module.exports = {
   ensureWalletForUser,
   setWalletBalance,
   ensureUserTransferCode,
+  lookupPeerTransferRecipient,
   rpcWalletPeerTransfer,
   createTransaction,
   getTransactionById,

@@ -15,6 +15,7 @@ const {
   ensureWalletForUser,
   setWalletBalance,
   ensureUserTransferCode,
+  lookupPeerTransferRecipient,
   rpcWalletPeerTransfer,
   createTransaction,
   getTransactionsByUserId,
@@ -691,6 +692,17 @@ app.get('/wallet/transfer-code', authMiddleware, async (req, res) => {
     return res.json({ transferCode });
   } catch {
     return res.status(500).json({ message: 'Failed to resolve transfer ID' });
+  }
+});
+
+app.get('/wallet/transfer-lookup', authMiddleware, async (req, res) => {
+  try {
+    const code = req.query?.code != null ? String(req.query.code).trim() : '';
+    if (!code) return res.status(400).json({ message: 'Transfer ID is required' });
+    const result = await lookupPeerTransferRecipient(req.userId, code);
+    return res.json(result);
+  } catch {
+    return res.status(500).json({ message: 'Lookup failed' });
   }
 });
 

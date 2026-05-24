@@ -6,6 +6,7 @@ import { HomeScreen } from '../screens/HomeScreen';
 import { JournalScreen } from '../screens/JournalScreen';
 import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
+import { navigateToTransactionHistory } from '../utils/navigationHelpers';
 import { MT5Screen } from '../screens/MT5Screen';
 import { ExtraStackNavigator } from './ExtraStackNavigator';
 import { palette } from '../theme/colors';
@@ -74,7 +75,23 @@ export function MainTabNavigator() {
       />
       <Tab.Screen name='Journal' component={JournalScreen} options={{ tabBarLabel: 'Journal', title: 'Journal' }} />
       <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
-      <Tab.Screen name='Wallet' component={WalletScreen} options={{ tabBarLabel: 'Wallet' }} />
+      <Tab.Screen
+        name='Wallet'
+        component={WalletScreen}
+        options={({ navigation }) => ({
+          tabBarLabel: 'Wallet',
+          headerRight: () => (
+            <Pressable
+              onPress={() => navigateToTransactionHistory(navigation)}
+              style={{ marginRight: 14, padding: 4 }}
+              hitSlop={12}
+              accessibilityLabel='Transaction history'
+            >
+              <Ionicons name='receipt-outline' size={24} color={palette.primary} />
+            </Pressable>
+          ),
+        })}
+      />
       <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
       <Tab.Screen
         name='Extra'
