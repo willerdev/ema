@@ -331,6 +331,97 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+
+    /* User detail page (replaces modal) */
+    .user-page-banner {
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      margin: -20px -24px 16px;
+      padding: 12px 24px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    .user-page-banner.banner-err {
+      background: rgba(248, 113, 113, 0.12);
+      color: var(--danger);
+      border-bottom-color: rgba(248, 113, 113, 0.35);
+    }
+    .user-page-banner.banner-ok {
+      background: rgba(74, 222, 128, 0.1);
+      color: var(--ok);
+      border-bottom-color: rgba(74, 222, 128, 0.35);
+    }
+    .user-page-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-start;
+      gap: 12px 16px;
+      margin-bottom: 20px;
+    }
+    .user-page-header .user-page-title-block { flex: 1; min-width: 200px; }
+    .user-page-header h2 { margin: 0 0 4px; font-size: 1.35rem; }
+    .user-page-header .user-page-meta { margin: 0; }
+    .user-page-sections {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-width: 1100px;
+    }
+    .admin-section {
+      margin-bottom: 0;
+    }
+    .admin-section-title {
+      margin: 0 0 4px;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .admin-section-desc {
+      margin: 0 0 16px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .btn-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    .btn-toolbar .btn-primary,
+    .btn-toolbar .btn-warn,
+    .btn-toolbar .btn-ghost,
+    .btn-toolbar .btn-danger {
+      width: auto;
+      min-width: 120px;
+      padding: 10px 16px;
+      font-size: 0.85rem;
+      margin: 0;
+    }
+    .form-grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px 16px;
+      margin-bottom: 12px;
+    }
+    .form-grid-2 label { margin-bottom: 6px; }
+    .form-grid-2 input,
+    .form-grid-2 select {
+      margin-bottom: 0;
+    }
+    .section-inline-ok {
+      font-size: 0.82rem;
+      color: var(--ok);
+      margin: 8px 0 0;
+    }
+    .table-scroll {
+      overflow-x: auto;
+      margin-top: 8px;
+    }
+    .table-scroll.tall { max-height: 280px; overflow-y: auto; }
     .tier-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -513,6 +604,7 @@
 
       <div class="content">
         <div id="panelUsers">
+          <div id="panelUsersList">
           <div class="card">
             <div class="row">
               <div style="flex:2;">
@@ -540,6 +632,181 @@
               </table>
             </div>
             <p id="usersErr" class="err hidden"></p>
+          </div>
+          </div>
+
+          <div id="panelUserDetail" class="hidden">
+            <div id="userPageBanner" class="user-page-banner banner-err hidden" role="alert"></div>
+
+            <div class="user-page-header">
+              <button type="button" class="btn-ghost" id="backToUsersBtn" style="width:auto;flex-shrink:0;">← Users</button>
+              <div class="user-page-title-block">
+                <h2 id="userModalTitle">User</h2>
+                <p id="userModalMeta" class="hint user-page-meta"></p>
+              </div>
+            </div>
+
+            <div class="stat-grid" id="userStatsGrid" style="max-width:1100px;margin-bottom:20px;"></div>
+
+            <div class="user-page-sections">
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Airfarming drops</h3>
+                <p id="userPauseStatus" class="admin-section-desc"></p>
+                <div class="btn-toolbar">
+                  <button type="button" id="toggleUserPauseBtn" class="btn-warn">Pause drops</button>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Custom drop plan (AI)</h3>
+                <p class="admin-section-desc">Set how many upcoming drops this user gets and the combined profit target. AI suggests percent and hours between each drop.</p>
+                <div class="form-grid-2">
+                  <div>
+                    <label>Upcoming drops</label>
+                    <input id="userDropPlanCount" type="number" min="1" max="12" step="1" value="3" />
+                  </div>
+                  <div>
+                    <label>Target total profit (USD)</label>
+                    <input id="userDropPlanTarget" type="number" min="0" step="0.01" placeholder="500.00" />
+                  </div>
+                  <div>
+                    <label>Week (UTC Mon)</label>
+                    <input id="userDropPlanWeek" type="date" />
+                  </div>
+                </div>
+                <p id="userDropPlanMeta" class="hint" style="margin-bottom:0;"></p>
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-primary" id="userDropPlanAiBtn">AI suggest</button>
+                  <button type="button" class="btn-warn" id="userDropPlanApplyBtn">Apply to schedule</button>
+                </div>
+                <p id="userDropPlanSummary" class="hint" style="margin-top:12px;"></p>
+                <div class="table-scroll">
+                  <table>
+                    <thead><tr><th>#</th><th>%</th><th>Interval (h)</th><th>Projected</th><th>Tier window</th></tr></thead>
+                    <tbody id="userDropPlanRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Scheduled drops</h3>
+                <p class="admin-section-desc">Upcoming airfarming drops for this user (current week).</p>
+                <div class="table-scroll">
+                  <table>
+                    <thead><tr><th>#</th><th>Due</th><th>%</th><th>Tier &amp; balance window</th></tr></thead>
+                    <tbody id="userDropRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Wallets</h3>
+                <p class="admin-section-desc">Adjust balances (reason required) or move cash into airfarming.</p>
+                <h4 style="font-size:0.88rem;margin:0 0 10px;color:var(--muted);">Adjust balance</h4>
+                <div class="form-grid-2">
+                  <div>
+                    <label>Wallet</label>
+                    <select id="adjustWallet">
+                      <option value="cash">Cash (USD)</option>
+                      <option value="airfarming">Airfarming (USD)</option>
+                      <option value="usdt">Crypto USDT</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Action</label>
+                    <select id="adjustMode">
+                      <option value="set">Set balance to</option>
+                      <option value="adjust">Add or subtract</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Amount (USD)</label>
+                    <input id="adjustAmount" type="number" step="0.01" placeholder="0.00" />
+                  </div>
+                </div>
+                <label>Reason (required)</label>
+                <input id="adjustReason" type="text" placeholder="e.g. Manual correction per support ticket #123" />
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-warn" id="applyAdjustBtn">Apply adjustment</button>
+                </div>
+                <p id="adjustOk" class="section-inline-ok hidden"></p>
+                <h4 style="font-size:0.88rem;margin:20px 0 10px;color:var(--muted);">Move cash → airfarming</h4>
+                <div class="form-grid-2">
+                  <div>
+                    <label>Amount (USD)</label>
+                    <input id="moveAmount" type="number" step="0.01" min="0.01" placeholder="0.00" />
+                  </div>
+                </div>
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-primary" id="moveToAfBtn">Move funds</button>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Reset password</h3>
+                <p class="admin-section-desc">Set a new password for this user (minimum 6 characters).</p>
+                <div class="form-grid-2">
+                  <div>
+                    <label>New password</label>
+                    <input id="userNewPassword" type="password" autocomplete="new-password" placeholder="New password" />
+                  </div>
+                  <div>
+                    <label>Confirm password</label>
+                    <input id="userNewPasswordConfirm" type="password" autocomplete="new-password" placeholder="Confirm password" />
+                  </div>
+                </div>
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-primary" id="saveUserPasswordBtn">Update password</button>
+                </div>
+                <p id="userPasswordOk" class="section-inline-ok hidden"></p>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Deposits &amp; profits (90 days)</h3>
+                <p id="chartTotals" class="admin-section-desc"></p>
+                <div class="chart-grid">
+                  <div class="chart-wrap">
+                    <h4>Deposits (USD)</h4>
+                    <canvas id="chartDeposits"></canvas>
+                  </div>
+                  <div class="chart-wrap">
+                    <h4>Drop profits (USD)</h4>
+                    <canvas id="chartProfits"></canvas>
+                  </div>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Performance journal (UTC)</h3>
+                <p id="userJournalSummary" class="hint" style="margin-bottom:12px;"></p>
+                <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:12px;max-width:320px;">
+                  <button type="button" class="btn-ghost" id="userJournalPrev" style="width:auto;min-width:48px;">←</button>
+                  <strong id="userJournalMonthLabel">—</strong>
+                  <button type="button" class="btn-ghost" id="userJournalNext" style="width:auto;min-width:48px;">→</button>
+                </div>
+                <div id="userJournalGrid" class="journal-grid"></div>
+                <p id="userJournalDayTitle" class="hint" style="margin:12px 0 8px;font-weight:700;"></p>
+                <div class="table-scroll tall">
+                  <table>
+                    <thead><tr><th>Source</th><th>Detail</th><th>Amount</th></tr></thead>
+                    <tbody id="userJournalDayRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Transactions</h3>
+                <p class="admin-section-desc">Latest 50 wallet transactions.</p>
+                <div class="table-scroll tall">
+                  <table>
+                    <thead><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
+                    <tbody id="userTxRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+            </div>
           </div>
         </div>
 
@@ -864,135 +1131,6 @@
     </div>
   </div>
 
-  <div id="userModal" class="modal-backdrop hidden" data-modal>
-    <div class="card modal modal-wide">
-      <div class="modal-header">
-        <h2 id="userModalTitle">User</h2>
-        <button type="button" class="modal-close" data-close-modal="userModal" aria-label="Close">×</button>
-      </div>
-      <p id="userModalMeta" class="hint"></p>
-      <div class="stat-grid" id="userStatsGrid"></div>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Reset password</h3>
-      <label>New password (min 6 characters)</label>
-      <input id="userNewPassword" type="password" autocomplete="new-password" placeholder="New password" />
-      <label>Confirm password</label>
-      <input id="userNewPasswordConfirm" type="password" autocomplete="new-password" placeholder="Confirm password" />
-      <button type="button" class="btn-primary" id="saveUserPasswordBtn" style="width:auto;margin-bottom:16px;">Update password</button>
-      <p id="userPasswordOk" class="hint hidden" style="color:var(--ok);"></p>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Airfarming drops</h3>
-      <p id="userPauseStatus" class="hint" style="margin-bottom:10px;"></p>
-      <button type="button" id="toggleUserPauseBtn" class="btn-warn" style="width:auto;margin-bottom:16px;">Pause drops</button>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Custom drop plan (AI)</h3>
-      <p class="hint" style="margin-bottom:10px;">Set how many upcoming drops this user gets and the combined profit target. AI suggests percent and hours between each drop.</p>
-      <div class="row" style="align-items:flex-end;margin-bottom:8px;">
-        <div>
-          <label>Upcoming drops</label>
-          <input id="userDropPlanCount" type="number" min="1" max="12" step="1" value="3" />
-        </div>
-        <div>
-          <label>Target total profit (USD)</label>
-          <input id="userDropPlanTarget" type="number" min="0" step="0.01" placeholder="500.00" />
-        </div>
-        <div>
-          <label>Week (UTC Mon)</label>
-          <input id="userDropPlanWeek" type="date" />
-        </div>
-      </div>
-      <p id="userDropPlanMeta" class="hint" style="margin-bottom:8px;"></p>
-      <div class="row" style="margin-bottom:8px;">
-        <button type="button" class="btn-primary" id="userDropPlanAiBtn" style="width:auto;">AI suggest</button>
-        <button type="button" class="btn-warn" id="userDropPlanApplyBtn" style="width:auto;">Apply to schedule</button>
-      </div>
-      <p id="userDropPlanSummary" class="hint" style="margin-bottom:8px;"></p>
-      <div style="overflow-x:auto;margin-bottom:16px;">
-        <table>
-          <thead><tr><th>#</th><th>%</th><th>Interval (h)</th><th>Projected</th><th>Tier window</th></tr></thead>
-          <tbody id="userDropPlanRows"></tbody>
-        </table>
-      </div>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Deposits &amp; profits (last 90 days)</h3>
-      <p id="chartTotals" class="hint" style="margin-bottom:8px;"></p>
-      <div class="chart-grid">
-        <div class="chart-wrap">
-          <h4>Deposits (USD)</h4>
-          <canvas id="chartDeposits"></canvas>
-        </div>
-        <div class="chart-wrap">
-          <h4>Drop profits (USD)</h4>
-          <canvas id="chartProfits"></canvas>
-        </div>
-      </div>
-      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Performance journal (UTC)</h3>
-      <p id="userJournalSummary" class="hint" style="margin-bottom:8px;"></p>
-      <div class="row" style="align-items:center;justify-content:space-between;margin-bottom:8px;">
-        <button type="button" class="btn-ghost" id="userJournalPrev" style="width:auto;">←</button>
-        <strong id="userJournalMonthLabel">—</strong>
-        <button type="button" class="btn-ghost" id="userJournalNext" style="width:auto;">→</button>
-      </div>
-      <div id="userJournalGrid" class="journal-grid"></div>
-      <p id="userJournalDayTitle" class="hint" style="margin:12px 0 6px;font-weight:700;"></p>
-      <div style="overflow-x:auto;max-height:160px;">
-        <table>
-          <thead><tr><th>Source</th><th>Detail</th><th>Amount</th></tr></thead>
-          <tbody id="userJournalDayRows"></tbody>
-        </table>
-      </div>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Adjust wallet balance</h3>
-      <p class="hint" style="margin-bottom:10px;">Set a new balance or add/subtract. A reason is required and recorded. Use carefully.</p>
-      <div class="row" style="align-items:flex-end;margin-bottom:8px;">
-        <div>
-          <label>Wallet</label>
-          <select id="adjustWallet">
-            <option value="cash">Cash (USD)</option>
-            <option value="airfarming">Airfarming (USD)</option>
-            <option value="usdt">Crypto USDT</option>
-          </select>
-        </div>
-        <div>
-          <label>Action</label>
-          <select id="adjustMode">
-            <option value="set">Set balance to</option>
-            <option value="adjust">Add or subtract</option>
-          </select>
-        </div>
-        <div>
-          <label>Amount (USD)</label>
-          <input id="adjustAmount" type="number" step="0.01" placeholder="0.00" />
-        </div>
-      </div>
-      <label>Reason (required)</label>
-      <input id="adjustReason" type="text" placeholder="e.g. Manual correction per support ticket #123" style="margin-bottom:10px;" />
-      <button type="button" class="btn-warn" id="applyAdjustBtn" style="width:auto;margin-bottom:8px;">Apply adjustment</button>
-      <p id="adjustOk" class="hint hidden" style="color:var(--ok);"></p>
-      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Move cash → airfarming</h3>
-      <div class="row" style="margin-bottom:16px;">
-        <div style="flex:2;">
-          <label>Amount (USD)</label>
-          <input id="moveAmount" type="number" step="0.01" min="0.01" placeholder="0.00" />
-        </div>
-        <div style="flex:0;">
-          <button type="button" class="btn-primary" id="moveToAfBtn" style="width:auto;margin-bottom:16px;">Move funds</button>
-        </div>
-      </div>
-      <h3 style="font-size:0.95rem;margin:0 0 8px;">Transactions (latest 50)</h3>
-      <div style="overflow-x:auto;max-height:220px;">
-        <table>
-          <thead><tr><th>Type</th><th>Amount</th><th>Status</th><th>Date</th></tr></thead>
-          <tbody id="userTxRows"></tbody>
-        </table>
-      </div>
-      <h3 style="font-size:0.95rem;margin:16px 0 8px;">Scheduled drops</h3>
-      <div style="overflow-x:auto;">
-        <table>
-          <thead><tr><th>#</th><th>Due</th><th>%</th><th>Tier &amp; balance window</th></tr></thead>
-          <tbody id="userDropRows"></tbody>
-        </table>
-      </div>
-      <p id="userModalErr" class="err hidden"></p>
-      <button type="button" class="btn-ghost" id="closeUserBtn" style="margin-top:16px;width:auto;">Close</button>
-    </div>
-  </div>
-
   <div id="ticketModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal modal-wide">
       <div class="modal-header">
@@ -1137,7 +1275,38 @@
       return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
 
+    function clearUserPageAlert() {
+      const el = document.getElementById('userPageBanner');
+      if (!el) return;
+      el.classList.add('hidden');
+      el.textContent = '';
+    }
+
+    function showUserPageAlert(message, type) {
+      const el = document.getElementById('userPageBanner');
+      if (!el) return;
+      el.textContent = message;
+      el.className = 'user-page-banner ' + (type === 'success' ? 'banner-ok' : 'banner-err');
+      el.classList.remove('hidden');
+      const content = document.querySelector('.content');
+      if (content) content.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function closeUserPage() {
+      clearUserPageAlert();
+      const detail = document.getElementById('panelUserDetail');
+      const list = document.getElementById('panelUsersList');
+      if (detail) detail.classList.add('hidden');
+      if (list) list.classList.remove('hidden');
+      document.getElementById('pageTitle').textContent = PAGE_TITLES.users;
+      viewingUserId = null;
+      viewingUserDetail = null;
+      chartDepositsInst = destroyChart(chartDepositsInst);
+      chartProfitsInst = destroyChart(chartProfitsInst);
+    }
+
     function setTab(tab) {
+      closeUserPage();
       activeTab = tab;
       document.querySelectorAll('.nav-item').forEach((el) => {
         el.classList.toggle('active', el.getAttribute('data-tab') === tab);
@@ -1299,18 +1468,16 @@
     }
 
     async function saveUserPassword() {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       document.getElementById('userPasswordOk').classList.add('hidden');
       const password = document.getElementById('userNewPassword').value;
       const confirm = document.getElementById('userNewPasswordConfirm').value;
       if (password.length < 6) {
-        document.getElementById('userModalErr').textContent = 'Password must be at least 6 characters';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Password must be at least 6 characters', 'error');
         return;
       }
       if (password !== confirm) {
-        document.getElementById('userModalErr').textContent = 'Passwords do not match';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Passwords do not match', 'error');
         return;
       }
       try {
@@ -1320,11 +1487,9 @@
         });
         document.getElementById('userNewPassword').value = '';
         document.getElementById('userNewPasswordConfirm').value = '';
-        document.getElementById('userPasswordOk').textContent = res.message || 'Password updated';
-        document.getElementById('userPasswordOk').classList.remove('hidden');
+        showUserPageAlert(res.message || 'Password updated.', 'success');
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
@@ -1607,22 +1772,20 @@
         userDropPlanView = await api('/admin/api/users/' + userId + '/drop-schedule?weekStart=' + weekStart);
       } catch (e) {
         userDropPlanView = { weekStart, airfarmingBalance: viewingUserDetail?.airfarmingBalance ?? 0, schedule: null };
-        document.getElementById('userDropPlanSummary').textContent = 'Drop plan unavailable: ' + e.message;
+        showUserPageAlert('Drop plan unavailable: ' + e.message, 'error');
       }
       renderUserDropPlan();
     }
 
     async function aiSuggestUserDropPlan() {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       const { dropCount, targetTotalUsd, weekStart } = readUserDropPlanInputs();
       if (!Number.isInteger(dropCount) || dropCount < 1 || dropCount > 12) {
-        document.getElementById('userModalErr').textContent = 'Drop count must be 1–12';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Drop count must be 1–12', 'error');
         return;
       }
       if (!Number.isFinite(targetTotalUsd) || targetTotalUsd < 0) {
-        document.getElementById('userModalErr').textContent = 'Enter a valid target total';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Enter a valid target total', 'error');
         return;
       }
       try {
@@ -1636,27 +1799,30 @@
           schedule: data.schedule,
         };
         renderUserDropPlan();
+        showUserPageAlert('AI drop plan ready. Review the table, then Apply to schedule.', 'success');
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
     async function applyUserDropPlan() {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       const { weekStart } = readUserDropPlanInputs();
       if (!confirm('Replace this user\'s scheduled drops for week ' + weekStart + ' with this plan?')) return;
       try {
-        await api('/admin/api/users/' + viewingUserId + '/drop-schedule/apply', {
+        const res = await api('/admin/api/users/' + viewingUserId + '/drop-schedule/apply', {
           method: 'POST',
           body: JSON.stringify({ weekStart }),
         });
         const d = await api('/admin/api/users/' + viewingUserId);
         renderUserDetail(d);
         await loadUserDropPlan(viewingUserId);
+        showUserPageAlert(
+          'Drop plan applied' + (res.dropsCreated ? ' (' + res.dropsCreated + ' scheduled).' : '.'),
+          'success'
+        );
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
@@ -1673,8 +1839,9 @@
     }
 
     async function openUser(id) {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       document.getElementById('userPasswordOk').classList.add('hidden');
+      document.getElementById('adjustOk').classList.add('hidden');
       document.getElementById('userNewPassword').value = '';
       document.getElementById('userNewPasswordConfirm').value = '';
       viewingUserId = id;
@@ -1686,27 +1853,28 @@
       document.getElementById('userDropPlanWeek').value = mondayUtcYmdClient();
       chartDepositsInst = destroyChart(chartDepositsInst);
       chartProfitsInst = destroyChart(chartProfitsInst);
+      document.getElementById('panelUsersList').classList.add('hidden');
+      document.getElementById('panelUserDetail').classList.remove('hidden');
       const d = await api('/admin/api/users/' + id);
       renderUserDetail(d);
-      document.getElementById('userModal').classList.remove('hidden');
+      document.getElementById('pageTitle').textContent = d.user.email;
+      document.querySelector('.content').scrollTop = 0;
       void loadUserCharts(id);
       void loadUserJournal(id);
       void loadUserDropPlan(id);
     }
 
     async function applyWalletAdjust() {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       document.getElementById('adjustOk').classList.add('hidden');
       const amount = Number(document.getElementById('adjustAmount').value);
       const reason = document.getElementById('adjustReason').value.trim();
       if (!Number.isFinite(amount)) {
-        document.getElementById('userModalErr').textContent = 'Enter a valid amount';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Enter a valid amount', 'error');
         return;
       }
       if (!reason) {
-        document.getElementById('userModalErr').textContent = 'Reason is required';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Reason is required', 'error');
         return;
       }
       const mode = document.getElementById('adjustMode').value;
@@ -1721,10 +1889,11 @@
           body: JSON.stringify({ wallet, mode, amount, reason }),
         });
         const adj = res.adjustment;
-        document.getElementById('adjustOk').textContent =
-          'Updated: ' + fmtMoney(adj.previousBalance) + ' → ' + fmtMoney(adj.newBalance) +
-          (adj.change !== 0 ? ' (change ' + (adj.change > 0 ? '+' : '') + fmtMoney(adj.change) + ')' : '');
-        document.getElementById('adjustOk').classList.remove('hidden');
+        showUserPageAlert(
+          'Wallet updated: ' + fmtMoney(adj.previousBalance) + ' → ' + fmtMoney(adj.newBalance) +
+          (adj.change !== 0 ? ' (change ' + (adj.change > 0 ? '+' : '') + fmtMoney(adj.change) + ')' : ''),
+          'success'
+        );
         document.getElementById('adjustAmount').value = '';
         document.getElementById('adjustReason').value = '';
         const d = await api('/admin/api/users/' + viewingUserId);
@@ -1736,17 +1905,15 @@
         }
         renderUsersTable();
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
     async function moveToAirfarming() {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       const amount = Number(document.getElementById('moveAmount').value);
       if (!Number.isFinite(amount) || amount <= 0) {
-        document.getElementById('userModalErr').textContent = 'Enter a valid amount';
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert('Enter a valid amount', 'error');
         return;
       }
       try {
@@ -1754,6 +1921,7 @@
           method: 'POST',
           body: JSON.stringify({ amount }),
         });
+        showUserPageAlert('Moved ' + fmtMoney(amount) + ' to airfarming.', 'success');
         document.getElementById('moveAmount').value = '';
         const d = await api('/admin/api/users/' + viewingUserId);
         renderUserDetail(d);
@@ -1764,8 +1932,7 @@
         }
         renderUsersTable();
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
@@ -1845,7 +2012,7 @@
     }
 
     async function patchUserPause(body) {
-      document.getElementById('userModalErr').classList.add('hidden');
+      clearUserPageAlert();
       await api('/admin/api/users/' + viewingUserId + '/airfarming', {
         method: 'PATCH',
         body: JSON.stringify(body),
@@ -1864,9 +2031,9 @@
       const paused = Boolean(viewingUserDetail?.airfarming?.dropsPaused);
       try {
         await patchUserPause(paused ? { clearPause: true } : { dropsPaused: true });
+        showUserPageAlert(paused ? 'Drops resumed for this user.' : 'Drops paused for this user.', 'success');
       } catch (e) {
-        document.getElementById('userModalErr').textContent = e.message;
-        document.getElementById('userModalErr').classList.remove('hidden');
+        showUserPageAlert(e.message, 'error');
       }
     }
 
@@ -2688,7 +2855,7 @@
     document.getElementById('saveBtn').onclick = () => saveEdit();
     setupDismissibleModals();
     document.getElementById('cancelBtn').onclick = () => closeModal('editModal');
-    document.getElementById('closeUserBtn').onclick = () => closeModal('userModal');
+    document.getElementById('backToUsersBtn').onclick = () => closeUserPage();
     document.getElementById('toggleUserPauseBtn').onclick = () => toggleUserPause();
     document.getElementById('saveDropCapsBtn').onclick = () => saveDropCaps();
     document.getElementById('saveGlobalPauseBtn').onclick = () => saveGlobalPause();
