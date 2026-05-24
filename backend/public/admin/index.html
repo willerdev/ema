@@ -1754,8 +1754,7 @@
           total += Number(it.projectedProfit || 0);
           return '<tr><td>' + (idx + 1) + '</td><td>' + Number(it.percent).toFixed(2) + '%</td>' +
             '<td>' + Number(it.intervalHours) + 'h</td><td>' + fmtMoney(it.projectedProfit || 0) + '</td>' +
-            '<td>' + escapeHtml(bandTierLabel(it.bandIndex)) + '<br><span style="color:var(--muted);font-size:0.7rem;">$' +
-            (it.minBalance ?? '—') + ' – $' + (it.maxBalance ?? '—') + '</span></td></tr>';
+            '<td>' + escapeHtml(formatDropTierWindow(it)) + '</td></tr>';
         }).join('') +
           '<tr><td colspan="3"><strong>Total projected</strong></td><td colspan="2"><strong>' + fmtMoney(total) + '</strong></td></tr>';
       }
@@ -2189,6 +2188,13 @@
       if (idx == null || Number.isNaN(idx)) idx = inferBandFromRange(minBalance, maxBalance);
       if (idx == null) return null;
       return dropBands.find((x) => x.bandIndex === idx) || { bandIndex: idx, label: 'Tier ' + idx, percent: '—', minBalance: 0, maxBalance: 0 };
+    }
+
+    function formatDropTierWindow(it) {
+      const idx = it.bandIndex != null ? it.bandIndex : '—';
+      const min = it.minBalance != null ? it.minBalance : '—';
+      const max = it.maxBalance != null ? it.maxBalance : '—';
+      return 'Tier ' + idx + ' · $' + min + ' – $' + max;
     }
 
     function bandTierLabel(bandIndex, minBalance, maxBalance) {

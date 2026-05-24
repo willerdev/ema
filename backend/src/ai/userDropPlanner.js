@@ -1,13 +1,13 @@
-const crypto = require('crypto');
 const { listAirfarmingDropBands } = require('../db');
 const {
   clampAirfarmingPercent,
   getEffectiveCaps,
   generateDropSpec,
+  isEligible,
 } = require('../airfarmingDrops');
 const { hasLlmCredentials, aiModel, aiProvider, providerConfig, apiKeyForProvider } = require('./llmClient');
 
-const INTERVAL_OPTIONS = [2, 3, 4, 5, 6, 8, 12, 24];
+const INTERVAL_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 12, 18, 24];
 
 function roundUsd(n) {
   return Math.round(Number(n || 0) * 100) / 100;
@@ -18,120 +18,165 @@ function estimateProfit(balance, percent, maxProfit) {
   return roundUsd(Math.min(raw, maxProfit));
 }
 
-function inferBandFromBalance(balance) {
-  const b = Number(balance) || 0;
-  if (b >= 10000) return 3;
-  if (b >= 1000) return 2;
-  if (b >= 100) return 1;
-  return 0;
+function profitWeights(dropCount) {
+  const weights = [];
+  for (let i = 0; i < dropCount; i += 1) {
+    weights.push(0.7 + (i % 3) * 0.15 + ((i * 17) % 7) * 0.05);
+  }
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w) => w / sum);
 }
 
-async function bandWindowForUser(userId, weekStart, bandIndex, balance) {
-  const spec = await generateDropSpec(userId, weekStart, 0);
-  const idx = bandIndex != null ? Number(bandIndex) : inferBandFromBalance(balance);
+function distributeProfits(dropCount, targetTotalUsd) {
+  const target = roundUsd(targetTotalUsd);
+  if (target <= 0 || dropCount < 1) return [];
+  const weights = profitWeights(dropCount);
+  const shares = weights.map((w) => roundUsd(target * w));
+  const sum = roundUsd(shares.reduce((s, n) => s + n, 0));
+  const diff = roundUsd(target - sum);
+  if (Math.abs(diff) >= 0.01) {
+    shares[shares.length - 1] = roundUsd(shares[shares.length - 1] + diff);
+  }
+  return shares;
+}
+
+async function bandWindowForSlot(userId, weekStart, slot, balance) {
+  const spec = await generateDropSpec(userId, weekStart, slot);
+  let bandIndex = Number(spec.band_index);
+  let minBalance = Number(spec.min_balance);
+  let maxBalance = Number(spec.max_balance);
+
   try {
     const bands = await listAirfarmingDropBands();
-    const row = bands.find((b) => Number(b.band_index) === idx);
+    const row = bands.find((b) => Number(b.band_index) === bandIndex);
     if (row) {
-      return {
-        bandIndex: idx,
-        minBalance: Number(row.min_balance),
-        maxBalance: Number(row.max_balance),
-      };
+      minBalance = Number(row.min_balance);
+      maxBalance = Number(row.max_balance);
+      if (maxBalance > minBalance) {
+        const spanCents = Math.floor((maxBalance - minBalance) * 100);
+        const h = Math.abs(slot * 7919 + bandIndex * 997) % (spanCents + 1);
+        maxBalance = Number((minBalance + h / 100).toFixed(2));
+      }
     }
   } catch {
-    /* bands table optional */
+    /* bands optional */
   }
+
+  return { bandIndex, minBalance, maxBalance };
+}
+
+function balanceRefForDrop(userBalance, minBalance, maxBalance) {
+  const bal = Number(userBalance) || 0;
+  if (isEligible(bal, minBalance, maxBalance)) return bal;
+  if (bal < minBalance) return minBalance;
+  if (bal > maxBalance) return maxBalance;
+  return bal > 0 ? bal : (minBalance + maxBalance) / 2;
+}
+
+function percentFromProfit(profitUsd, balanceRef, maxPercent) {
+  if (balanceRef <= 0) return 1;
+  return clampAirfarmingPercent((profitUsd / balanceRef) * 100, maxPercent);
+}
+
+async function buildItemFromShare(ctx, slot, profitShare, caps, overrides = {}) {
+  const win = await bandWindowForSlot(ctx.userId, ctx.weekStart, slot, ctx.balance);
+  const bandIndex =
+    overrides.bandIndex != null ? Number(overrides.bandIndex) : win.bandIndex;
+  const minBalance = overrides.minBalance != null ? Number(overrides.minBalance) : win.minBalance;
+  const maxBalance = overrides.maxBalance != null ? Number(overrides.maxBalance) : win.maxBalance;
+
+  let intervalHours = Number(overrides.intervalHours);
+  if (!Number.isFinite(intervalHours) || intervalHours < 1) {
+    intervalHours = INTERVAL_OPTIONS[slot % INTERVAL_OPTIONS.length];
+  }
+  intervalHours = Math.min(72, Math.max(1, Math.round(intervalHours)));
+
+  const balanceRef = balanceRefForDrop(ctx.balance, minBalance, maxBalance);
+  let plannedProfit = roundUsd(overrides.projectedProfitUsd ?? profitShare);
+  plannedProfit = Math.min(plannedProfit, caps.maxProfit);
+
+  const percent =
+    overrides.percent != null
+      ? clampAirfarmingPercent(overrides.percent, caps.maxPercent)
+      : percentFromProfit(plannedProfit, balanceRef, caps.maxPercent);
+
   return {
-    bandIndex: idx,
-    minBalance: Number(spec.min_balance),
-    maxBalance: Number(spec.max_balance),
+    slot,
+    percent,
+    intervalHours,
+    projectedProfit: plannedProfit,
+    bandIndex,
+    minBalance,
+    maxBalance,
   };
 }
 
-function normalizeItems(rawItems, dropCount, balance, caps) {
+async function buildVariedItems(ctx, rawItems, caps) {
+  const profitShares = distributeProfits(ctx.dropCount, ctx.targetTotalUsd);
   const items = [];
-  for (let i = 0; i < dropCount; i += 1) {
+
+  for (let i = 0; i < ctx.dropCount; i += 1) {
     const src = rawItems[i] || {};
-    const percent = clampAirfarmingPercent(src.percent ?? src.percentage ?? 10, caps.maxPercent);
-    let intervalHours = Number(src.intervalHours ?? src.interval_hours ?? src.durationHours);
-    if (!Number.isFinite(intervalHours) || intervalHours < 1) {
-      intervalHours = INTERVAL_OPTIONS[i % INTERVAL_OPTIONS.length];
-    }
-    intervalHours = Math.min(72, Math.max(1, Math.round(intervalHours)));
-    items.push({
-      slot: i,
-      percent,
-      intervalHours,
-      projectedProfit: estimateProfit(balance, percent, caps.maxProfit),
-      bandIndex: src.bandIndex != null ? Number(src.bandIndex) : null,
-      minBalance: src.minBalance != null ? Number(src.minBalance) : null,
-      maxBalance: src.maxBalance != null ? Number(src.maxBalance) : null,
-    });
+    items.push(
+      await buildItemFromShare(ctx, i, profitShares[i], caps, {
+        bandIndex: src.bandIndex ?? src.band_index,
+        minBalance: src.minBalance ?? src.min_balance,
+        maxBalance: src.maxBalance ?? src.max_balance,
+        intervalHours: src.intervalHours ?? src.interval_hours,
+        percent: src.percent ?? src.percentage,
+        projectedProfitUsd: src.projectedProfitUsd ?? src.projected_profit_usd,
+      })
+    );
   }
-  return items;
+
+  return rebalanceProfitsToTarget(items, ctx.targetTotalUsd, caps, ctx.balance);
 }
 
-function scaleItemsToTarget(items, balance, targetTotalUsd, caps) {
+function rebalanceProfitsToTarget(items, targetTotalUsd, caps, userBalance) {
   const target = roundUsd(targetTotalUsd);
-  if (target <= 0 || !items.length) return items;
+  if (!items.length || target <= 0) return items;
 
   let sum = roundUsd(items.reduce((s, it) => s + it.projectedProfit, 0));
-  if (sum <= 0) return items;
+  if (Math.abs(sum - target) < 0.02) return items;
 
-  const ratio = target / sum;
-  const scaled = items.map((it) => {
-    let pct = clampAirfarmingPercent(it.percent * ratio, caps.maxPercent);
-    let profit = estimateProfit(balance, pct, caps.maxProfit);
-    return { ...it, percent: pct, projectedProfit: profit };
+  const ratio = target / (sum || 1);
+  const adjusted = items.map((it) => {
+    const planned = roundUsd(Math.min(it.projectedProfit * ratio, caps.maxProfit));
+    const balanceRef = balanceRefForDrop(userBalance, it.minBalance, it.maxBalance);
+    const percent = percentFromProfit(planned, balanceRef, caps.maxPercent);
+    return { ...it, projectedProfit: planned, percent };
   });
 
-  sum = roundUsd(scaled.reduce((s, it) => s + it.projectedProfit, 0));
+  sum = roundUsd(adjusted.reduce((s, it) => s + it.projectedProfit, 0));
   const diff = roundUsd(target - sum);
-  if (Math.abs(diff) >= 0.01 && scaled.length) {
-    const last = scaled[scaled.length - 1];
-    const adjustedPct = clampAirfarmingPercent(
-      last.percent + (balance > 0 ? (diff / balance) * 100 : 0),
-      caps.maxPercent
-    );
-    scaled[scaled.length - 1] = {
+  if (Math.abs(diff) >= 0.01 && adjusted.length) {
+    const last = adjusted[adjusted.length - 1];
+    const newProfit = roundUsd(Math.min(last.projectedProfit + diff, caps.maxProfit));
+    const balanceRef = balanceRefForDrop(userBalance, last.minBalance, last.maxBalance);
+    adjusted[adjusted.length - 1] = {
       ...last,
-      percent: adjustedPct,
-      projectedProfit: estimateProfit(balance, adjustedPct, caps.maxProfit),
+      projectedProfit: newProfit,
+      percent: percentFromProfit(newProfit, balanceRef, caps.maxPercent),
     };
   }
-  return scaled;
+
+  return adjusted;
 }
 
-async function runDeterministicUserDropPlan({ userId, weekStart, dropCount, targetTotalUsd, balance }) {
+async function runDeterministicUserDropPlan(ctx) {
   const caps = await getEffectiveCaps();
-  const bandIndex = inferBandFromBalance(balance);
-  const avgPct =
-    balance > 0
-      ? clampAirfarmingPercent((targetTotalUsd / balance) * (100 / dropCount), caps.maxPercent)
-      : 10;
-
-  const weights = [];
-  let wSum = 0;
-  for (let i = 0; i < dropCount; i += 1) {
-    const w = 0.85 + (i % 3) * 0.1;
-    weights.push(w);
-    wSum += w;
+  const rawItems = [];
+  for (let i = 0; i < ctx.dropCount; i += 1) {
+    rawItems.push({ intervalHours: INTERVAL_OPTIONS[(i * 2) % INTERVAL_OPTIONS.length] });
   }
-
-  const rawItems = weights.map((w, i) => ({
-    percent: clampAirfarmingPercent((avgPct * w * dropCount) / wSum, caps.maxPercent),
-    intervalHours: INTERVAL_OPTIONS[i % INTERVAL_OPTIONS.length],
-    bandIndex,
-  }));
-
-  let items = normalizeItems(rawItems, dropCount, balance, caps);
-  items = scaleItemsToTarget(items, balance, targetTotalUsd, caps);
-
+  const items = await buildVariedItems(ctx, rawItems, caps);
   const totalProjected = roundUsd(items.reduce((s, it) => s + it.projectedProfit, 0));
+  const tierSummary = [...new Set(items.map((it) => it.bandIndex))].join(', ');
   return {
     plannerMode: 'deterministic',
-    planSummary: `${dropCount} drops targeting ${totalProjected} USD (deterministic split).`,
+    planSummary:
+      `${ctx.dropCount} drops · ${totalProjected} USD projected · tiers ${tierSummary} · ` +
+      `${items.map((it) => it.intervalHours + 'h').join(', ')} spacing`,
     items,
     totalProjectedUsd: totalProjected,
   };
@@ -164,7 +209,7 @@ async function callJsonChat(system, userPayload) {
         { role: 'system', content: system },
         { role: 'user', content: JSON.stringify(userPayload) },
       ],
-      temperature: 0.2,
+      temperature: 0.35,
       response_format: { type: 'json_object' },
     }),
   });
@@ -177,46 +222,62 @@ async function callJsonChat(system, userPayload) {
 }
 
 const SYSTEM_PROMPT = `You plan upcoming airfarming drops for one user.
-Return JSON only: { "summary": string, "items": [ { "percent": number, "intervalHours": number } ] }.
+Return JSON only:
+{
+  "summary": string,
+  "items": [
+    {
+      "percent": number,
+      "intervalHours": number,
+      "bandIndex": 0-3,
+      "projectedProfitUsd": number,
+      "minBalance": number (optional),
+      "maxBalance": number (optional)
+    }
+  ]
+}
 Rules:
 - items.length must equal dropCount
-- percent between 0.01 and maxPercent; vary percents naturally across drops
-- intervalHours is hours until the NEXT drop (first item is hours from now); use 2–24h typically
-- projected profits should approximate targetTotalUsd on referenceBalance (platform caps profit per drop)
-- respect maxProfitPerDrop when reasoning about feasibility`;
+- VARY bandIndex across drops when it fits the plan (0=low, 1=mid-low, 2=mid-high, 3=high balance tiers)
+- VARY projectedProfitUsd across drops; they must sum to approximately targetTotalUsd (within 2%)
+- Each projectedProfitUsd must be <= maxProfitPerDrop
+- percent should match projectedProfitUsd relative to referenceBalance and the tier window
+- intervalHours: hours until the NEXT drop (first = hours from now); use different values per drop (2–24h)
+- Do NOT use identical projectedProfitUsd or bandIndex for every drop unless dropCount is 1`;
 
 async function runAiUserDropPlan(ctx) {
   const caps = await getEffectiveCaps();
-  const payload = {
-    dropCount: ctx.dropCount,
-    targetTotalUsd: ctx.targetTotalUsd,
-    referenceBalance: ctx.balance,
-    maxPercent: caps.maxPercent,
-    maxProfitPerDrop: caps.maxProfit,
-    weekStart: ctx.weekStart,
-  };
 
   if (!hasLlmCredentials()) {
     return runDeterministicUserDropPlan(ctx);
   }
 
   try {
-    const parsed = await callJsonChat(SYSTEM_PROMPT, payload);
+    const bands = await listAirfarmingDropBands().catch(() => []);
+    const parsed = await callJsonChat(SYSTEM_PROMPT, {
+      dropCount: ctx.dropCount,
+      targetTotalUsd: ctx.targetTotalUsd,
+      referenceBalance: ctx.balance,
+      maxPercent: caps.maxPercent,
+      maxProfitPerDrop: caps.maxProfit,
+      weekStart: ctx.weekStart,
+      tiers: bands.map((b) => ({
+        bandIndex: Number(b.band_index),
+        minBalance: Number(b.min_balance),
+        maxBalance: Number(b.max_balance),
+        defaultPercent: Number(b.percent),
+      })),
+    });
+
     const rawItems = Array.isArray(parsed.items) ? parsed.items : [];
-    let items = normalizeItems(rawItems, ctx.dropCount, ctx.balance, caps);
-    items = scaleItemsToTarget(items, ctx.balance, ctx.targetTotalUsd, caps);
-
-    for (let i = 0; i < items.length; i += 1) {
-      const win = await bandWindowForUser(ctx.userId, ctx.weekStart, items[i].bandIndex, ctx.balance);
-      items[i].bandIndex = win.bandIndex;
-      items[i].minBalance = win.minBalance;
-      items[i].maxBalance = win.maxBalance;
-    }
-
+    const items = await buildVariedItems(ctx, rawItems, caps);
     const totalProjected = roundUsd(items.reduce((s, it) => s + it.projectedProfit, 0));
+
     return {
       plannerMode: 'llm',
-      planSummary: parsed.summary || `AI plan: ${ctx.dropCount} drops ≈ ${totalProjected} USD.`,
+      planSummary:
+        parsed.summary ||
+        `AI plan: ${ctx.dropCount} drops, ${totalProjected} USD across mixed tiers.`,
       items,
       totalProjectedUsd: totalProjected,
     };
@@ -224,20 +285,6 @@ async function runAiUserDropPlan(ctx) {
     console.warn('[user-drop-planner] LLM failed, using deterministic fallback:', e.message);
     return runDeterministicUserDropPlan(ctx);
   }
-}
-
-async function enrichItemsWithBands(userId, weekStart, items, balance) {
-  const out = [];
-  for (const it of items) {
-    const win = await bandWindowForUser(userId, weekStart, it.bandIndex, balance);
-    out.push({
-      ...it,
-      bandIndex: win.bandIndex,
-      minBalance: win.minBalance,
-      maxBalance: win.maxBalance,
-    });
-  }
-  return out;
 }
 
 async function suggestUserDropPlan({ userId, weekStart, dropCount, targetTotalUsd, balance }) {
@@ -252,8 +299,6 @@ async function suggestUserDropPlan({ userId, weekStart, dropCount, targetTotalUs
 
   const ctx = { userId, weekStart, dropCount: n, targetTotalUsd: target, balance: bal };
   const result = await runAiUserDropPlan(ctx);
-  result.items = await enrichItemsWithBands(userId, weekStart, result.items, bal);
-  result.totalProjectedUsd = roundUsd(result.items.reduce((s, it) => s + it.projectedProfit, 0));
   return { ok: true, ...result };
 }
 
