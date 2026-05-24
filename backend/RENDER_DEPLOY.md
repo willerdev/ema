@@ -120,6 +120,8 @@ Run `backend/sql/schema.sql` (or `backend/sql/migrate_airfarming_contracts.sql` 
 
 Run `backend/sql/migrations/20260605_vip_farmers.sql` in Supabase for `vip_investments` and `vip_accruals` (Journal aggregates VIP + airfarming + contracts).
 
+Run `backend/sql/migrations/20260606_user_drop_schedules.sql` for per-user AI drop plans in admin (custom drop count, target profit, percents, intervals).
+
 - **`INTERNAL_CRON_SECRET`** — shared secret for internal cron routes. Send header `x-internal-cron-secret: <value>` or JSON body `{ "secret": "<value>" }`.
 - **`POST /internal/contracts/daily-accrue`** — once per day UTC; contract balances accrue **2%** per day (idempotent per user per UTC date).
 - **`POST /internal/vip-farmers/daily-accrue`** — once per day UTC (~00:15 UTC, after contracts); credits **9% of principal** to cash per active VIP investment for up to 30 days (idempotent per investment per UTC date).

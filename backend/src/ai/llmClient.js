@@ -183,6 +183,8 @@ module.exports = {
   aiProvider,
   aiModel,
   hasLlmCredentials,
+  providerConfig,
+  apiKeyForProvider,
   plannerStep,
   appendToolResults,
 };

@@ -882,6 +882,34 @@
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Airfarming drops</h3>
       <p id="userPauseStatus" class="hint" style="margin-bottom:10px;"></p>
       <button type="button" id="toggleUserPauseBtn" class="btn-warn" style="width:auto;margin-bottom:16px;">Pause drops</button>
+      <h3 style="font-size:0.95rem;margin:0 0 8px;">Custom drop plan (AI)</h3>
+      <p class="hint" style="margin-bottom:10px;">Set how many upcoming drops this user gets and the combined profit target. AI suggests percent and hours between each drop.</p>
+      <div class="row" style="align-items:flex-end;margin-bottom:8px;">
+        <div>
+          <label>Upcoming drops</label>
+          <input id="userDropPlanCount" type="number" min="1" max="12" step="1" value="3" />
+        </div>
+        <div>
+          <label>Target total profit (USD)</label>
+          <input id="userDropPlanTarget" type="number" min="0" step="0.01" placeholder="500.00" />
+        </div>
+        <div>
+          <label>Week (UTC Mon)</label>
+          <input id="userDropPlanWeek" type="date" />
+        </div>
+      </div>
+      <p id="userDropPlanMeta" class="hint" style="margin-bottom:8px;"></p>
+      <div class="row" style="margin-bottom:8px;">
+        <button type="button" class="btn-primary" id="userDropPlanAiBtn" style="width:auto;">AI suggest</button>
+        <button type="button" class="btn-warn" id="userDropPlanApplyBtn" style="width:auto;">Apply to schedule</button>
+      </div>
+      <p id="userDropPlanSummary" class="hint" style="margin-bottom:8px;"></p>
+      <div style="overflow-x:auto;margin-bottom:16px;">
+        <table>
+          <thead><tr><th>#</th><th>%</th><th>Interval (h)</th><th>Projected</th><th>Tier window</th></tr></thead>
+          <tbody id="userDropPlanRows"></tbody>
+        </table>
+      </div>
       <h3 style="font-size:0.95rem;margin:0 0 8px;">Deposits &amp; profits (last 90 days)</h3>
       <p id="chartTotals" class="hint" style="margin-bottom:8px;"></p>
       <div class="chart-grid">
@@ -1049,6 +1077,7 @@
     let userJournalMonth = null;
     let userJournalSelectedDate = null;
     let userJournalMonthData = null;
+    let userDropPlanView = null;
     let viewingTicketId = null;
     let pendingWithdrawals = [];
     let aiPlan = null;
@@ -1503,6 +1532,134 @@
       if (viewingUserId) void loadUserJournal(viewingUserId);
     }
 
+    function mondayUtcYmdClient(d) {
+      const dt = d ? new Date(d) : new Date();
+      const utc = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate()));
+      const dow = utc.getUTCDay();
+      const offset = (dow + 6) % 7;
+      utc.setUTCDate(utc.getUTCDate() - offset);
+      return utc.toISOString().slice(0, 10);
+    }
+
+    function readUserDropPlanInputs() {
+      const dropCount = Number(document.getElementById('userDropPlanCount').value);
+      const targetTotalUsd = Number(document.getElementById('userDropPlanTarget').value);
+      const weekStart = document.getElementById('userDropPlanWeek').value || mondayUtcYmdClient();
+      return { dropCount, targetTotalUsd, weekStart };
+    }
+
+    function renderUserDropPlan() {
+      const metaEl = document.getElementById('userDropPlanMeta');
+      const summaryEl = document.getElementById('userDropPlanSummary');
+      const rowsEl = document.getElementById('userDropPlanRows');
+      const applyBtn = document.getElementById('userDropPlanApplyBtn');
+      if (!metaEl || !rowsEl) return;
+
+      const view = userDropPlanView;
+      const bal = view?.airfarmingBalance ?? viewingUserDetail?.airfarmingBalance ?? 0;
+      metaEl.textContent = 'Airfarming balance ' + fmtMoney(bal) +
+        (view?.weekStart ? ' · Week ' + view.weekStart : '');
+
+      const schedule = view?.schedule;
+      if (schedule) {
+        document.getElementById('userDropPlanCount').value = schedule.dropCount;
+        document.getElementById('userDropPlanTarget').value = schedule.targetTotalUsd;
+        if (schedule.weekStart) document.getElementById('userDropPlanWeek').value = schedule.weekStart;
+      } else if (!document.getElementById('userDropPlanWeek').value) {
+        document.getElementById('userDropPlanWeek').value = mondayUtcYmdClient();
+      }
+
+      if (summaryEl) {
+        if (schedule?.planSummary) {
+          let text = schedule.planSummary;
+          if (schedule.plannerMode) text += ' (' + schedule.plannerMode + ')';
+          if (schedule.status === 'applied') text += ' · Applied';
+          summaryEl.textContent = text;
+        } else {
+          summaryEl.textContent = '';
+        }
+      }
+
+      const items = schedule?.items || [];
+      if (!items.length) {
+        rowsEl.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">Run AI suggest to preview drops</td></tr>';
+      } else {
+        let total = 0;
+        rowsEl.innerHTML = items.map((it, idx) => {
+          total += Number(it.projectedProfit || 0);
+          return '<tr><td>' + (idx + 1) + '</td><td>' + Number(it.percent).toFixed(2) + '%</td>' +
+            '<td>' + Number(it.intervalHours) + 'h</td><td>' + fmtMoney(it.projectedProfit || 0) + '</td>' +
+            '<td>' + escapeHtml(bandTierLabel(it.bandIndex)) + '<br><span style="color:var(--muted);font-size:0.7rem;">$' +
+            (it.minBalance ?? '—') + ' – $' + (it.maxBalance ?? '—') + '</span></td></tr>';
+        }).join('') +
+          '<tr><td colspan="3"><strong>Total projected</strong></td><td colspan="2"><strong>' + fmtMoney(total) + '</strong></td></tr>';
+      }
+
+      if (applyBtn) {
+        applyBtn.disabled = !items.length || schedule?.status === 'applied';
+      }
+    }
+
+    async function loadUserDropPlan(userId) {
+      const weekStart = document.getElementById('userDropPlanWeek').value || mondayUtcYmdClient();
+      document.getElementById('userDropPlanWeek').value = weekStart;
+      try {
+        userDropPlanView = await api('/admin/api/users/' + userId + '/drop-schedule?weekStart=' + weekStart);
+      } catch (e) {
+        userDropPlanView = { weekStart, airfarmingBalance: viewingUserDetail?.airfarmingBalance ?? 0, schedule: null };
+        document.getElementById('userDropPlanSummary').textContent = 'Drop plan unavailable: ' + e.message;
+      }
+      renderUserDropPlan();
+    }
+
+    async function aiSuggestUserDropPlan() {
+      document.getElementById('userModalErr').classList.add('hidden');
+      const { dropCount, targetTotalUsd, weekStart } = readUserDropPlanInputs();
+      if (!Number.isInteger(dropCount) || dropCount < 1 || dropCount > 12) {
+        document.getElementById('userModalErr').textContent = 'Drop count must be 1–12';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      if (!Number.isFinite(targetTotalUsd) || targetTotalUsd < 0) {
+        document.getElementById('userModalErr').textContent = 'Enter a valid target total';
+        document.getElementById('userModalErr').classList.remove('hidden');
+        return;
+      }
+      try {
+        const data = await api('/admin/api/users/' + viewingUserId + '/drop-schedule/ai-suggest', {
+          method: 'POST',
+          body: JSON.stringify({ dropCount, targetTotalUsd, weekStart }),
+        });
+        userDropPlanView = {
+          weekStart: data.schedule.weekStart,
+          airfarmingBalance: data.schedule.referenceBalance,
+          schedule: data.schedule,
+        };
+        renderUserDropPlan();
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
+    async function applyUserDropPlan() {
+      document.getElementById('userModalErr').classList.add('hidden');
+      const { weekStart } = readUserDropPlanInputs();
+      if (!confirm('Replace this user\'s scheduled drops for week ' + weekStart + ' with this plan?')) return;
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/drop-schedule/apply', {
+          method: 'POST',
+          body: JSON.stringify({ weekStart }),
+        });
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        await loadUserDropPlan(viewingUserId);
+      } catch (e) {
+        document.getElementById('userModalErr').textContent = e.message;
+        document.getElementById('userModalErr').classList.remove('hidden');
+      }
+    }
+
     function updatePauseButton(af) {
       const btn = document.getElementById('toggleUserPauseBtn');
       if (!btn) return;
@@ -1525,6 +1682,8 @@
       userJournalMonth = null;
       userJournalSelectedDate = null;
       userJournalMonthData = null;
+      userDropPlanView = null;
+      document.getElementById('userDropPlanWeek').value = mondayUtcYmdClient();
       chartDepositsInst = destroyChart(chartDepositsInst);
       chartProfitsInst = destroyChart(chartProfitsInst);
       const d = await api('/admin/api/users/' + id);
@@ -1532,6 +1691,7 @@
       document.getElementById('userModal').classList.remove('hidden');
       void loadUserCharts(id);
       void loadUserJournal(id);
+      void loadUserDropPlan(id);
     }
 
     async function applyWalletAdjust() {
@@ -2541,6 +2701,8 @@
     document.getElementById('applyAdjustBtn').onclick = () => applyWalletAdjust();
     document.getElementById('userJournalPrev').onclick = () => shiftUserJournalMonth(-1);
     document.getElementById('userJournalNext').onclick = () => shiftUserJournalMonth(1);
+    document.getElementById('userDropPlanAiBtn').onclick = () => aiSuggestUserDropPlan();
+    document.getElementById('userDropPlanApplyBtn').onclick = () => applyUserDropPlan();
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');

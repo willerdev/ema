@@ -42,6 +42,12 @@ const {
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 const { registerAdminAiRoutes } = require('./adminAiRoutes');
 const { getJournalMonth, getJournalDay } = require('./journalService');
+const {
+  getUserDropScheduleView,
+  saveUserDropScheduleDraft,
+  aiSuggestUserDropSchedule,
+  applyUserDropSchedule,
+} = require('./userDropScheduleService');
 
 const SUPPORT_STATUSES = new Set(['under_review', 'in_progress', 'resolved', 'closed']);
 
@@ -239,6 +245,75 @@ function registerAdminRoutes(app) {
         return res.status(503).json({ message: 'Journal schema not ready.' });
       }
       return res.status(500).json({ message: e.message || 'Failed to load journal day' });
+    }
+  });
+
+  const dropScheduleSchemaMsg =
+    'User drop schedules schema missing. Run backend/sql/migrations/20260606_user_drop_schedules.sql in Supabase.';
+
+  app.get('/admin/api/users/:id/drop-schedule', adminAuthMiddleware, async (req, res) => {
+    try {
+      const weekStart = req.query.weekStart ? String(req.query.weekStart).slice(0, 10) : undefined;
+      const view = await getUserDropScheduleView(req.params.id, weekStart);
+      if (!view) return res.status(404).json({ message: 'User not found' });
+      return res.json(view);
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: dropScheduleSchemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to load drop schedule' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drop-schedule', adminAuthMiddleware, async (req, res) => {
+    try {
+      const dropCount = Number(req.body?.dropCount);
+      const targetTotalUsd = Number(req.body?.targetTotalUsd);
+      const weekStart = req.body?.weekStart ? String(req.body.weekStart).slice(0, 10) : undefined;
+      if (!Number.isInteger(dropCount) || dropCount < 1 || dropCount > 12) {
+        return res.status(400).json({ message: 'dropCount must be 1–12' });
+      }
+      if (!Number.isFinite(targetTotalUsd) || targetTotalUsd < 0) {
+        return res.status(400).json({ message: 'targetTotalUsd must be a non-negative number' });
+      }
+      const result = await saveUserDropScheduleDraft(req.params.id, { weekStart, dropCount, targetTotalUsd });
+      if (!result.ok) return res.status(400).json({ message: result.error });
+      return res.json(result);
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: dropScheduleSchemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to save drop schedule' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drop-schedule/ai-suggest', adminAuthMiddleware, async (req, res) => {
+    try {
+      const dropCount = Number(req.body?.dropCount);
+      const targetTotalUsd = Number(req.body?.targetTotalUsd);
+      const weekStart = req.body?.weekStart ? String(req.body.weekStart).slice(0, 10) : undefined;
+      if (!Number.isInteger(dropCount) || dropCount < 1 || dropCount > 12) {
+        return res.status(400).json({ message: 'dropCount must be 1–12' });
+      }
+      if (!Number.isFinite(targetTotalUsd) || targetTotalUsd < 0) {
+        return res.status(400).json({ message: 'targetTotalUsd must be a non-negative number' });
+      }
+      const result = await aiSuggestUserDropSchedule(req.params.id, { weekStart, dropCount, targetTotalUsd });
+      if (!result.ok) return res.status(400).json({ message: result.error });
+      return res.json(result);
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: dropScheduleSchemaMsg });
+      console.error('[admin/drop-schedule/ai-suggest]', e);
+      return res.status(500).json({ message: e.message || 'AI suggest failed' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drop-schedule/apply', adminAuthMiddleware, async (req, res) => {
+    try {
+      const weekStart = req.body?.weekStart ? String(req.body.weekStart).slice(0, 10) : undefined;
+      const result = await applyUserDropSchedule(req.params.id, { weekStart });
+      if (!result.ok) return res.status(400).json({ message: result.error });
+      return res.json(result);
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: dropScheduleSchemaMsg });
+      console.error('[admin/drop-schedule/apply]', e);
+      return res.status(500).json({ message: e.message || 'Apply failed' });
     }
   });
 

@@ -2809,6 +2809,82 @@ async function listVipAccrualsForUserOnDate(userId, dateYmd) {
   return data || [];
 }
 
+function userDropScheduleRowToApi(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    weekStart: row.week_start,
+    dropCount: Number(row.drop_count),
+    targetTotalUsd: Number(row.target_total_usd),
+    referenceBalance: Number(row.reference_balance),
+    status: row.status,
+    planSummary: row.plan_summary || null,
+    plannerMode: row.planner_mode || null,
+    items: Array.isArray(row.items) ? row.items : [],
+    appliedAt: row.applied_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function getUserDropSchedule(userId, weekStart) {
+  const { data, error } = await supabase
+    .from('user_drop_schedules')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .maybeSingle();
+  if (error && isSchemaError(error)) return null;
+  if (error) throw error;
+  return data;
+}
+
+async function upsertUserDropSchedule({
+  userId,
+  weekStart,
+  dropCount,
+  targetTotalUsd,
+  referenceBalance,
+  status,
+  planSummary,
+  plannerMode,
+  items,
+  appliedAt,
+}) {
+  const now = new Date().toISOString();
+  const row = {
+    user_id: userId,
+    week_start: weekStart,
+    drop_count: Number(dropCount),
+    target_total_usd: Number(targetTotalUsd),
+    reference_balance: Number(referenceBalance),
+    status: status || 'draft',
+    plan_summary: planSummary ?? null,
+    planner_mode: plannerMode ?? null,
+    items: items || [],
+    applied_at: appliedAt ?? null,
+    updated_at: now,
+  };
+  const { data, error } = await supabase
+    .from('user_drop_schedules')
+    .upsert(row, { onConflict: 'user_id,week_start' })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function deleteScheduledAirfarmingDropsForUserWeek(userId, weekStart) {
+  const { error } = await supabase
+    .from('airfarming_drops')
+    .delete()
+    .eq('user_id', userId)
+    .eq('week_start', weekStart)
+    .eq('status', 'scheduled');
+  if (error) throw error;
+}
+
 async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
   const { data, error } = await supabase
     .from('airfarming_drops')
@@ -3027,4 +3103,8 @@ module.exports = {
   listPaidAirfarmingDropsForUserBetween,
   listContractAccrualsForUserBetween,
   listContractAccrualsForUserOnDate,
+  userDropScheduleRowToApi,
+  getUserDropSchedule,
+  upsertUserDropSchedule,
+  deleteScheduledAirfarmingDropsForUserWeek,
 };
