@@ -269,29 +269,31 @@ async function toPublicUpcomingDrop(row, ctx = {}) {
     eligibilitySnapshotBalance: snapshotBal,
   };
 
-  if (!percentLocked) {
-    return { ...base, percent: null, eligibleNow: null, projectedProfit: null };
-  }
-
-  const synced = await syncScheduledDropPercent(row);
-  const percent = Number(synced.percent);
+  const synced = row.id ? await syncScheduledDropPercent(row) : row;
+  const percent = Number(synced?.percent ?? row.percent);
   const eligibilityBal = snapshotBal != null ? snapshotBal : liveBal;
   const eligibleNow = isEligible(eligibilityBal, synced.min_balance, synced.max_balance);
-  let projectedProfitBase = eligibleNow ? await computeProfit(eligibilityBal, percent) : 0;
-  let projectedProfit = projectedProfitBase;
+
+  // Keep profit estimates for when the drop is live (optional UI), but always expose percent + eligibility.
+  let projectedProfitBase = 0;
+  let projectedProfit = null;
   let dropPotentialMultiplier = 1;
-  if (eligibleNow && ctx.userId) {
-    const trust = await getWithdrawalTrustScoreForUser(ctx.userId);
-    dropPotentialMultiplier = trust.dropPotentialMultiplier;
-    projectedProfit = roundMoney(projectedProfitBase * dropPotentialMultiplier);
+  if (percentLocked && eligibleNow && Number.isFinite(percent)) {
+    projectedProfitBase = await computeProfit(eligibilityBal, percent);
+    projectedProfit = projectedProfitBase;
+    if (ctx.userId) {
+      const trust = await getWithdrawalTrustScoreForUser(ctx.userId);
+      dropPotentialMultiplier = trust.dropPotentialMultiplier;
+      projectedProfit = roundMoney(projectedProfitBase * dropPotentialMultiplier);
+    }
   }
 
   return {
     ...base,
-    percent,
+    percent: Number.isFinite(percent) ? percent : null,
     eligibleNow,
     projectedProfit,
-    projectedProfitBase,
+    projectedProfitBase: projectedProfitBase || 0,
     dropPotentialMultiplier,
   };
 }

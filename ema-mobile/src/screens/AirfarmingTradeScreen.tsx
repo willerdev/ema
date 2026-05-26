@@ -25,8 +25,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Card } from '../components/Card';
-import { AirfarmingNetworkViz } from '../components/AirfarmingNetworkViz';
-import { AnimatedDropPercent, UpcomingDropsList } from '../components/UpcomingDropsList';
+import { UpcomingDropsList } from '../components/UpcomingDropsList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import {
   airfarmingService,
@@ -53,6 +52,7 @@ export function AirfarmingTradeScreen() {
   const [activateModalOpen, setActivateModalOpen] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [autoFundSaving, setAutoFundSaving] = useState(false);
+  const [autoFundExpanded, setAutoFundExpanded] = useState(false);
   const [countdownSec, setCountdownSec] = useState(0);
   const pulse = useSharedValue(1);
   const urgentPulse = useSharedValue(1);
@@ -203,6 +203,7 @@ export function AirfarmingTradeScreen() {
   const upcomingDrops =
     status?.upcomingDrops?.length ? status.upcomingDrops : status?.nextDrop ? [status.nextDrop] : [];
   const nextDrop = upcomingDrops[0] ?? status?.nextDrop ?? null;
+  const [selectedDropIndex, setSelectedDropIndex] = useState(0);
   const trust = status?.withdrawalTrustScore;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
   const showRangeInfo = () => {
@@ -286,24 +287,23 @@ export function AirfarmingTradeScreen() {
               </Card>
             </View>
 
-            <Card style={styles.networkCard}>
-              <Text style={styles.section}>Drop network</Text>
-              <Text style={styles.meta}>
-                Live-style mesh of settlement nodes. Labels show sample blockchain activity (not your personal
-                transactions).
-              </Text>
-              <AirfarmingNetworkViz height={228} active={Boolean(status)} />
-            </Card>
-
             <Card>
-              <View style={styles.settingRow}>
+              <Pressable
+                style={styles.settingRow}
+                onPress={() => setAutoFundExpanded((v) => !v)}
+                hitSlop={10}
+                accessibilityRole='button'
+                accessibilityLabel='Toggle auto-fund details'
+              >
                 <View style={{ flex: 1 }}>
                   <Text style={styles.section}>Auto-fund drops</Text>
-                  <Text style={styles.meta}>
-                    When enabled, Ema can move only the missing amount into airfarming at drop time, using cash first
-                    or available USDT crypto if cash cannot cover it.
-                  </Text>
                 </View>
+                <Ionicons
+                  name={autoFundExpanded ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={palette.textSecondary}
+                  style={{ marginRight: 8 }}
+                />
                 <Switch
                   value={Boolean(status.autoFundEnabled)}
                   onValueChange={(v) => void onToggleAutoFund(v)}
@@ -311,12 +311,20 @@ export function AirfarmingTradeScreen() {
                   trackColor={{ false: palette.border, true: palette.primary }}
                   thumbColor={status.autoFundEnabled ? '#0B1220' : palette.textSecondary}
                 />
-              </View>
-              <Text style={styles.autoFundNote}>
-                Auto-adjust runs at drop time. If your balance is low, it tops up from cash and then USDT balances. If
-                your balance is above the allowed maximum, it moves excess back to cash. If total funds still cannot fit
-                the required range, the standard not-in-range status is shown.
-              </Text>
+              </Pressable>
+              {autoFundExpanded ? (
+                <>
+                  <Text style={styles.meta}>
+                    When enabled, Ema can move only the missing amount into airfarming at drop time, using cash first
+                    or available USDT crypto if cash cannot cover it.
+                  </Text>
+                  <Text style={styles.autoFundNote}>
+                    Auto-adjust runs at drop time. If your balance is low, it tops up from cash and then USDT balances.
+                    If your balance is above the allowed maximum, it moves excess back to cash. If total funds still
+                    cannot fit the required range, the standard not-in-range status is shown.
+                  </Text>
+                </>
+              ) : null}
             </Card>
 
             {status.eligibilityNotice ? (
@@ -389,11 +397,9 @@ export function AirfarmingTradeScreen() {
                     <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
                     <Text style={styles.meta}>until eligibility check</Text>
                     <View style={styles.percentRow}>
-                      {nextDrop.percentLocked && nextDrop.percent != null ? (
-                        <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
-                      ) : (
-                        <AnimatedDropPercent seed={nextDrop.previewKey} large />
-                      )}
+                      <Text style={styles.heroBig}>
+                        {nextDrop.percent != null ? `+${nextDrop.percent.toFixed(0)}%` : '—'}
+                      </Text>
                       <Pressable
                         onPress={showPercentInfo}
                         hitSlop={10}
@@ -403,9 +409,6 @@ export function AirfarmingTradeScreen() {
                         <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
                       </Pressable>
                     </View>
-                    {!nextDrop.percentLocked ? (
-                      <Text style={styles.meta}>Preview rate — locks when the drop goes live</Text>
-                    ) : null}
                     <View style={styles.rangeRow}>
                       <Text style={styles.rangeLine}>
                         Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
@@ -421,13 +424,11 @@ export function AirfarmingTradeScreen() {
                       ]}
                     >
                       <Text style={styles.eligibilityText}>
-                        {nextDrop.percentLocked && nextDrop.eligibleNow === true && nextDrop.projectedProfit != null
-                          ? `Eligible at snapshot · est. +$${nextDrop.projectedProfit.toFixed(2)}`
-                          : nextDrop.percentLocked && nextDrop.eligibleNow === false
-                            ? 'Not in range at 24h eligibility snapshot'
-                            : nextDrop.hasSnapshot
-                              ? 'Eligibility based on balance recorded 24h before drop'
-                              : 'Eligibility snapshot records 24h before this drop'}
+                        {nextDrop.eligibleNow === true
+                          ? 'Amount available for required range'
+                          : nextDrop.eligibleNow === false
+                            ? 'Amount not available for required range'
+                            : 'Checking availability…'}
                       </Text>
                     </View>
                     <Text style={[styles.meta, { marginTop: 8 }]}>
@@ -450,9 +451,62 @@ export function AirfarmingTradeScreen() {
             <Card>
               <Text style={styles.section}>Upcoming drops</Text>
               <Text style={styles.meta}>
-                Required balance ranges are fixed. Percentages preview until each drop goes live.
+                Range, percent, and time. Tap a dot to view details.
               </Text>
-              <UpcomingDropsList drops={upcomingDrops} />
+              <View style={styles.dotWrap}>
+                <Animated.View style={[styles.dotRing, ringStyle]} />
+                <View style={styles.dotRingInner}>
+                  {upcomingDrops.slice(0, 12).map((d, i) => {
+                    const angle = (i / Math.max(1, Math.min(12, upcomingDrops.length))) * Math.PI * 2 - Math.PI / 2;
+                    const radius = 74;
+                    const x = 88 + Math.cos(angle) * radius;
+                    const y = 88 + Math.sin(angle) * radius;
+                    const available = d.eligibleNow === true;
+                    const dotColor = available ? '#3b82f6' : '#ef4444';
+                    const selected = i === selectedDropIndex;
+                    return (
+                      <Pressable
+                        key={d.previewKey}
+                        onPress={() => setSelectedDropIndex(i)}
+                        style={[
+                          styles.dot,
+                          {
+                            left: x,
+                            top: y,
+                            backgroundColor: dotColor,
+                            transform: [{ translateX: -6 }, { translateY: -6 }, { scale: selected ? 1.25 : 1 }],
+                          },
+                        ]}
+                        hitSlop={12}
+                        accessibilityRole='button'
+                        accessibilityLabel={`Select drop ${i + 1}`}
+                      />
+                    );
+                  })}
+                </View>
+              </View>
+
+              {upcomingDrops[selectedDropIndex] ? (
+                <View style={styles.dotDetails}>
+                  <Text style={styles.dotTitle}>Drop #{upcomingDrops[selectedDropIndex].dropIndex + 1}</Text>
+                  <Text style={styles.dotRow}>
+                    Required: {formatUsd(upcomingDrops[selectedDropIndex].minBalance)} – {formatUsd(upcomingDrops[selectedDropIndex].maxBalance)}
+                  </Text>
+                  <Text style={styles.dotRow}>
+                    Percent: {upcomingDrops[selectedDropIndex].percent != null ? `+${upcomingDrops[selectedDropIndex].percent.toFixed(1)}%` : '—'}
+                  </Text>
+                  <Text style={styles.dotRow}>
+                    Time: {new Date(upcomingDrops[selectedDropIndex].dueAt).toLocaleString(undefined, { timeZone: 'UTC' })}
+                  </Text>
+                  <Text style={styles.dotHint}>
+                    {upcomingDrops[selectedDropIndex].eligibleNow === true
+                      ? 'Blue: amount available'
+                      : 'Red: amount not available'}
+                  </Text>
+                </View>
+              ) : null}
+
+              <UpcomingDropsList drops={upcomingDrops.slice(0, 5)} />
             </Card>
 
             <Card>
@@ -682,11 +736,42 @@ const styles = StyleSheet.create({
   meta: { color: palette.textSecondary, marginBottom: 4 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
   statCard: { width: '48%', marginBottom: 0, padding: 14 },
-  networkCard: { paddingBottom: 12, overflow: 'hidden' },
   statLabel: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 },
   statValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '800' },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   autoFundNote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  dotWrap: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 12 },
+  dotRing: {
+    width: 176,
+    height: 176,
+    borderRadius: 88,
+    borderWidth: 2,
+    borderColor: palette.primary,
+    opacity: 0.55,
+  },
+  dotRingInner: {
+    position: 'absolute',
+    width: 176,
+    height: 176,
+    borderRadius: 88,
+  },
+  dot: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: palette.surface,
+  },
+  dotDetails: {
+    borderTopWidth: 1,
+    borderTopColor: palette.border,
+    paddingTop: 12,
+    marginTop: 6,
+  },
+  dotTitle: { color: palette.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 6 },
+  dotRow: { color: palette.textPrimary, fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  dotHint: { color: palette.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 16 },
   noticeCard: { borderColor: palette.primary, borderLeftWidth: 3, marginBottom: 12 },
   trustHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   trustCardWarn: { borderColor: '#f59e0b', borderLeftWidth: 3 },

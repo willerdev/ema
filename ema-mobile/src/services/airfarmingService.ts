@@ -108,10 +108,7 @@ function normalizeUpcomingDrop(raw: unknown): AirfarmingUpcomingDrop | null {
   if (!dueAt) return null;
   const percentLocked = Boolean(r.percentLocked);
   const percentRaw = r.percent;
-  const percent =
-    percentLocked && percentRaw != null && percentRaw !== ''
-      ? num(percentRaw)
-      : null;
+  const percent = percentRaw != null && percentRaw !== '' ? num(percentRaw) : null;
   const eligibleRaw = r.eligibleNow;
   const eligibleNow =
     eligibleRaw === true || eligibleRaw === false ? Boolean(eligibleRaw) : null;
