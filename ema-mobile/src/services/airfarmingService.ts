@@ -6,17 +6,56 @@ export type AirfarmingPlatformHighlight = {
   percent: number;
 };
 
-export type AirfarmingNextDrop = {
-  id: string;
+export type WithdrawalTrustFactor = {
+  key: string;
+  label: string;
+  impact: number;
+  count?: number;
+  ratio?: number;
+  amountUsd?: number;
+  note?: string;
+};
+
+export type WithdrawalTrustScore = {
+  score: number;
+  band: 'excellent' | 'good' | 'fair' | 'low' | 'poor';
+  label: string;
+  dropPotentialMultiplier: number;
+  dropPotentialPercent: number;
+  factors: WithdrawalTrustFactor[];
+  stats: {
+    withdrawCount7d: number;
+    withdrawCount30d: number;
+    withdrawCountLifetime: number;
+    withdrawAmount7d: number;
+    withdrawAmount90d: number;
+    depositAmount90d: number;
+    illegalCount90d: number;
+  };
+  affectsDrops: boolean;
+  message: string;
+};
+
+export type AirfarmingUpcomingDrop = {
+  id: string | null;
+  previewKey: string;
   dropIndex: number;
   dueAt: string;
   secondsRemaining: number;
-  percent: number;
   minBalance: number;
   maxBalance: number;
-  eligibleNow: boolean;
-  projectedProfit: number;
+  percentLocked: boolean;
+  isProjected: boolean;
+  hasSnapshot: boolean;
+  eligibilitySnapshotBalance: number | null;
+  percent: number | null;
+  eligibleNow: boolean | null;
+  projectedProfit: number | null;
+  projectedProfitBase?: number | null;
+  dropPotentialMultiplier?: number;
 };
+
+export type AirfarmingNextDrop = AirfarmingUpcomingDrop;
 
 export type AirfarmingDropHistoryRow = {
   id: string;
@@ -45,6 +84,9 @@ export type AirfarmingStatus = {
   lastEventAt: string | null;
   platformHighlight: AirfarmingPlatformHighlight | null;
   nextDrop: AirfarmingNextDrop | null;
+  upcomingDrops?: AirfarmingUpcomingDrop[];
+  eligibilityNotice?: string | null;
+  withdrawalTrustScore?: WithdrawalTrustScore | null;
   history: AirfarmingDropHistoryRow[];
   dropHistory?: AirfarmingDropHistoryRow[];
 };
@@ -59,21 +101,84 @@ function num(v: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function normalizeNextDrop(raw: unknown): AirfarmingNextDrop | null {
+function normalizeUpcomingDrop(raw: unknown): AirfarmingUpcomingDrop | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
   const dueAt = String(r.dueAt ?? '');
   if (!dueAt) return null;
+  const percentLocked = Boolean(r.percentLocked);
+  const percentRaw = r.percent;
+  const percent =
+    percentLocked && percentRaw != null && percentRaw !== ''
+      ? num(percentRaw)
+      : null;
+  const eligibleRaw = r.eligibleNow;
+  const eligibleNow =
+    eligibleRaw === true || eligibleRaw === false ? Boolean(eligibleRaw) : null;
   return {
-    id: String(r.id ?? ''),
+    id: r.id != null && String(r.id) ? String(r.id) : null,
+    previewKey: String(r.previewKey ?? r.id ?? `${dueAt}:${num(r.dropIndex)}`),
     dropIndex: num(r.dropIndex),
     dueAt,
     secondsRemaining: num(r.secondsRemaining),
-    percent: num(r.percent),
     minBalance: num(r.minBalance),
     maxBalance: num(r.maxBalance),
-    eligibleNow: Boolean(r.eligibleNow),
-    projectedProfit: num(r.projectedProfit),
+    percentLocked,
+    isProjected: Boolean(r.isProjected),
+    hasSnapshot: Boolean(r.hasSnapshot),
+    eligibilitySnapshotBalance:
+      r.eligibilitySnapshotBalance != null ? num(r.eligibilitySnapshotBalance) : null,
+    percent,
+    eligibleNow,
+    projectedProfit: r.projectedProfit != null ? num(r.projectedProfit) : null,
+    projectedProfitBase: r.projectedProfitBase != null ? num(r.projectedProfitBase) : null,
+    dropPotentialMultiplier: r.dropPotentialMultiplier != null ? num(r.dropPotentialMultiplier) : undefined,
+  };
+}
+
+function normalizeNextDrop(raw: unknown): AirfarmingNextDrop | null {
+  return normalizeUpcomingDrop(raw);
+}
+
+function normalizeTrustScore(raw: unknown): WithdrawalTrustScore | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const band = r.band;
+  const validBand =
+    band === 'excellent' || band === 'good' || band === 'fair' || band === 'low' || band === 'poor'
+      ? band
+      : 'fair';
+  const factorsRaw = Array.isArray(r.factors) ? r.factors : [];
+  const statsRaw = r.stats && typeof r.stats === 'object' ? (r.stats as Record<string, unknown>) : {};
+  return {
+    score: num(r.score),
+    band: validBand,
+    label: String(r.label ?? 'Fair'),
+    dropPotentialMultiplier: num(r.dropPotentialMultiplier, 1),
+    dropPotentialPercent: num(r.dropPotentialPercent, num(r.score)),
+    factors: factorsRaw.map((f) => {
+      const row = f && typeof f === 'object' ? (f as Record<string, unknown>) : {};
+      return {
+        key: String(row.key ?? ''),
+        label: String(row.label ?? ''),
+        impact: num(row.impact),
+        count: row.count != null ? num(row.count) : undefined,
+        ratio: row.ratio != null ? num(row.ratio) : undefined,
+        amountUsd: row.amountUsd != null ? num(row.amountUsd) : undefined,
+        note: row.note != null ? String(row.note) : undefined,
+      };
+    }),
+    stats: {
+      withdrawCount7d: num(statsRaw.withdrawCount7d),
+      withdrawCount30d: num(statsRaw.withdrawCount30d),
+      withdrawCountLifetime: num(statsRaw.withdrawCountLifetime),
+      withdrawAmount7d: num(statsRaw.withdrawAmount7d),
+      withdrawAmount90d: num(statsRaw.withdrawAmount90d),
+      depositAmount90d: num(statsRaw.depositAmount90d),
+      illegalCount90d: num(statsRaw.illegalCount90d),
+    },
+    affectsDrops: Boolean(r.affectsDrops),
+    message: String(r.message ?? ''),
   };
 }
 
@@ -126,6 +231,13 @@ function normalizeStatus(raw: unknown): AirfarmingStatus {
     lastEventAt: r.lastEventAt == null ? null : String(r.lastEventAt),
     platformHighlight,
     nextDrop: normalizeNextDrop(r.nextDrop),
+    upcomingDrops: Array.isArray(r.upcomingDrops)
+      ? (r.upcomingDrops as unknown[])
+          .map((d) => normalizeUpcomingDrop(d))
+          .filter((d): d is AirfarmingUpcomingDrop => d != null)
+      : undefined,
+    eligibilityNotice: r.eligibilityNotice != null ? String(r.eligibilityNotice) : null,
+    withdrawalTrustScore: normalizeTrustScore(r.withdrawalTrustScore),
     history,
     dropHistory: Array.isArray(r.dropHistory)
       ? (r.dropHistory as unknown[]).map((h) =>

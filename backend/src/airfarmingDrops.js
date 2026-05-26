@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const {
   getScheduledAirfarmingDrop,
+  listScheduledAirfarmingDropsForUser,
   getLastAirfarmingDropForWeek,
   insertAirfarmingDrop,
   updateAirfarmingDrop,
@@ -22,8 +23,17 @@ const {
 } = require('./db');
 const { isDropPausedForUser } = require('./airfarmingPause');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
+const { getWithdrawalTrustScoreForUser } = require('./services/withdrawalTrustScore');
 
+const {
+  ELIGIBILITY_SNAPSHOT_MS,
+  snapshotBalanceFromRow,
+  isPercentLockedForDrop,
+} = require('./airfarmingDropUtils');
 const INTERVAL_HOURS = [2, 3, 5];
+const MAX_UPCOMING_PROJECTED = 24;
+const ELIGIBILITY_NOTICE =
+  'Required balance ranges are fixed in advance. Your eligibility is based on your airfarming balance recorded 24 hours before each drop — not on funds added right before the drop window. This prevents gaming the schedule by depositing only when a range is shown.';
 const MAX_PROFIT_PER_DROP = 5000;
 /** Default maximum airfarming drop interest % (overridden by platform settings). */
 const MAX_AIRFARMING_PERCENT = 57.9;
@@ -200,24 +210,163 @@ function roundMoney(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
-async function toPublicNextDrop(row, airfarmingBalance, nowMs = Date.now()) {
+async function captureEligibilitySnapshotIfDue(userId, drop) {
+  if (!drop || drop.status !== 'scheduled') return drop;
+  if (drop.eligibility_snapshot_at != null) return drop;
+
+  const dueMs = new Date(drop.due_at).getTime();
+  const nowMs = Date.now();
+  if (nowMs < dueMs - ELIGIBILITY_SNAPSHOT_MS) return drop;
+
+  const af = await getAirfarmingWalletByUserId(userId);
+  const balance = roundMoney(Number.parseFloat(String(af?.balance ?? 0)) || 0);
+  const now = new Date().toISOString();
+
+  try {
+    return await updateAirfarmingDrop(drop.id, {
+      eligibility_snapshot_at: now,
+      eligibility_snapshot_balance: balance,
+    });
+  } catch (e) {
+    if (String(e?.message || '').includes('eligibility_snapshot')) return drop;
+    throw e;
+  }
+}
+
+async function captureSnapshotsForScheduled(userId, drops) {
+  const out = [];
+  for (const d of drops || []) {
+    out.push(await captureEligibilitySnapshotIfDue(userId, d));
+  }
+  return out;
+}
+
+/**
+ * @param {object} row - DB row or projected preview
+ * @param {{ userId?: string, airfarmingBalance?: number, nowMs?: number, isProjected?: boolean }} ctx
+ */
+async function toPublicUpcomingDrop(row, ctx = {}) {
   if (!row) return null;
+  const nowMs = ctx.nowMs ?? Date.now();
   const dueMs = new Date(row.due_at).getTime();
   const secondsRemaining = Math.max(0, Math.floor((dueMs - nowMs) / 1000));
-  const bal = Number(airfarmingBalance) || 0;
-  const eligibleNow = isEligible(bal, row.min_balance, row.max_balance);
-  const projectedProfit = eligibleNow ? await computeProfit(bal, row.percent) : 0;
-  return {
-    id: row.id,
-    dropIndex: row.drop_index,
+  const percentLocked = isPercentLockedForDrop(row, nowMs);
+  const isProjected = Boolean(ctx.isProjected);
+  const snapshotBal = snapshotBalanceFromRow(row);
+  const liveBal = Number(ctx.airfarmingBalance) || 0;
+
+  const base = {
+    id: row.id ? String(row.id) : null,
+    previewKey: row.previewKey || (row.id ? String(row.id) : `${ctx.userId}:${row.week_start}:${row.drop_index}`),
+    dropIndex: Number(row.drop_index),
     dueAt: row.due_at,
     secondsRemaining,
-    percent: Number(row.percent),
     minBalance: Number(row.min_balance),
     maxBalance: Number(row.max_balance),
+    percentLocked,
+    isProjected,
+    hasSnapshot: snapshotBal != null,
+    eligibilitySnapshotBalance: snapshotBal,
+  };
+
+  if (!percentLocked) {
+    return { ...base, percent: null, eligibleNow: null, projectedProfit: null };
+  }
+
+  const synced = await syncScheduledDropPercent(row);
+  const percent = Number(synced.percent);
+  const eligibilityBal = snapshotBal != null ? snapshotBal : liveBal;
+  const eligibleNow = isEligible(eligibilityBal, synced.min_balance, synced.max_balance);
+  let projectedProfitBase = eligibleNow ? await computeProfit(eligibilityBal, percent) : 0;
+  let projectedProfit = projectedProfitBase;
+  let dropPotentialMultiplier = 1;
+  if (eligibleNow && ctx.userId) {
+    const trust = await getWithdrawalTrustScoreForUser(ctx.userId);
+    dropPotentialMultiplier = trust.dropPotentialMultiplier;
+    projectedProfit = roundMoney(projectedProfitBase * dropPotentialMultiplier);
+  }
+
+  return {
+    ...base,
+    percent,
     eligibleNow,
     projectedProfit,
+    projectedProfitBase,
+    dropPotentialMultiplier,
   };
+}
+
+async function toPublicNextDrop(row, airfarmingBalance, userId, nowMs = Date.now()) {
+  return toPublicUpcomingDrop(row, { userId, airfarmingBalance, nowMs, isProjected: false });
+}
+
+async function projectUpcomingDropsForWeek(userId, weekStart, scheduledRows) {
+  const weekEnd = weekEndMs(weekStart);
+  const projected = [];
+  const pauseCheck = await isDropPausedForUser(userId, 0);
+  if (pauseCheck.paused) return projected;
+
+  let last = scheduledRows.length
+    ? scheduledRows[scheduledRows.length - 1]
+    : await getLastAirfarmingDropForWeek(userId, weekStart);
+
+  let dropIndex = last ? Number(last.drop_index) + 1 : 0;
+  let dueMs = last
+    ? Math.max(Date.now(), new Date(last.due_at).getTime()) + pickIntervalHours(userId, weekStart, dropIndex) * 3600 * 1000
+    : Date.now() + pickIntervalHours(userId, weekStart, dropIndex) * 3600 * 1000;
+
+  const existingDue = new Set((scheduledRows || []).map((r) => r.due_at));
+
+  for (let guard = 0; guard < MAX_UPCOMING_PROJECTED && dueMs < weekEnd; guard += 1) {
+    const spec = await generateDropSpec(userId, weekStart, dropIndex);
+    const dueAt = new Date(dueMs).toISOString();
+    if (!existingDue.has(dueAt)) {
+      projected.push({
+        previewKey: `${userId}:${weekStart}:${dropIndex}`,
+        user_id: userId,
+        week_start: weekStart,
+        drop_index: dropIndex,
+        due_at: dueAt,
+        min_balance: spec.min_balance,
+        max_balance: spec.max_balance,
+        percent: spec.percent,
+        band_index: spec.band_index,
+        status: 'scheduled',
+      });
+      existingDue.add(dueAt);
+    }
+    dropIndex += 1;
+    dueMs += pickIntervalHours(userId, weekStart, dropIndex) * 3600 * 1000;
+  }
+
+  return projected;
+}
+
+async function buildUpcomingDropsQueue(userId, weekStart, airfarmingBalance, options = {}) {
+  const nowMs = Date.now();
+  let scheduled = await listScheduledAirfarmingDropsForUser(userId, weekStart);
+  if (!scheduled.length) {
+    const one = await ensureNextScheduledDrop(userId, weekStart);
+    if (one) scheduled = [one];
+  }
+
+  scheduled = await Promise.all(scheduled.map((d) => syncScheduledDropPercent(d)));
+  scheduled = await captureSnapshotsForScheduled(userId, scheduled);
+
+  const projected = await projectUpcomingDropsForWeek(userId, weekStart, scheduled);
+  const allRows = [...scheduled, ...projected].sort(
+    (a, b) => new Date(a.due_at).getTime() - new Date(b.due_at).getTime()
+  );
+
+  const ctx = { userId, airfarmingBalance, nowMs };
+  const upcomingDrops = [];
+  for (const row of allRows) {
+    const isProjected = !row.id;
+    const pub = await toPublicUpcomingDrop(row, { ...ctx, isProjected });
+    if (pub) upcomingDrops.push(pub);
+  }
+
+  return { upcomingDrops, eligibilityNotice: ELIGIBILITY_NOTICE };
 }
 
 function dropToHistoryRow(row) {
@@ -384,16 +533,23 @@ async function autoAdjustToRange(userId, drop, currentBalance) {
 
 async function settleDrop(userId, drop, options = {}) {
   drop = await syncScheduledDropPercent(drop);
+  drop = await captureEligibilitySnapshotIfDue(userId, drop);
+
   const af = await getAirfarmingWalletByUserId(userId);
-  let balance = Number.parseFloat(String(af?.balance ?? 0)) || 0;
+  let liveBalance = Number.parseFloat(String(af?.balance ?? 0)) || 0;
   const now = new Date().toISOString();
   let autoFunded = { cash: 0, crypto: 0 };
-  if (!isEligible(balance, drop.min_balance, drop.max_balance) && options.autoFundEnabled) {
-    const adjusted = await autoAdjustToRange(userId, drop, balance);
-    autoFunded = { cash: adjusted.cash, crypto: adjusted.crypto };
-    balance = adjusted.balance;
+
+  const maxBalance = Number(drop.max_balance);
+  if (liveBalance > maxBalance && options.autoFundEnabled) {
+    const adjusted = await autoAdjustToRange(userId, drop, liveBalance);
+    autoFunded = { cash: adjusted.cash, crypto: adjusted.crypto, returnedCash: adjusted.returnedCash };
+    liveBalance = adjusted.balance;
   }
-  const eligible = isEligible(balance, drop.min_balance, drop.max_balance);
+
+  const snapshotBal = snapshotBalanceFromRow(drop);
+  const eligibilityBalance = snapshotBal != null ? snapshotBal : liveBalance;
+  const eligible = isEligible(eligibilityBalance, drop.min_balance, drop.max_balance);
 
   if (eligible) {
     const planDate = utcTodayYmd();
@@ -401,7 +557,7 @@ async function settleDrop(userId, drop, options = {}) {
     if (dailyPlan && dailyPlan.status !== 'active') {
       return updateAirfarmingDrop(drop.id, {
         status: 'missed',
-        eligible_balance: balance,
+        eligible_balance: eligibilityBalance,
         profit_amount: 0,
         auto_funded_cash: autoFunded.cash,
         auto_funded_crypto: autoFunded.crypto,
@@ -409,7 +565,9 @@ async function settleDrop(userId, drop, options = {}) {
       });
     }
 
-    let profit = await computeProfit(balance, drop.percent);
+    let profit = await computeProfit(eligibilityBalance, drop.percent);
+    const trust = await getWithdrawalTrustScoreForUser(userId);
+    profit = roundMoney(profit * trust.dropPotentialMultiplier);
     if (dailyPlan?.status === 'active') {
       const budgetUsd = Number(dailyPlan.budget_usd);
       const spent = Number(dailyPlan.budget_spent_usd);
@@ -417,7 +575,7 @@ async function settleDrop(userId, drop, options = {}) {
       if (remaining <= 0) {
         return updateAirfarmingDrop(drop.id, {
           status: 'missed',
-          eligible_balance: balance,
+          eligible_balance: eligibilityBalance,
           profit_amount: 0,
           auto_funded_cash: autoFunded.cash,
           auto_funded_crypto: autoFunded.crypto,
@@ -435,7 +593,7 @@ async function settleDrop(userId, drop, options = {}) {
       }
     }
 
-    const nextBal = roundMoney(balance + profit);
+    const nextBal = roundMoney(liveBalance + profit);
     await upsertAirfarmingWalletRow({
       user_id: userId,
       balance: nextBal,
@@ -443,7 +601,7 @@ async function settleDrop(userId, drop, options = {}) {
     });
     const paid = await updateAirfarmingDrop(drop.id, {
       status: 'paid',
-      eligible_balance: balance,
+      eligible_balance: eligibilityBalance,
       profit_amount: profit,
       auto_funded_cash: autoFunded.cash,
       auto_funded_crypto: autoFunded.crypto,
@@ -457,7 +615,7 @@ async function settleDrop(userId, drop, options = {}) {
 
   return updateAirfarmingDrop(drop.id, {
     status: 'missed',
-    eligible_balance: balance,
+    eligible_balance: eligibilityBalance,
     profit_amount: 0,
     auto_funded_cash: autoFunded.cash,
     auto_funded_crypto: autoFunded.crypto,
@@ -479,6 +637,7 @@ async function processDueDrops(userId, weekStart, options = {}) {
     if (Date.now() < dueMs) break;
 
     scheduled = await syncScheduledDropPercent(scheduled);
+    scheduled = await captureEligibilitySnapshotIfDue(userId, scheduled);
     const bandIndex =
       scheduled.band_index != null
         ? Number(scheduled.band_index)
@@ -495,17 +654,16 @@ async function processDueDrops(userId, weekStart, options = {}) {
 
 async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {}) {
   await processDueDrops(userId, weekStart, options);
-  let scheduled = await getScheduledAirfarmingDrop(userId, weekStart);
-  if (!scheduled) {
-    scheduled = await ensureNextScheduledDrop(userId, weekStart);
-  }
-  if (scheduled) {
-    scheduled = await syncScheduledDropPercent(scheduled);
-  }
   const af = await getAirfarmingWalletByUserId(userId);
   const latestBalance = Number.parseFloat(String(af?.balance ?? airfarmingBalance ?? 0)) || 0;
-  const nextDrop = await toPublicNextDrop(scheduled, latestBalance);
-  return { nextDrop };
+  const { upcomingDrops, eligibilityNotice } = await buildUpcomingDropsQueue(
+    userId,
+    weekStart,
+    latestBalance,
+    options
+  );
+  const nextDrop = upcomingDrops[0] || null;
+  return { nextDrop, upcomingDrops, eligibilityNotice };
 }
 
 module.exports = {
@@ -517,6 +675,11 @@ module.exports = {
   computeProfit,
   autoAdjustToRange,
   toPublicNextDrop,
+  toPublicUpcomingDrop,
+  buildUpcomingDropsQueue,
+  captureEligibilitySnapshotIfDue,
+  projectUpcomingDropsForWeek,
+  ELIGIBILITY_NOTICE,
   ensureNextScheduledDrop,
   settleDrop,
   processDueDrops,

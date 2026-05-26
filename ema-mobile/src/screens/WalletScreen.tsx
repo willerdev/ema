@@ -19,6 +19,7 @@ import { NetworkGridCompact } from '../components/NetworkGridCompact';
 import { OptionGrid } from '../components/OptionGrid';
 import { OptionHighlightList } from '../components/OptionHighlightList';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { WithdrawalProgressSteps } from '../components/WithdrawalProgressSteps';
 import { usePolling } from '../hooks/usePolling';
 import { useToast } from '../hooks/useToast';
 import { authService } from '../services/authService';
@@ -55,6 +56,10 @@ const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 const WITHDRAW_CURRENCY_OPTIONS = ['usdttrc20', 'eth'] as const;
 const GAS_BANNER_DISMISS_PREFIX = 'ema_wallet_gas_banner_dismissed_';
 
+function delay(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
 export function WalletScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
@@ -79,6 +84,9 @@ export function WalletScreen() {
   const [withdrawTotpCode, setWithdrawTotpCode] = useState('');
   const [withdrawModalOpen, setWithdrawModalOpen] = useState(false);
   const [withdrawSubmitting, setWithdrawSubmitting] = useState(false);
+  const [withdrawShowProgress, setWithdrawShowProgress] = useState(false);
+  const [withdrawProgressStep, setWithdrawProgressStep] = useState(0);
+  const [withdrawProgressError, setWithdrawProgressError] = useState<string | null>(null);
   const [clientIp, setClientIp] = useState<string | null>(null);
   const [withdrawModalMax, setWithdrawModalMax] = useState(0);
   const [withdrawModalCurrencyLabel, setWithdrawModalCurrencyLabel] = useState('USDT (TRC20)');
@@ -197,6 +205,29 @@ export function WalletScreen() {
   const availableForWithdraw = combinedWithdrawableForNetwork(npSummary, withdrawCurrency);
   const maxWithdraw = maxWithdrawableAmount(availableForWithdraw);
 
+  const ensureClientIp = useCallback(async () => {
+    if (clientIp) return clientIp;
+    try {
+      const r = await nowpaymentsService.getClientIp();
+      const ip = r.ip && r.ip !== 'unknown' ? r.ip : null;
+      setClientIp(ip);
+      return ip;
+    } catch {
+      return null;
+    }
+  }, [clientIp]);
+
+  const closeWithdrawModal = () => {
+    if (withdrawSubmitting && withdrawShowProgress && withdrawProgressStep < 4 && !withdrawProgressError) {
+      return;
+    }
+    setWithdrawModalOpen(false);
+    setWithdrawShowProgress(false);
+    setWithdrawProgressStep(0);
+    setWithdrawProgressError(null);
+    setWithdrawSubmitting(false);
+  };
+
   const onWithdraw = async () => {
     if (!complianceComplete) {
       alertComplianceRequired();
@@ -218,24 +249,50 @@ export function WalletScreen() {
     }
     const totpOk = !totpEnabled || withdrawTotpCode.replace(/\s/g, '').length >= 6;
     if (!totpOk) return;
+
+    setWithdrawSubmitting(true);
+    setWithdrawShowProgress(true);
+    setWithdrawProgressStep(0);
+    setWithdrawProgressError(null);
+    setNpError(null);
+
     try {
-      setWithdrawSubmitting(true);
-      setNpError(null);
+      setWithdrawProgressStep(0);
+      await delay(650);
+
+      setWithdrawProgressStep(1);
+      await delay(800);
+
+      setWithdrawProgressStep(2);
+      await ensureClientIp();
+      await delay(900);
+
+      setWithdrawProgressStep(3);
       await nowpaymentsService.createWithdrawal(
         selected.currency,
         selected.address,
         n,
         totpEnabled ? withdrawTotpCode.replace(/\s/g, '') : undefined
       );
+
+      setWithdrawProgressStep(4);
+      await delay(1400);
+
       setWithdrawAmount('');
       setSelectedWhitelistId(null);
       setWithdrawTotpCode('');
       setWithdrawModalOpen(false);
+      setWithdrawShowProgress(false);
+      setWithdrawProgressStep(0);
       await refreshNowpayments();
-      showToast('Withdrawal in progress');
+      showToast('Withdrawal submitted');
     } catch (e: any) {
-      if (isComplianceRequiredError(e)) alertComplianceRequired();
-      else Alert.alert('Withdraw failed', sanitizeError(e?.message || 'Withdrawal failed'));
+      if (isComplianceRequiredError(e)) {
+        closeWithdrawModal();
+        alertComplianceRequired();
+      } else {
+        setWithdrawProgressError(sanitizeError(e?.message || 'Withdrawal failed'));
+      }
     } finally {
       setWithdrawSubmitting(false);
     }
@@ -260,6 +317,9 @@ export function WalletScreen() {
     setWithdrawModalMax(snapMax);
     setWithdrawModalCurrencyLabel(formatNetworkLabel(withdrawCurrency));
     setWithdrawSubmitting(false);
+    setWithdrawShowProgress(false);
+    setWithdrawProgressStep(0);
+    setWithdrawProgressError(null);
     setWithdrawModalOpen(true);
   };
 
@@ -451,82 +511,112 @@ export function WalletScreen() {
 
       <FormModal
         visible={withdrawModalOpen}
-        title='Withdraw'
+        title={withdrawShowProgress ? 'Withdrawing' : 'Withdraw'}
         avoidKeyboard={false}
-        onClose={() => setWithdrawModalOpen(false)}
+        onClose={closeWithdrawModal}
+        footer={
+          withdrawShowProgress ? (
+            withdrawProgressError ? (
+              <PrimaryButton
+                label='Back to form'
+                onPress={() => {
+                  setWithdrawShowProgress(false);
+                  setWithdrawProgressStep(0);
+                  setWithdrawProgressError(null);
+                }}
+                style={{ marginTop: 12 }}
+              />
+            ) : (
+              <View style={{ height: 0 }} />
+            )
+          ) : undefined
+        }
       >
-        <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
-        <View style={styles.ipSlot}>
-          <Text style={styles.ipText}>
-            {clientIp
-              ? `Your IP: ${clientIp}\nIf withdrawals fail, ask support to whitelist this IP for payouts.`
-              : 'Loading your IP…'}
-          </Text>
-        </View>
-        <Text style={styles.gasTextModal}>
-          Keep 5% in your wallet for gas. Max withdrawable:{' '}
-          {withdrawModalMax > 0 ? Math.floor(withdrawModalMax) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
-          can block future deposits.
-        </Text>
-        <Pressable onPress={() => navigateToSupport(navigation, { category: 'withdraw' })} style={styles.supportLinkWrap}>
-          <Text style={styles.supportLinkText}>
-            Having trouble withdrawing? <Text style={styles.supportLinkAccent}>Get help in Support</Text>
-          </Text>
-        </Pressable>
-        <TextInput
-          style={inputStyle}
-          value={withdrawAmount}
-          onChangeText={setWithdrawAmount}
-          placeholder='Amount'
-          placeholderTextColor={palette.textSecondary}
-          keyboardType='numeric'
-        />
-        <Text style={styles.fieldLabel}>Network</Text>
-        <OptionGrid
-          options={WITHDRAW_CURRENCY_OPTIONS}
-          value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
-          onChange={(c) => {
-            setWithdrawCurrency(c);
-            setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
-            setWithdrawModalMax(maxWithdrawableAmount(combinedWithdrawableForNetwork(npSummary, c)));
-            const first = whitelistedWallets.find((w) => w.currency === c);
-            setSelectedWhitelistId(first?.id ?? null);
-          }}
-          formatLabel={formatNetworkLabel}
-        />
-        <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
-        {walletsForWithdrawCurrency.length ? (
-          <OptionHighlightList
-            options={walletsForWithdrawCurrency.map((w) => w.id!)}
-            value={selectedWhitelistId || walletsForWithdrawCurrency[0].id!}
-            onChange={setSelectedWhitelistId}
-            formatLabel={(id) => {
-              const w = whitelistedWallets.find((x) => x.id === id);
-              return w?.label || formatNetworkLabel(w?.currency || withdrawCurrency);
-            }}
-          />
+        {withdrawShowProgress ? (
+          <>
+            <Text style={styles.hint}>Please wait while we process your withdrawal.</Text>
+            <WithdrawalProgressSteps
+              activeIndex={withdrawProgressStep}
+              clientIp={clientIp}
+              errorMessage={withdrawProgressError}
+            />
+          </>
         ) : (
-          <Text style={styles.hint}>Add a {formatNetworkLabel(withdrawCurrency)} wallet in Settings.</Text>
+          <>
+            <Text style={styles.hint}>Withdraw to a whitelisted address from Settings.</Text>
+            <View style={styles.ipSlot}>
+              <Text style={styles.ipText}>
+                {clientIp
+                  ? `Your IP: ${clientIp}\nIf withdrawals fail, ask support to whitelist this IP for payouts.`
+                  : 'Loading your IP…'}
+              </Text>
+            </View>
+            <Text style={styles.gasTextModal}>
+              Keep 5% in your wallet for gas. Max withdrawable:{' '}
+              {withdrawModalMax > 0 ? Math.floor(withdrawModalMax) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
+              can block future deposits.
+            </Text>
+            <Pressable onPress={() => navigateToSupport(navigation, { category: 'withdraw' })} style={styles.supportLinkWrap}>
+              <Text style={styles.supportLinkText}>
+                Having trouble withdrawing? <Text style={styles.supportLinkAccent}>Get help in Support</Text>
+              </Text>
+            </Pressable>
+            <TextInput
+              style={inputStyle}
+              value={withdrawAmount}
+              onChangeText={setWithdrawAmount}
+              placeholder='Amount'
+              placeholderTextColor={palette.textSecondary}
+              keyboardType='numeric'
+            />
+            <Text style={styles.fieldLabel}>Network</Text>
+            <OptionGrid
+              options={WITHDRAW_CURRENCY_OPTIONS}
+              value={withdrawCurrency as (typeof WITHDRAW_CURRENCY_OPTIONS)[number]}
+              onChange={(c) => {
+                setWithdrawCurrency(c);
+                setWithdrawModalCurrencyLabel(formatNetworkLabel(c));
+                setWithdrawModalMax(maxWithdrawableAmount(combinedWithdrawableForNetwork(npSummary, c)));
+                const first = whitelistedWallets.find((w) => w.currency === c);
+                setSelectedWhitelistId(first?.id ?? null);
+              }}
+              formatLabel={formatNetworkLabel}
+            />
+            <Text style={styles.fieldLabel}>Whitelisted wallet</Text>
+            {walletsForWithdrawCurrency.length ? (
+              <OptionHighlightList
+                options={walletsForWithdrawCurrency.map((w) => w.id!)}
+                value={selectedWhitelistId || walletsForWithdrawCurrency[0].id!}
+                onChange={setSelectedWhitelistId}
+                formatLabel={(id) => {
+                  const w = whitelistedWallets.find((x) => x.id === id);
+                  return w?.label || formatNetworkLabel(w?.currency || withdrawCurrency);
+                }}
+              />
+            ) : (
+              <Text style={styles.hint}>Add a {formatNetworkLabel(withdrawCurrency)} wallet in Settings.</Text>
+            )}
+            {selectedWhitelistId ? (
+              <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
+            ) : null}
+            {totpEnabled ? (
+              <TextInput
+                style={inputStyle}
+                value={withdrawTotpCode}
+                onChangeText={setWithdrawTotpCode}
+                placeholder='Authenticator code'
+                placeholderTextColor={palette.textSecondary}
+                keyboardType='number-pad'
+                maxLength={10}
+              />
+            ) : null}
+            <PrimaryButton
+              label='Submit withdrawal'
+              onPress={() => void onWithdraw()}
+              disabled={!withdrawReady || withdrawSubmitting}
+            />
+          </>
         )}
-        {selectedWhitelistId ? (
-          <Text style={styles.mono}>{whitelistedWallets.find((w) => w.id === selectedWhitelistId)?.address}</Text>
-        ) : null}
-        {totpEnabled ? (
-          <TextInput
-            style={inputStyle}
-            value={withdrawTotpCode}
-            onChangeText={setWithdrawTotpCode}
-            placeholder='Authenticator code'
-            placeholderTextColor={palette.textSecondary}
-            keyboardType='number-pad'
-            maxLength={10}
-          />
-        ) : null}
-        <PrimaryButton
-          label={withdrawSubmitting ? 'Submitting…' : 'Submit withdrawal'}
-          onPress={() => void onWithdraw()}
-          disabled={!withdrawReady || withdrawSubmitting}
-        />
       </FormModal>
 
       <FormModal visible={transferModalOpen} title='Transfer' onClose={() => setTransferModalOpen(false)}>

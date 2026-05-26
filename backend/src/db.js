@@ -1055,6 +1055,12 @@ async function listAirfarmingEventsByUserId(userId, limit = 30) {
 }
 
 async function getScheduledAirfarmingDrop(userId, weekStart) {
+  const rows = await listScheduledAirfarmingDropsForUser(userId, weekStart, 1);
+  return rows[0] || null;
+}
+
+async function listScheduledAirfarmingDropsForUser(userId, weekStart, limit = 50) {
+  const cap = Math.min(100, Math.max(1, Number(limit) || 50));
   const { data, error } = await supabase
     .from('airfarming_drops')
     .select('*')
@@ -1062,10 +1068,9 @@ async function getScheduledAirfarmingDrop(userId, weekStart) {
     .eq('week_start', weekStart)
     .eq('status', 'scheduled')
     .order('due_at', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+    .limit(cap);
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
 async function getMaxAirfarmingDropIndex(userId, weekStart) {
@@ -1819,6 +1824,187 @@ async function listPendingLocalMoneyWithdrawalsByUserId(userId) {
     .in('status', ['pending', 'awaiting_approval', 'processing']);
   if (error) throw error;
   return data || [];
+}
+
+const ILLEGAL_WITHDRAW_STATUSES = new Set(['failed', 'rejected', 'refunded', 'cancelled', 'cancelled_by_user', 'expired']);
+const COMPLETED_DEPOSIT_STATUSES = new Set(['completed', 'successful', 'success', 'succeeded', 'finished', 'approved']);
+const COMPLETED_WITHDRAW_STATUSES = new Set([
+  'finished',
+  'approved',
+  'completed',
+  'successful',
+  'success',
+  'succeeded',
+  'in_progress',
+  'processing',
+  'creating',
+  'sending',
+  'waiting',
+  'awaiting_verify',
+]);
+
+function isoDaysAgo(days) {
+  return new Date(Date.now() - days * 86400000).toISOString();
+}
+
+function isIllegalWithdrawStatus(status) {
+  const s = String(status || '').toLowerCase();
+  if (ILLEGAL_WITHDRAW_STATUSES.has(s)) return true;
+  if (s.includes('reject')) return true;
+  return false;
+}
+
+function withdrawalAmountUsd(amount) {
+  const n = Number.parseFloat(String(amount ?? 0));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function depositAmountUsd(amount) {
+  return withdrawalAmountUsd(amount);
+}
+
+function withinWindow(createdAt, sinceIso) {
+  if (!sinceIso) return true;
+  return new Date(createdAt).getTime() >= new Date(sinceIso).getTime();
+}
+
+/**
+ * Aggregate withdrawal and deposit activity from cash wallet, crypto payouts, and mobile money.
+ * @returns {Promise<{
+ *   withdrawCount7d: number;
+ *   withdrawCount30d: number;
+ *   withdrawCountLifetime: number;
+ *   withdrawAmount7d: number;
+ *   withdrawAmount90d: number;
+ *   depositAmount90d: number;
+ *   illegalCount90d: number;
+ * }>}
+ */
+async function getUserWithdrawalDepositStats(userId) {
+  const since7 = isoDaysAgo(7);
+  const since30 = isoDaysAgo(30);
+  const since90 = isoDaysAgo(90);
+
+  const stats = {
+    withdrawCount7d: 0,
+    withdrawCount30d: 0,
+    withdrawCountLifetime: 0,
+    withdrawAmount7d: 0,
+    withdrawAmount90d: 0,
+    depositAmount90d: 0,
+    illegalCount90d: 0,
+  };
+
+  const bumpWithdraw = (amount, createdAt) => {
+    const amt = withdrawalAmountUsd(amount);
+    if (amt <= 0) return;
+    stats.withdrawCountLifetime += 1;
+    if (withinWindow(createdAt, since30)) stats.withdrawCount30d += 1;
+    if (withinWindow(createdAt, since7)) {
+      stats.withdrawCount7d += 1;
+      stats.withdrawAmount7d += amt;
+    }
+    if (withinWindow(createdAt, since90)) stats.withdrawAmount90d += amt;
+  };
+
+  const [txRes, npPayRes, npPayoutRes, localRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('type, amount, status, created_at')
+      .eq('user_id', userId)
+      .in('type', ['withdraw', 'deposit'])
+      .order('created_at', { ascending: false })
+      .limit(500),
+    supabase
+      .from('nowpayments_payments')
+      .select('price_amount, payment_status, ledger_credited, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    supabase
+      .from('nowpayments_payouts')
+      .select('amount, status, created_at')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    supabase
+      .from('local_money_orders')
+      .select('type, crypto_amount, status, created_at')
+      .eq('user_id', userId)
+      .in('type', ['withdraw', 'deposit'])
+      .order('created_at', { ascending: false })
+      .limit(200),
+  ]);
+
+  if (txRes.error && !isSchemaError(txRes.error)) throw txRes.error;
+  if (npPayRes.error && !isSchemaError(npPayRes.error)) throw npPayRes.error;
+  if (npPayoutRes.error && !isSchemaError(npPayoutRes.error)) throw npPayoutRes.error;
+  if (localRes.error && !isSchemaError(localRes.error)) throw localRes.error;
+
+  for (const row of txRes.data || []) {
+    const createdAt = row.created_at;
+    if (row.type === 'deposit') {
+      const s = String(row.status || '').toLowerCase();
+      if (!COMPLETED_DEPOSIT_STATUSES.has(s) && !s.startsWith('approved')) continue;
+      const amt = depositAmountUsd(row.amount);
+      if (withinWindow(createdAt, since90)) stats.depositAmount90d += amt;
+      continue;
+    }
+    if (row.type !== 'withdraw') continue;
+    const s = String(row.status || '').toLowerCase();
+    if (isIllegalWithdrawStatus(s)) {
+      if (withinWindow(createdAt, since90)) stats.illegalCount90d += 1;
+      continue;
+    }
+    if (s.startsWith('pending')) {
+      if (withinWindow(createdAt, since90)) bumpWithdraw(row.amount, createdAt);
+      continue;
+    }
+    if (COMPLETED_WITHDRAW_STATUSES.has(s) || s.startsWith('approved')) {
+      bumpWithdraw(row.amount, createdAt);
+    }
+  }
+
+  for (const row of npPayRes.data || []) {
+    const credited = Boolean(row.ledger_credited);
+    const s = String(row.payment_status || '').toLowerCase();
+    if (!credited && s !== 'finished') continue;
+    const amt = depositAmountUsd(row.price_amount);
+    if (withinWindow(row.created_at, since90)) stats.depositAmount90d += amt;
+  }
+
+  for (const row of npPayoutRes.data || []) {
+    const s = String(row.status || '').toLowerCase();
+    const createdAt = row.created_at;
+    if (isIllegalWithdrawStatus(s)) {
+      if (withinWindow(createdAt, since90)) stats.illegalCount90d += 1;
+      continue;
+    }
+    if (s === 'awaiting_approval' || COMPLETED_WITHDRAW_STATUSES.has(s)) {
+      bumpWithdraw(row.amount, createdAt);
+    }
+  }
+
+  for (const row of localRes.data || []) {
+    const createdAt = row.created_at;
+    const s = String(row.status || '').toLowerCase();
+    const amt = withdrawalAmountUsd(row.crypto_amount);
+    if (row.type === 'deposit') {
+      if (COMPLETED_DEPOSIT_STATUSES.has(s) && withinWindow(createdAt, since90)) {
+        stats.depositAmount90d += amt;
+      }
+      continue;
+    }
+    if (isIllegalWithdrawStatus(s)) {
+      if (withinWindow(createdAt, since90)) stats.illegalCount90d += 1;
+      continue;
+    }
+    if (COMPLETED_WITHDRAW_STATUSES.has(s) || s === 'awaiting_approval' || s === 'pending' || s === 'processing') {
+      bumpWithdraw(row.crypto_amount, createdAt);
+    }
+  }
+
+  return stats;
 }
 
 /** All withdrawals awaiting manual admin approval. */
@@ -3009,6 +3195,7 @@ module.exports = {
   insertAirfarmingEvent,
   listAirfarmingEventsByUserId,
   getScheduledAirfarmingDrop,
+  listScheduledAirfarmingDropsForUser,
   getMaxAirfarmingDropIndex,
   getLastAirfarmingDropForWeek,
   insertAirfarmingDrop,
@@ -3084,6 +3271,7 @@ module.exports = {
   getLocalMoneyOrderById,
   getLocalMoneyOrderForUser,
   listPendingWithdrawalsAdmin,
+  getUserWithdrawalDepositStats,
   planRowToApi,
   allocationRowToApi,
   getAiDailyPlanByDate,

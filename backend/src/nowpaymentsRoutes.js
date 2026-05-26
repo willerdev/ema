@@ -31,6 +31,7 @@ const {
 } = require('./depositNotifications');
 const { getCombinedWithdrawable, getCashWalletUsd } = require('./walletFunding');
 const { createPayoutAwaitingApproval } = require('./nowpaymentsPayoutFlow');
+const { clearWithdrawalTrustScoreCache } = require('./services/withdrawalTrustScore');
 
 const FINISHED_PAYMENT_STATUS = 'finished';
 const FAILED_PAYOUT_STATUSES = ['failed', 'rejected', 'refunded'];
@@ -608,6 +609,8 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
         }
         throw e;
       }
+
+      clearWithdrawalTrustScoreCache(req.userId);
 
       return res.json({
         id: payoutRow.id,

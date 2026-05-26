@@ -25,6 +25,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Card } from '../components/Card';
+import { AirfarmingNetworkViz } from '../components/AirfarmingNetworkViz';
+import { AnimatedDropPercent, UpcomingDropsList } from '../components/UpcomingDropsList';
 import { PrimaryButton } from '../components/PrimaryButton';
 import {
   airfarmingService,
@@ -198,19 +200,29 @@ export function AirfarmingTradeScreen() {
     }
   };
 
-  const nextDrop = status?.nextDrop;
+  const upcomingDrops =
+    status?.upcomingDrops?.length ? status.upcomingDrops : status?.nextDrop ? [status.nextDrop] : [];
+  const nextDrop = upcomingDrops[0] ?? status?.nextDrop ?? null;
+  const trust = status?.withdrawalTrustScore;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
   const showRangeInfo = () => {
     Alert.alert(
       'How the required range works',
-      'Each drop uses a dynamically engineered balance window designed to distribute ROI and platform revenue fairly across users.\n\nRanges are calculated from approximately $100 up to $2,000,000. This keeps payouts balanced and prevents concentration in only one account size tier.\n\nAuto-fund can adjust your Airfarming balance at drop time: it can add missing funds from cash/USDT balances, or move excess back to cash when your balance is above the allowed maximum.\n\nIf your available balances are still not enough to enter the required range, the system keeps the standard status and the drop can be missed.\n\nBecause windows rotate by account and schedule, some users may receive eligible ROI within hours while others can take up to 3 days, but not longer under the active weekly schedule.'
+      'Each drop uses a fixed balance window shown in your upcoming drops list.\n\nEligibility is based on your airfarming balance recorded 24 hours before the drop — not on funds you add right before the drop opens.\n\nAuto-fund may still move excess balance back to cash when you are above the maximum. It cannot use late deposits to qualify if your 24-hour snapshot was outside the range.\n\nRanges are engineered from approximately $100 up to $2,000,000 to keep payouts fair across account sizes.'
     );
   };
 
   const showPercentInfo = () => {
     Alert.alert(
       'Drop percentage',
-      'The percentage shown for each drop is set when the drop is scheduled and is an estimate until settlement. Platform interest on a single drop is capped at 57.9%.\n\nIt may be revised before or at drop time if economic conditions change — for example shifts in interest rates, inflation, FX volatility, commodity prices, or broader market stress — or when platform risk and liquidity controls require adjustment.\n\nRevisions are applied to keep payout distribution sustainable across all participants. The displayed rate is not a fixed guarantee of returns.'
+      'Before a drop goes live, the app shows a preview rate that changes every few seconds. When the drop window opens, the rate locks to the official percentage for that drop.\n\nPlatform interest on a single drop is capped at 57.9%. Rates may be revised at drop time for risk and liquidity controls. The locked rate is not a guarantee of returns.'
+    );
+  };
+
+  const showTrustScoreInfo = () => {
+    Alert.alert(
+      'Withdrawal trust score',
+      'Your score (0–100%) reflects withdrawal activity across crypto payouts, cash wallet withdrawals, and mobile money.\n\nFewer withdrawals and no rejected or illegal withdrawals keep the score high. Heavy or frequent withdrawals lower it.\n\nThis score multiplies your potential airfarming drop payout. Rejected, failed, or flagged withdrawals have the largest negative impact.'
     );
   };
 
@@ -274,6 +286,15 @@ export function AirfarmingTradeScreen() {
               </Card>
             </View>
 
+            <Card style={styles.networkCard}>
+              <Text style={styles.section}>Drop network</Text>
+              <Text style={styles.meta}>
+                Live-style mesh of settlement nodes. Labels show sample blockchain activity (not your personal
+                transactions).
+              </Text>
+              <AirfarmingNetworkViz height={228} active={Boolean(status)} />
+            </Card>
+
             <Card>
               <View style={styles.settingRow}>
                 <View style={{ flex: 1 }}>
@@ -298,6 +319,68 @@ export function AirfarmingTradeScreen() {
               </Text>
             </Card>
 
+            {status.eligibilityNotice ? (
+              <Card style={styles.noticeCard}>
+                <Text style={styles.section}>Eligibility notice</Text>
+                <Text style={styles.meta}>{status.eligibilityNotice}</Text>
+              </Card>
+            ) : null}
+
+            {trust ? (
+              <Card style={trust.stats.illegalCount90d > 0 ? styles.trustCardWarn : undefined}>
+                <View style={styles.trustHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.section}>Withdrawal trust score</Text>
+                    <Text style={styles.meta}>Affects potential drop payouts</Text>
+                  </View>
+                  <Pressable onPress={showTrustScoreInfo} hitSlop={10} accessibilityLabel='Explain trust score'>
+                    <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
+                  </Pressable>
+                </View>
+                <View style={styles.trustScoreRow}>
+                  <Text
+                    style={[
+                      styles.trustScoreValue,
+                      trust.score >= 85
+                        ? styles.trustExcellent
+                        : trust.score >= 50
+                          ? styles.trustFair
+                          : styles.trustPoor,
+                    ]}
+                  >
+                    {trust.score}%
+                  </Text>
+                  <Text style={styles.trustBand}>{trust.label}</Text>
+                </View>
+                <View style={styles.trustBarTrack}>
+                  <View
+                    style={[
+                      styles.trustBarFill,
+                      { width: `${Math.max(0, Math.min(100, trust.score))}%` },
+                      trust.score >= 85
+                        ? styles.trustBarExcellent
+                        : trust.score >= 50
+                          ? styles.trustBarFair
+                          : styles.trustBarPoor,
+                    ]}
+                  />
+                </View>
+                <Text style={styles.meta}>{trust.message}</Text>
+                {trust.stats.illegalCount90d > 0 ? (
+                  <Text style={styles.trustIllegal}>
+                    {trust.stats.illegalCount90d} rejected or failed withdrawal
+                    {trust.stats.illegalCount90d === 1 ? '' : 's'} in the last 90 days — this heavily lowers drop potential.
+                  </Text>
+                ) : null}
+                {trust.dropPotentialMultiplier < 1 && nextDrop?.percentLocked && nextDrop?.eligibleNow ? (
+                  <Text style={styles.trustAdjust}>
+                    Estimated drop profit uses {Math.round(trust.dropPotentialMultiplier * 100)}% of full potential based on
+                    your score.
+                  </Text>
+                ) : null}
+              </Card>
+            ) : null}
+
             <Animated.View style={[styles.heroRing, nearDrop ? urgentRingStyle : ringStyle]}>
               <Card style={nearDrop ? { ...styles.heroCard, ...styles.heroCardUrgent } : styles.heroCard}>
                 <Text style={styles.heroLabel}>Next drop</Text>
@@ -306,7 +389,11 @@ export function AirfarmingTradeScreen() {
                     <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
                     <Text style={styles.meta}>until eligibility check</Text>
                     <View style={styles.percentRow}>
-                      <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
+                      {nextDrop.percentLocked && nextDrop.percent != null ? (
+                        <Text style={styles.heroBig}>+{nextDrop.percent.toFixed(0)}%</Text>
+                      ) : (
+                        <AnimatedDropPercent seed={nextDrop.previewKey} large />
+                      )}
                       <Pressable
                         onPress={showPercentInfo}
                         hitSlop={10}
@@ -316,6 +403,9 @@ export function AirfarmingTradeScreen() {
                         <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
                       </Pressable>
                     </View>
+                    {!nextDrop.percentLocked ? (
+                      <Text style={styles.meta}>Preview rate — locks when the drop goes live</Text>
+                    ) : null}
                     <View style={styles.rangeRow}>
                       <Text style={styles.rangeLine}>
                         Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
@@ -331,9 +421,13 @@ export function AirfarmingTradeScreen() {
                       ]}
                     >
                       <Text style={styles.eligibilityText}>
-                        {nextDrop.eligibleNow
-                          ? `Eligible now · est. +$${nextDrop.projectedProfit.toFixed(2)}`
-                          : 'Not in range — auto-adjust could not place your balance inside the required window'}
+                        {nextDrop.percentLocked && nextDrop.eligibleNow === true && nextDrop.projectedProfit != null
+                          ? `Eligible at snapshot · est. +$${nextDrop.projectedProfit.toFixed(2)}`
+                          : nextDrop.percentLocked && nextDrop.eligibleNow === false
+                            ? 'Not in range at 24h eligibility snapshot'
+                            : nextDrop.hasSnapshot
+                              ? 'Eligibility based on balance recorded 24h before drop'
+                              : 'Eligibility snapshot records 24h before this drop'}
                       </Text>
                     </View>
                     <Text style={[styles.meta, { marginTop: 8 }]}>
@@ -352,6 +446,14 @@ export function AirfarmingTradeScreen() {
                 )}
               </Card>
             </Animated.View>
+
+            <Card>
+              <Text style={styles.section}>Upcoming drops</Text>
+              <Text style={styles.meta}>
+                Required balance ranges are fixed. Percentages preview until each drop goes live.
+              </Text>
+              <UpcomingDropsList drops={upcomingDrops} />
+            </Card>
 
             <Card>
               <Text style={styles.section}>Week summary</Text>
@@ -580,10 +682,33 @@ const styles = StyleSheet.create({
   meta: { color: palette.textSecondary, marginBottom: 4 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
   statCard: { width: '48%', marginBottom: 0, padding: 14 },
+  networkCard: { paddingBottom: 12, overflow: 'hidden' },
   statLabel: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 },
   statValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '800' },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   autoFundNote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8 },
+  noticeCard: { borderColor: palette.primary, borderLeftWidth: 3, marginBottom: 12 },
+  trustHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
+  trustCardWarn: { borderColor: '#f59e0b', borderLeftWidth: 3 },
+  trustScoreRow: { flexDirection: 'row', alignItems: 'baseline', gap: 10, marginBottom: 10 },
+  trustScoreValue: { fontSize: 32, fontWeight: '800' },
+  trustExcellent: { color: palette.primary },
+  trustFair: { color: '#fbbf24' },
+  trustPoor: { color: '#f87171' },
+  trustBand: { color: palette.textSecondary, fontSize: 15, fontWeight: '700' },
+  trustBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: palette.surfaceElevated,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  trustBarFill: { height: '100%', borderRadius: 4 },
+  trustBarExcellent: { backgroundColor: palette.primary },
+  trustBarFair: { backgroundColor: '#fbbf24' },
+  trustBarPoor: { backgroundColor: '#f87171' },
+  trustIllegal: { color: '#fbbf24', fontSize: 12, lineHeight: 17, marginTop: 6 },
+  trustAdjust: { color: palette.textPrimary, fontSize: 12, lineHeight: 17, marginTop: 6, fontWeight: '600' },
   balanceLine: { marginBottom: 6 },
   balanceValue: { color: palette.textPrimary, fontWeight: '700', fontSize: 18 },
   buttonRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },

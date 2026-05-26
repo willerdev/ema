@@ -20,6 +20,7 @@ const {
   isMissingTableError,
 } = require('./db');
 const { buildDropStatus, dropToHistoryRow } = require('./airfarmingDrops');
+const { getWithdrawalTrustScoreForUser } = require('./services/withdrawalTrustScore');
 
 function newId() {
   return crypto.randomUUID();
@@ -89,9 +90,13 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
       const state = await ensureWeekState(req.userId);
       let { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
       const autoFundEnabled = Boolean(state.auto_fund_enabled);
-      const { nextDrop } = await buildDropStatus(req.userId, state.week_start, airfarmingBalance, {
-        autoFundEnabled,
-      });
+      const withdrawalTrustScore = await getWithdrawalTrustScoreForUser(req.userId);
+      const { nextDrop, upcomingDrops, eligibilityNotice } = await buildDropStatus(
+        req.userId,
+        state.week_start,
+        airfarmingBalance,
+        { autoFundEnabled }
+      );
       ({ cashWallet, airfarmingBalance } = await balancesForUser(req.userId));
       const settled = await listAirfarmingDropsForWeek(req.userId, state.week_start, 50);
       const paidCount = settled.filter((d) => d.status === 'paid').length;
@@ -113,6 +118,9 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         dropsPaused: require('./airfarmingPause').pauseStatusFromState(state).dropsPausedNow,
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
         nextDrop,
+        upcomingDrops,
+        eligibilityNotice,
+        withdrawalTrustScore,
         history,
         dropHistory,
       });
