@@ -358,7 +358,7 @@ export function SupportScreen() {
                 style={inputStyle}
                 value={recipientTransferId}
                 onChangeText={setRecipientTransferId}
-                placeholder='EMA-XXXXXXXX'
+                placeholder='AIRFARMS-XXXXXXXX'
                 placeholderTextColor={palette.textSecondary}
                 autoCapitalize='characters'
               />

@@ -118,7 +118,7 @@ export function AppLockProvider({
   const unlockWithBiometric = useCallback(async () => {
     const bioOn = await securityStorage.isBiometricLoginEnabled();
     if (!bioOn) return false;
-    const ok = await authenticateBiometric('Unlock Ema');
+    const ok = await authenticateBiometric('Unlock Airfarms');
     if (!ok) return false;
     const now = Date.now();
     lastActiveRef.current = now;

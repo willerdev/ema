@@ -156,7 +156,7 @@ export function AuthScreen() {
   if (totpPreAuthToken) {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>EMA</Text>
+        <Text style={styles.title}>Airfarms</Text>
         <Text style={styles.subtitle}>Authenticator code</Text>
         <Text style={styles.hint}>Open your authenticator app and enter the 6-digit code.</Text>
         <TextInput
@@ -183,7 +183,7 @@ export function AuthScreen() {
       return (
         <View style={styles.container}>
           <ActivityIndicator size='large' color={palette.primary} style={{ marginBottom: 24 }} />
-          <Text style={styles.title}>EMA</Text>
+          <Text style={styles.title}>Airfarms</Text>
           <Text style={styles.subtitle}>Verifying{dots}</Text>
           <Text style={styles.hint}>
             Checking your email and phone against your compliance profile. This may take a moment.
@@ -195,7 +195,7 @@ export function AuthScreen() {
     if (recoverStep === 'password') {
       return (
         <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
-          <Text style={styles.title}>EMA</Text>
+          <Text style={styles.title}>Airfarms</Text>
           <Text style={styles.subtitle}>Set new password</Text>
           <Text style={styles.hint}>Your details were verified. Choose a new password for {email.trim()}.</Text>
           <TextInput
@@ -228,7 +228,7 @@ export function AuthScreen() {
 
     return (
       <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps='handled'>
-        <Text style={styles.title}>EMA</Text>
+        <Text style={styles.title}>Airfarms</Text>
         <Text style={styles.subtitle}>Recover account</Text>
         <Text style={styles.hint}>
           Enter the email and phone number you used when completing compliance in Settings. We will verify them before
@@ -267,7 +267,7 @@ export function AuthScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>EMA</Text>
+      <Text style={styles.title}>Airfarms</Text>
       <Text style={styles.subtitle}>{mode === 'register' ? 'Create account' : 'Sign in'}</Text>
       {showBiometricLogin && mode === 'signin' ? (
         <>

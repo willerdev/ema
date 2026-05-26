@@ -11,7 +11,7 @@ export const ABOUT_EMA: Record<
     title: 'Who we are',
     subtitle: 'DAO · token holders · community capital',
     paragraphs: [
-      'Ema is built as a decentralized autonomous organization (DAO). Governance and strategic direction are influenced by token holders who participate in platform decisions and share in long-term outcomes.',
+      'Airfarms is built as a decentralized autonomous organization (DAO). Governance and strategic direction are influenced by token holders who participate in platform decisions and share in long-term outcomes.',
       'We aggregate member capital into diversified programs: crypto treasury management, structured yield (airfarming and contracts), and expert-managed trading on connected MT5 accounts.',
       'Income is generated on daily or monthly cycles depending on the product you choose. Each program publishes its rhythm and risk profile before you allocate funds.',
       'Token holders align incentives with transparent reporting, risk limits, and policies approved through the community framework—not opaque promises.',

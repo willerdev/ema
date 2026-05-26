@@ -5,6 +5,7 @@ export type ExtraStackParamList = {
   P2P: undefined;
   SendById: undefined;
   LocalMoney: undefined;
+  MT5: undefined;
   Settings: { openSecurity?: boolean } | undefined;
 };
 
@@ -13,7 +14,6 @@ export type RootTabParamList = {
   Journal: undefined;
   Trades: undefined;
   Wallet: undefined;
-  MT5: undefined;
   Extra: NavigatorScreenParams<ExtraStackParamList> | undefined;
 };
 

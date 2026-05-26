@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const enabled = await securityStorage.isBiometricLoginEnabled();
     const token = await securityStorage.getSecureAuthToken();
     if (!enabled || !token) return false;
-    const ok = await authenticateBiometric('Sign in to Ema');
+    const ok = await authenticateBiometric('Sign in to Airfarms');
     if (!ok) return false;
     try {
       await authStorage.setToken(token);

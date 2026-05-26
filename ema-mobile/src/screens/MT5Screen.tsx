@@ -190,7 +190,7 @@ export function MT5Screen() {
     const label = account.accountName || account.login || 'this account';
     Alert.alert(
       'Remove MT5 connection',
-      `Remove ${label} from Ema? Saved credentials and cached balance will be deleted. This does not close your broker account.`,
+      `Remove ${label} from Airfarms? Saved credentials and cached balance will be deleted. This does not close your broker account.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {

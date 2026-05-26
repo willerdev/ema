@@ -109,6 +109,12 @@ export function ExtraHubScreen() {
               onPress={() => navigation.navigate('LocalMoney')}
             />
             <ExtraMenuRow
+              title='MT5'
+              subtitle='Connect account and monitor live broker activity'
+              icon='analytics-outline'
+              onPress={() => navigation.navigate('MT5')}
+            />
+            <ExtraMenuRow
               title='Settings'
               subtitle='Profile, security, compliance, and more'
               icon='settings-outline'

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   AppState,
   Keyboard,
@@ -54,6 +55,8 @@ export function AirfarmingTradeScreen() {
   const [autoFundSaving, setAutoFundSaving] = useState(false);
   const [autoFundExpanded, setAutoFundExpanded] = useState(false);
   const [countdownSec, setCountdownSec] = useState(0);
+  const [showOpportunityCircle, setShowOpportunityCircle] = useState(false);
+  const [selectedDotDrop, setSelectedDotDrop] = useState<AirfarmingStatus['nextDrop'] | null>(null);
   const pulse = useSharedValue(1);
   const urgentPulse = useSharedValue(1);
   const dueAtRef = useRef<string | null>(null);
@@ -203,7 +206,6 @@ export function AirfarmingTradeScreen() {
   const upcomingDrops =
     status?.upcomingDrops?.length ? status.upcomingDrops : status?.nextDrop ? [status.nextDrop] : [];
   const nextDrop = upcomingDrops[0] ?? status?.nextDrop ?? null;
-  const [selectedDropIndex, setSelectedDropIndex] = useState(0);
   const trust = status?.withdrawalTrustScore;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
   const showRangeInfo = () => {
@@ -315,7 +317,7 @@ export function AirfarmingTradeScreen() {
               {autoFundExpanded ? (
                 <>
                   <Text style={styles.meta}>
-                    When enabled, Ema can move only the missing amount into airfarming at drop time, using cash first
+                    When enabled, Airfarms can move only the missing amount into airfarming at drop time, using cash first
                     or available USDT crypto if cash cannot cover it.
                   </Text>
                   <Text style={styles.autoFundNote}>
@@ -451,62 +453,49 @@ export function AirfarmingTradeScreen() {
             <Card>
               <Text style={styles.section}>Upcoming drops</Text>
               <Text style={styles.meta}>
-                Range, percent, and time. Tap a dot to view details.
+                Showing next 2 drops with time and required amount.
               </Text>
-              <View style={styles.dotWrap}>
-                <Animated.View style={[styles.dotRing, ringStyle]} />
-                <View style={styles.dotRingInner}>
-                  {upcomingDrops.slice(0, 12).map((d, i) => {
-                    const angle = (i / Math.max(1, Math.min(12, upcomingDrops.length))) * Math.PI * 2 - Math.PI / 2;
-                    const radius = 74;
-                    const x = 88 + Math.cos(angle) * radius;
-                    const y = 88 + Math.sin(angle) * radius;
-                    const available = d.eligibleNow === true;
-                    const dotColor = available ? '#3b82f6' : '#ef4444';
-                    const selected = i === selectedDropIndex;
-                    return (
-                      <Pressable
-                        key={d.previewKey}
-                        onPress={() => setSelectedDropIndex(i)}
-                        style={[
-                          styles.dot,
-                          {
-                            left: x,
-                            top: y,
-                            backgroundColor: dotColor,
-                            transform: [{ translateX: -6 }, { translateY: -6 }, { scale: selected ? 1.25 : 1 }],
-                          },
-                        ]}
-                        hitSlop={12}
-                        accessibilityRole='button'
-                        accessibilityLabel={`Select drop ${i + 1}`}
-                      />
-                    );
-                  })}
-                </View>
-              </View>
-
-              {upcomingDrops[selectedDropIndex] ? (
-                <View style={styles.dotDetails}>
-                  <Text style={styles.dotTitle}>Drop #{upcomingDrops[selectedDropIndex].dropIndex + 1}</Text>
-                  <Text style={styles.dotRow}>
-                    Required: {formatUsd(upcomingDrops[selectedDropIndex].minBalance)} – {formatUsd(upcomingDrops[selectedDropIndex].maxBalance)}
-                  </Text>
-                  <Text style={styles.dotRow}>
-                    Percent: {upcomingDrops[selectedDropIndex].percent != null ? `+${upcomingDrops[selectedDropIndex].percent.toFixed(1)}%` : '—'}
-                  </Text>
-                  <Text style={styles.dotRow}>
-                    Time: {new Date(upcomingDrops[selectedDropIndex].dueAt).toLocaleString(undefined, { timeZone: 'UTC' })}
-                  </Text>
-                  <Text style={styles.dotHint}>
-                    {upcomingDrops[selectedDropIndex].eligibleNow === true
-                      ? 'Blue: amount available'
-                      : 'Red: amount not available'}
-                  </Text>
+              <Pressable style={styles.toggleCircleBtn} onPress={() => setShowOpportunityCircle((v) => !v)}>
+                <Ionicons name={showOpportunityCircle ? 'eye-off-outline' : 'eye-outline'} size={16} color={palette.primary} />
+                <Text style={styles.toggleCircleLabel}>
+                  {showOpportunityCircle ? 'Hide opportunity circle' : 'Show opportunity circle'}
+                </Text>
+              </Pressable>
+              {showOpportunityCircle ? (
+                <View style={styles.dotWrap}>
+                  <Animated.View style={[styles.dotRing, ringStyle]} />
+                  <View style={styles.dotRingInner}>
+                    {upcomingDrops.slice(0, 12).map((d, i) => {
+                      const angle = (i / Math.max(1, Math.min(12, upcomingDrops.length))) * Math.PI * 2 - Math.PI / 2;
+                      const radius = 74;
+                      const x = 88 + Math.cos(angle) * radius;
+                      const y = 88 + Math.sin(angle) * radius;
+                      const available = d.eligibleNow === true;
+                      const dotColor = available ? '#3b82f6' : '#ef4444';
+                      return (
+                        <Pressable
+                          key={d.previewKey}
+                          onPress={() => setSelectedDotDrop(d)}
+                          style={[
+                            styles.dot,
+                            {
+                              left: x,
+                              top: y,
+                              backgroundColor: dotColor,
+                              transform: [{ translateX: -6 }, { translateY: -6 }],
+                            },
+                          ]}
+                          hitSlop={12}
+                          accessibilityRole='button'
+                          accessibilityLabel={`Open drop ${i + 1} details`}
+                        />
+                      );
+                    })}
+                  </View>
                 </View>
               ) : null}
 
-              <UpcomingDropsList drops={upcomingDrops.slice(0, 5)} />
+              <UpcomingDropsList drops={upcomingDrops} />
             </Card>
 
             <Card>
@@ -585,6 +574,53 @@ export function AirfarmingTradeScreen() {
                 <Text style={styles.fabMenuLabel}>Return to cash</Text>
                 <Text style={styles.fabMenuHint}>Airfarming → wallet</Text>
               </Pressable>
+            </Card>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(selectedDotDrop)}
+        transparent
+        animationType='fade'
+        onRequestClose={() => setSelectedDotDrop(null)}
+      >
+        <View style={styles.modalRoot}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setSelectedDotDrop(null)} />
+          <View style={styles.dotModalCardWrap} pointerEvents='box-none'>
+            <Card style={styles.dotModalCard}>
+              <Text style={styles.dotTitle}>
+                {selectedDotDrop ? `Drop #${selectedDotDrop.dropIndex + 1}` : 'Drop details'}
+              </Text>
+              {selectedDotDrop ? (
+                <>
+                  <Text style={styles.dotRow}>
+                    Time: {new Date(selectedDotDrop.dueAt).toLocaleString(undefined, { timeZone: 'UTC' })}
+                  </Text>
+                  <Text style={styles.dotRow}>
+                    Required amount: {formatUsd(selectedDotDrop.minBalance)} – {formatUsd(selectedDotDrop.maxBalance)}
+                  </Text>
+                  <View style={styles.dotStatusRow}>
+                    {selectedDotDrop.eligibleNow == null ? (
+                      <>
+                        <ActivityIndicator size='small' color={palette.primary} />
+                        <Text style={styles.dotHint}>Checking availability</Text>
+                      </>
+                    ) : selectedDotDrop.eligibleNow ? (
+                      <>
+                        <Ionicons name='checkmark-circle' size={16} color={palette.primary} />
+                        <Text style={styles.dotHint}>Amount available</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name='close-circle' size={16} color='#ef4444' />
+                        <Text style={styles.dotHint}>Amount not available</Text>
+                      </>
+                    )}
+                  </View>
+                </>
+              ) : null}
+              <PrimaryButton label='Close' onPress={() => setSelectedDotDrop(null)} style={{ marginTop: 12 }} />
             </Card>
           </View>
         </View>
@@ -741,6 +777,15 @@ const styles = StyleSheet.create({
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   autoFundNote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8 },
   dotWrap: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 12 },
+  toggleCircleBtn: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  toggleCircleLabel: { color: palette.primary, fontSize: 12, fontWeight: '700' },
   dotRing: {
     width: 176,
     height: 176,
@@ -763,15 +808,12 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: palette.surface,
   },
-  dotDetails: {
-    borderTopWidth: 1,
-    borderTopColor: palette.border,
-    paddingTop: 12,
-    marginTop: 6,
-  },
   dotTitle: { color: palette.textPrimary, fontSize: 16, fontWeight: '800', marginBottom: 6 },
   dotRow: { color: palette.textPrimary, fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  dotHint: { color: palette.textSecondary, fontSize: 11, marginTop: 6, lineHeight: 16 },
+  dotHint: { color: palette.textSecondary, fontSize: 12, lineHeight: 16 },
+  dotStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8 },
+  dotModalCardWrap: { position: 'absolute', left: 16, right: 16, top: '32%' },
+  dotModalCard: { marginBottom: 0 },
   noticeCard: { borderColor: palette.primary, borderLeftWidth: 3, marginBottom: 12 },
   trustHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
   trustCardWarn: { borderColor: '#f59e0b', borderLeftWidth: 3 },

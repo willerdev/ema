@@ -111,7 +111,7 @@ export function HomeScreen() {
             to protect your account.
           </Text>
           <Text style={[styles.disclaimerText, { marginBottom: 0 }]}>
-            We will never hold your assets unless you violate these terms. Ema will never call or text you asking you to move
+            We will never hold your assets unless you violate these terms. Airfarms will never call or text you asking you to move
             funds, share passwords, or approve actions outside this app. Do not follow instructions from phone calls or SMS —
             they are scams.
           </Text>

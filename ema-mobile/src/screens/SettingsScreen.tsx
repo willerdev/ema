@@ -560,7 +560,7 @@ export function SettingsScreen() {
         </Card>
 
         <Card style={styles.menuCard}>
-          <Text style={styles.label}>About Ema</Text>
+          <Text style={styles.label}>About Airfarms</Text>
           <SettingsRow
             title='Who we are'
             subtitle='DAO, token holders, and community capital'

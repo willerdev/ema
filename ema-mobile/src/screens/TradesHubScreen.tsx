@@ -1,17 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
 import { FormModal } from '../components/FormModal';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { TRADE_HUB_HIDDEN_STORAGE_KEY, TRADE_HUB_ITEMS, TRADE_HUB_DEFAULT_HIDDEN, TradeHubItem, TradeHubItemId } from '../content/tradeHubItems';
+import { airfarmingService } from '../services/airfarmingService';
 import { RootStackParamList } from '../types';
 import { palette } from '../theme/colors';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
+const AIRFARMING_OPPORTUNITY_POLL_MS = 45_000;
 
 async function loadHiddenIds(): Promise<TradeHubItemId[]> {
   try {
@@ -42,6 +44,8 @@ export function TradesHubScreen() {
   const [hiddenIds, setHiddenIds] = useState<TradeHubItemId[]>([]);
   const [hiddenModalOpen, setHiddenModalOpen] = useState(false);
   const [ready, setReady] = useState(false);
+  const [airfarmingEligible, setAirfarmingEligible] = useState<boolean | null>(null);
+  const [checkingAirfarming, setCheckingAirfarming] = useState(false);
 
   useEffect(() => {
     void loadHiddenIds().then((ids) => {
@@ -49,6 +53,34 @@ export function TradesHubScreen() {
       setReady(true);
     });
   }, []);
+
+  const loadAirfarmingOpportunity = useCallback(async () => {
+    setCheckingAirfarming(true);
+    try {
+      const status = await airfarmingService.getStatus();
+      const eligible =
+        status.nextDrop?.eligibleNow === true ||
+        Boolean(status.upcomingDrops?.some((drop) => drop.eligibleNow === true));
+      setAirfarmingEligible(eligible);
+    } catch {
+      setAirfarmingEligible(false);
+    } finally {
+      setCheckingAirfarming(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadAirfarmingOpportunity();
+    }, [loadAirfarmingOpportunity])
+  );
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      void loadAirfarmingOpportunity();
+    }, AIRFARMING_OPPORTUNITY_POLL_MS);
+    return () => clearInterval(id);
+  }, [loadAirfarmingOpportunity]);
 
   const visibleItems = useMemo(
     () => TRADE_HUB_ITEMS.filter((item) => !hiddenIds.includes(item.id)),
@@ -119,6 +151,22 @@ export function TradesHubScreen() {
           <Text style={styles.cardTitle}>{item.title}</Text>
           <Text style={styles.cardMeta}>{item.meta}</Text>
           <Text style={styles.roi}>{item.roi}</Text>
+          {item.id === 'airfarming' ? (
+            <View style={styles.opportunityRow}>
+              {airfarmingEligible === null ? (
+                <>
+                  <ActivityIndicator size='small' color={palette.primary} />
+                  <Text style={styles.opportunityText}>Checking live opportunities</Text>
+                </>
+              ) : airfarmingEligible ? (
+                <>
+                  {checkingAirfarming ? <ActivityIndicator size='small' color={palette.primary} /> : null}
+                  <Ionicons name='checkmark-done-circle' size={14} color={palette.primary} />
+                  <Text style={styles.opportunityText}>Opportunity eligible now</Text>
+                </>
+              ) : null}
+            </View>
+          ) : null}
         </Pressable>
         {showHide ? (
           <Pressable style={styles.hideBtn} onPress={() => confirmHide(item)} hitSlop={8}>
@@ -190,6 +238,8 @@ const styles = StyleSheet.create({
   cardTitle: { color: palette.textPrimary, fontSize: 20, fontWeight: '700', marginBottom: 6 },
   cardMeta: { color: palette.textSecondary, marginBottom: 8 },
   roi: { color: palette.primary, fontWeight: '700' },
+  opportunityRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, minHeight: 18 },
+  opportunityText: { color: palette.primary, fontSize: 12, fontWeight: '700' },
   hideBtn: { alignItems: 'center', paddingTop: 4, paddingLeft: 8 },
   hideBtnText: { color: palette.textSecondary, fontSize: 11, marginTop: 2 },
   hiddenRow: {

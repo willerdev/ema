@@ -28,7 +28,7 @@ export function sanitizeUserFacingError(raw: string, fallback = 'Something went 
   if (INTERNAL_PATTERNS.some((p) => lower.includes(p))) return fallback;
   if (text.length > 140) return fallback;
   if (lower.includes('network request failed') || lower.includes('failed to fetch')) {
-    return 'Unable to reach Ema right now. Check your connection and try again.';
+    return 'Unable to reach Airfarms right now. Check your connection and try again.';
   }
   if (lower.includes('cannot delete') || lower.includes('cannot post')) {
     return 'This action is not available yet. Update the app or try again after the server has been updated.';

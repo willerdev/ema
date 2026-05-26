@@ -254,12 +254,12 @@ export function SendByIdScreen() {
       </ScrollView>
 
       <FormModal visible={peerModalOpen} title='Send to member' avoidKeyboard={false} onClose={() => setPeerModalOpen(false)}>
-        <Text style={styles.hint}>Recipient transfer ID (e.g. EMA-XXXXXXXX).</Text>
+        <Text style={styles.hint}>Recipient transfer ID (e.g. AIRFARMS-XXXXXXXX).</Text>
         <TextInput
           style={inputStyle}
           value={peerRecipient}
           onChangeText={setPeerRecipient}
-          placeholder='EMA-XXXXXXXX'
+          placeholder='AIRFARMS-XXXXXXXX'
           placeholderTextColor={palette.textSecondary}
           autoCapitalize='characters'
         />

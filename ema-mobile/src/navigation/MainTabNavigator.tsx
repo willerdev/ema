@@ -7,7 +7,6 @@ import { JournalScreen } from '../screens/JournalScreen';
 import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
 import { navigateToTransactionHistory } from '../utils/navigationHelpers';
-import { MT5Screen } from '../screens/MT5Screen';
 import { ExtraStackNavigator } from './ExtraStackNavigator';
 import { palette } from '../theme/colors';
 import { RootTabParamList } from '../types';
@@ -19,7 +18,6 @@ const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyph
   Journal: 'calendar',
   Trades: 'stats-chart',
   Wallet: 'wallet',
-  MT5: 'analytics',
   Extra: 'grid',
 };
 
@@ -28,7 +26,6 @@ const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.gly
   Journal: 'calendar-outline',
   Trades: 'stats-chart-outline',
   Wallet: 'wallet-outline',
-  MT5: 'analytics-outline',
   Extra: 'grid-outline',
 };
 
@@ -92,7 +89,6 @@ export function MainTabNavigator() {
           ),
         })}
       />
-      <Tab.Screen name='MT5' component={MT5Screen} options={{ tabBarLabel: 'MT5' }} />
       <Tab.Screen
         name='Extra'
         component={ExtraStackNavigator}

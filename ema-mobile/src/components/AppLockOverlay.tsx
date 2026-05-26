@@ -53,7 +53,7 @@ export function AppLockOverlay() {
   return (
     <Modal visible transparent animationType='fade' statusBarTranslucent>
       <View style={[styles.backdrop, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
-        <Text style={styles.brand}>EMA</Text>
+        <Text style={styles.brand}>Airfarms</Text>
         <Text style={styles.title}>App locked</Text>
         <Text style={styles.sub}>Enter your PIN to continue</Text>
         <PinPad mode='unlock' title='' subtitle='' error={error} onComplete={(pin) => void onPinComplete(pin)} />
