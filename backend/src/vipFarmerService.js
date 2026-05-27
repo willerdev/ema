@@ -83,6 +83,49 @@ async function investVip(userId, amount) {
   return { investment: vipInvestmentToApi(row), cashWalletUsd: roundUsd(cash - amt) };
 }
 
+async function addCapitalVip(userId, amount) {
+  const amt = roundUsd(amount);
+  if (!Number.isFinite(amt) || amt < VIP_MIN_INVEST_USD) {
+    const err = new Error(`Minimum add is $${VIP_MIN_INVEST_USD}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const inv = await getActiveVipInvestmentForUser(userId);
+  if (!inv) {
+    const err = new Error('No active VIP investment to add capital to');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const wallet = await ensureWalletForUser(userId);
+  const cash = roundUsd(wallet?.balance);
+  if (cash < amt) {
+    const err = new Error('Insufficient cash wallet balance');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const now = new Date().toISOString();
+  const maturesAt = addDaysUtc(now, VIP_LOCK_DAYS);
+  const newPrincipal = roundUsd(Number(inv.principal_usd) + amt);
+  await setWalletBalance(userId, roundUsd(cash - amt));
+  const row = await updateVipInvestment(inv.id, {
+    principalUsd: newPrincipal,
+    startedAt: now,
+    maturesAt,
+    daysAccrued: 0,
+    status: 'active',
+  });
+
+  return {
+    investment: vipInvestmentToApi(row),
+    cashWalletUsd: roundUsd(cash - amt),
+    addedUsd: amt,
+    lockReset: true,
+  };
+}
+
 async function withdrawVipAtMaturity(userId) {
   const inv = await getActiveVipInvestmentForUser(userId);
   if (!inv) {
@@ -213,6 +256,7 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
 module.exports = {
   getVipSummary,
   investVip,
+  addCapitalVip,
   withdrawVipAtMaturity,
   earlyWithdrawVip,
   runVipDailyAccrual,

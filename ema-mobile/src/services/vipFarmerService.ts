@@ -27,6 +27,11 @@ export const vipFarmerService = {
   getSummary: () => api.get<VipSummary>('/vip-farmers/summary'),
   invest: (amount: number) =>
     api.post<{ investment: VipInvestment; cashWalletUsd: number }>('/vip-farmers/invest', { amount }),
+  addCapital: (amount: number) =>
+    api.post<{ investment: VipInvestment; cashWalletUsd: number; addedUsd: number; lockReset: boolean }>(
+      '/vip-farmers/add-capital',
+      { amount }
+    ),
   withdraw: () =>
     api.post<{ principalReturned: number; cashWalletUsd: number; investment: VipInvestment }>(
       '/vip-farmers/withdraw',

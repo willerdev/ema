@@ -36,6 +36,8 @@ export type WithdrawalTrustScore = {
   message: string;
 };
 
+export type AirfarmingDropPhase = 'waiting' | 'preparing' | 'processing' | 'rewarding' | 'idle';
+
 export type AirfarmingUpcomingDrop = {
   id: string | null;
   previewKey: string;
@@ -53,6 +55,9 @@ export type AirfarmingUpcomingDrop = {
   projectedProfit: number | null;
   projectedProfitBase?: number | null;
   dropPotentialMultiplier?: number;
+  dropPhase?: AirfarmingDropPhase;
+  autoFundPrepared?: boolean;
+  autoFundInProgress?: boolean;
 };
 
 export type AirfarmingNextDrop = AirfarmingUpcomingDrop;
@@ -71,6 +76,12 @@ export type AirfarmingDropHistoryRow = {
   source?: 'drop' | 'platform';
 };
 
+export type AirfarmingLastSettledDrop = AirfarmingDropHistoryRow & {
+  dropPhase?: AirfarmingDropPhase;
+  dueAt?: string;
+  secondsRemaining?: number;
+};
+
 export type AirfarmingStatus = {
   cashWallet: number;
   airfarmingBalance: number;
@@ -86,6 +97,8 @@ export type AirfarmingStatus = {
   nextDrop: AirfarmingNextDrop | null;
   upcomingDrops?: AirfarmingUpcomingDrop[];
   eligibilityNotice?: string | null;
+  lastSettledDrop?: AirfarmingLastSettledDrop | null;
+  pollIntervalSec?: number;
   withdrawalTrustScore?: WithdrawalTrustScore | null;
   history: AirfarmingDropHistoryRow[];
   dropHistory?: AirfarmingDropHistoryRow[];
@@ -112,6 +125,15 @@ function normalizeUpcomingDrop(raw: unknown): AirfarmingUpcomingDrop | null {
   const eligibleRaw = r.eligibleNow;
   const eligibleNow =
     eligibleRaw === true || eligibleRaw === false ? Boolean(eligibleRaw) : null;
+  const phaseRaw = r.dropPhase;
+  const dropPhase =
+    phaseRaw === 'waiting' ||
+    phaseRaw === 'preparing' ||
+    phaseRaw === 'processing' ||
+    phaseRaw === 'rewarding' ||
+    phaseRaw === 'idle'
+      ? phaseRaw
+      : undefined;
   return {
     id: r.id != null && String(r.id) ? String(r.id) : null,
     previewKey: String(r.previewKey ?? r.id ?? `${dueAt}:${num(r.dropIndex)}`),
@@ -130,6 +152,9 @@ function normalizeUpcomingDrop(raw: unknown): AirfarmingUpcomingDrop | null {
     projectedProfit: r.projectedProfit != null ? num(r.projectedProfit) : null,
     projectedProfitBase: r.projectedProfitBase != null ? num(r.projectedProfitBase) : null,
     dropPotentialMultiplier: r.dropPotentialMultiplier != null ? num(r.dropPotentialMultiplier) : undefined,
+    dropPhase,
+    autoFundPrepared: r.autoFundPrepared != null ? Boolean(r.autoFundPrepared) : undefined,
+    autoFundInProgress: r.autoFundInProgress != null ? Boolean(r.autoFundInProgress) : undefined,
   };
 }
 
@@ -234,6 +259,21 @@ function normalizeStatus(raw: unknown): AirfarmingStatus {
           .filter((d): d is AirfarmingUpcomingDrop => d != null)
       : undefined,
     eligibilityNotice: r.eligibilityNotice != null ? String(r.eligibilityNotice) : null,
+    lastSettledDrop:
+      r.lastSettledDrop && typeof r.lastSettledDrop === 'object'
+        ? {
+            ...normalizeHistoryItem(r.lastSettledDrop as Record<string, unknown>),
+            dropPhase:
+              (r.lastSettledDrop as Record<string, unknown>).dropPhase === 'rewarding'
+                ? 'rewarding'
+                : undefined,
+            dueAt:
+              (r.lastSettledDrop as Record<string, unknown>).dueAt != null
+                ? String((r.lastSettledDrop as Record<string, unknown>).dueAt)
+                : undefined,
+          }
+        : null,
+    pollIntervalSec: r.pollIntervalSec != null ? num(r.pollIntervalSec, 45) : 45,
     withdrawalTrustScore: normalizeTrustScore(r.withdrawalTrustScore),
     history,
     dropHistory: Array.isArray(r.dropHistory)

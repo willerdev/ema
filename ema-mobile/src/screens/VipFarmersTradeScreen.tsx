@@ -12,6 +12,7 @@ function fmtUsd(n: number) {
 export function VipFarmersTradeScreen() {
   const [summary, setSummary] = useState<VipSummary | null>(null);
   const [amount, setAmount] = useState('');
+  const [addAmount, setAddAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -64,6 +65,34 @@ export function VipFarmersTradeScreen() {
         },
       },
     ]);
+  };
+
+  const onAddCapital = async () => {
+    const n = Number(addAmount);
+    if (!n || n <= 0) return Alert.alert('Amount', 'Enter a valid amount');
+    Alert.alert(
+      'Add capital',
+      'Adding funds increases your principal and restarts the 30-day lock from today. Daily accrual resets to day 0.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Add capital',
+          onPress: async () => {
+            try {
+              const r = await vipFarmerService.addCapital(n);
+              setAddAmount('');
+              await load();
+              Alert.alert(
+                'Capital added',
+                `Added ${fmtUsd(r.addedUsd)}. New principal ${fmtUsd(r.investment.principalUsd)}. Lock restarted.`
+              );
+            } catch (e: any) {
+              Alert.alert('VIP Farmers', e?.message || 'Add capital failed');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const onEarlyWithdraw = async () => {
@@ -129,6 +158,22 @@ export function VipFarmersTradeScreen() {
                 Days {inv.daysAccrued}/{inv.lockDays} · {inv.daysLeft} day{inv.daysLeft === 1 ? '' : 's'} left
               </Text>
               <Text style={styles.meta}>Matures {new Date(inv.maturesAt).toLocaleString()}</Text>
+              {!inv.matured ? (
+                <>
+                  <Text style={[styles.disclaimer, { marginTop: 10 }]}>
+                    Add capital from cash to grow principal. This restarts the 30-day lock from today.
+                  </Text>
+                  <TextInput
+                    style={[styles.input, { marginTop: 8 }]}
+                    value={addAmount}
+                    onChangeText={setAddAmount}
+                    placeholder={`Min ${fmtUsd(summary.minInvestUsd)}`}
+                    placeholderTextColor={palette.textSecondary}
+                    keyboardType='numeric'
+                  />
+                  <PrimaryButton label='Add capital' onPress={() => void onAddCapital()} style={{ marginTop: 8 }} />
+                </>
+              ) : null}
               {inv.matured ? (
                 <PrimaryButton label='Withdraw principal' onPress={() => void onWithdraw()} style={{ marginTop: 12 }} />
               ) : (

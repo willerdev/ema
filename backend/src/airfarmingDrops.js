@@ -27,6 +27,9 @@ const { getWithdrawalTrustScoreForUser } = require('./services/withdrawalTrustSc
 
 const {
   ELIGIBILITY_SNAPSHOT_MS,
+  AUTO_FUND_PREP_MS,
+  AUTO_FUND_PREP_SEC,
+  computeDropPhase,
   snapshotBalanceFromRow,
   isPercentLockedForDrop,
 } = require('./airfarmingDropUtils');
@@ -255,6 +258,9 @@ async function toPublicUpcomingDrop(row, ctx = {}) {
   const snapshotBal = snapshotBalanceFromRow(row);
   const liveBal = Number(ctx.airfarmingBalance) || 0;
 
+  const dropPhase = isProjected ? 'waiting' : computeDropPhase(row, nowMs);
+  const autoFundPrepared = Boolean(row.auto_fund_prepared_at);
+
   const base = {
     id: row.id ? String(row.id) : null,
     previewKey: row.previewKey || (row.id ? String(row.id) : `${ctx.userId}:${row.week_start}:${row.drop_index}`),
@@ -267,6 +273,9 @@ async function toPublicUpcomingDrop(row, ctx = {}) {
     isProjected,
     hasSnapshot: snapshotBal != null,
     eligibilitySnapshotBalance: snapshotBal,
+    dropPhase,
+    autoFundPrepared,
+    autoFundInProgress: dropPhase === 'preparing' && !autoFundPrepared,
   };
 
   const synced = row.id ? await syncScheduledDropPercent(row) : row;
@@ -354,6 +363,14 @@ async function buildUpcomingDropsQueue(userId, weekStart, airfarmingBalance, opt
 
   scheduled = await Promise.all(scheduled.map((d) => syncScheduledDropPercent(d)));
   scheduled = await captureSnapshotsForScheduled(userId, scheduled);
+
+  if (options.autoFundEnabled) {
+    const prepared = [];
+    for (const d of scheduled) {
+      prepared.push(await prepareDropAutoFundIfDue(userId, d, options));
+    }
+    scheduled = prepared;
+  }
 
   const projected = await projectUpcomingDropsForWeek(userId, weekStart, scheduled);
   const allRows = [...scheduled, ...projected].sort(
@@ -533,6 +550,50 @@ async function autoAdjustToRange(userId, drop, currentBalance) {
   return { balance: nextBalance, cash: cashTake, crypto: cryptoTake, returnedCash: 0 };
 }
 
+async function prepareDropAutoFundIfDue(userId, drop, options = {}) {
+  if (!options.autoFundEnabled || !drop?.id || drop.status !== 'scheduled') return drop;
+  if (drop.auto_fund_prepared_at) return drop;
+
+  const nowMs = Date.now();
+  const dueMs = new Date(drop.due_at).getTime();
+  const prepStart = dueMs - AUTO_FUND_PREP_MS;
+  if (nowMs < prepStart || nowMs >= dueMs) return drop;
+
+  const af = await getAirfarmingWalletByUserId(userId);
+  let liveBalance = Number.parseFloat(String(af?.balance ?? 0)) || 0;
+  const minBalance = Number(drop.min_balance);
+  const maxBalance = Number(drop.max_balance);
+  const now = new Date().toISOString();
+
+  let autoFunded = { cash: 0, crypto: 0, returnedCash: 0 };
+  if (liveBalance < minBalance || liveBalance > maxBalance) {
+    const adjusted = await autoAdjustToRange(userId, drop, liveBalance);
+    autoFunded = adjusted;
+    liveBalance = adjusted.balance;
+  }
+
+  try {
+    return await updateAirfarmingDrop(drop.id, {
+      auto_fund_prepared_at: now,
+      auto_funded_cash: autoFunded.cash,
+      auto_funded_crypto: autoFunded.crypto,
+    });
+  } catch (e) {
+    if (String(e?.message || '').includes('auto_fund_prepared')) return drop;
+    throw e;
+  }
+}
+
+function settledDropToPublic(row) {
+  if (!row) return null;
+  return {
+    ...dropToHistoryRow(row),
+    dropPhase: 'rewarding',
+    dueAt: row.due_at,
+    secondsRemaining: 0,
+  };
+}
+
 async function settleDrop(userId, drop, options = {}) {
   drop = await syncScheduledDropPercent(drop);
   drop = await captureEligibilitySnapshotIfDue(userId, drop);
@@ -542,11 +603,14 @@ async function settleDrop(userId, drop, options = {}) {
   const now = new Date().toISOString();
   let autoFunded = { cash: 0, crypto: 0 };
 
+  const minBalance = Number(drop.min_balance);
   const maxBalance = Number(drop.max_balance);
-  if (liveBalance > maxBalance && options.autoFundEnabled) {
-    const adjusted = await autoAdjustToRange(userId, drop, liveBalance);
-    autoFunded = { cash: adjusted.cash, crypto: adjusted.crypto, returnedCash: adjusted.returnedCash };
-    liveBalance = adjusted.balance;
+  if (options.autoFundEnabled && !drop.auto_fund_prepared_at) {
+    if (liveBalance < minBalance || liveBalance > maxBalance) {
+      const adjusted = await autoAdjustToRange(userId, drop, liveBalance);
+      autoFunded = { cash: adjusted.cash, crypto: adjusted.crypto, returnedCash: adjusted.returnedCash };
+      liveBalance = adjusted.balance;
+    }
   }
 
   const snapshotBal = snapshotBalanceFromRow(drop);
@@ -628,6 +692,7 @@ async function settleDrop(userId, drop, options = {}) {
 /** Process all overdue scheduled drops; schedule the next one after each settlement. */
 async function processDueDrops(userId, weekStart, options = {}) {
   let processed = 0;
+  let lastSettled = null;
   const guardMax = 20;
   while (processed < guardMax) {
     let scheduled = await getScheduledAirfarmingDrop(userId, weekStart);
@@ -647,15 +712,17 @@ async function processDueDrops(userId, weekStart, options = {}) {
     const pauseCheck = await isDropPausedForUser(userId, bandIndex);
     if (pauseCheck.paused) break;
 
-    await settleDrop(userId, scheduled, options);
+    lastSettled = await settleDrop(userId, scheduled, options);
     processed += 1;
     await ensureNextScheduledDrop(userId, weekStart);
   }
-  return processed;
+  return { processed, lastSettled };
 }
 
+const LAST_SETTLED_UI_MS = 45_000;
+
 async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {}) {
-  await processDueDrops(userId, weekStart, options);
+  const { lastSettled } = await processDueDrops(userId, weekStart, options);
   const af = await getAirfarmingWalletByUserId(userId);
   const latestBalance = Number.parseFloat(String(af?.balance ?? airfarmingBalance ?? 0)) || 0;
   const { upcomingDrops, eligibilityNotice } = await buildUpcomingDropsQueue(
@@ -665,7 +732,17 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
     options
   );
   const nextDrop = upcomingDrops[0] || null;
-  return { nextDrop, upcomingDrops, eligibilityNotice };
+  let lastSettledDrop = null;
+  if (lastSettled?.paid_at) {
+    const paidMs = new Date(lastSettled.paid_at).getTime();
+    if (Date.now() - paidMs < LAST_SETTLED_UI_MS) {
+      lastSettledDrop = settledDropToPublic(lastSettled);
+    }
+  }
+  const phase = nextDrop?.dropPhase;
+  const pollIntervalSec =
+    phase === 'preparing' || phase === 'processing' || lastSettledDrop ? 5 : 45;
+  return { nextDrop, upcomingDrops, eligibilityNotice, lastSettledDrop, pollIntervalSec };
 }
 
 module.exports = {
@@ -683,9 +760,11 @@ module.exports = {
   projectUpcomingDropsForWeek,
   ELIGIBILITY_NOTICE,
   ensureNextScheduledDrop,
+  prepareDropAutoFundIfDue,
   settleDrop,
   processDueDrops,
   buildDropStatus,
+  AUTO_FUND_PREP_SEC,
   dropToHistoryRow,
   MAX_PROFIT_PER_DROP,
   MAX_AIRFARMING_PERCENT,

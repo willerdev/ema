@@ -2,6 +2,7 @@ const { isMissingTableError } = require('./db');
 const {
   getVipSummary,
   investVip,
+  addCapitalVip,
   withdrawVipAtMaturity,
   earlyWithdrawVip,
   runVipDailyAccrual,
@@ -35,6 +36,17 @@ function registerVipFarmerRoutes(app, { authMiddleware }) {
       if (e.statusCode === 400) return res.status(400).json({ message: e.message });
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e.message || 'Invest failed' });
+    }
+  });
+
+  app.post('/vip-farmers/add-capital', authMiddleware, async (req, res) => {
+    try {
+      const result = await addCapitalVip(req.userId, req.body?.amount);
+      return res.json(result);
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e.message || 'Add capital failed' });
     }
   });
 

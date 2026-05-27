@@ -2950,6 +2950,9 @@ async function createVipInvestment({ userId, principalUsd, startedAt, maturesAt 
 async function updateVipInvestment(investmentId, patch) {
   const row = { updated_at: new Date().toISOString() };
   if (patch.status !== undefined) row.status = patch.status;
+  if (patch.principalUsd !== undefined) row.principal_usd = roundWalletUsd(patch.principalUsd);
+  if (patch.startedAt !== undefined) row.started_at = patch.startedAt;
+  if (patch.maturesAt !== undefined) row.matures_at = patch.maturesAt;
   if (patch.totalAccruedUsd !== undefined) row.total_accrued_usd = roundWalletUsd(patch.totalAccruedUsd);
   if (patch.daysAccrued !== undefined) row.days_accrued = Number(patch.daysAccrued);
   const { data, error } = await supabase

@@ -25,9 +25,12 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
+import { AirfarmingDropProgress, type AirfarmingDropPhase } from '../components/AirfarmingDropProgress';
 import { Card } from '../components/Card';
+import { CollapsibleNotice } from '../components/CollapsibleNotice';
 import { UpcomingDropsList } from '../components/UpcomingDropsList';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { useAuth } from '../context/AuthContext';
 import {
   airfarmingService,
   formatDropCountdown,
@@ -35,7 +38,7 @@ import {
 } from '../services/airfarmingService';
 import { palette } from '../theme/colors';
 
-const POLL_MS = 45_000;
+const DEFAULT_POLL_SEC = 45;
 
 function formatUsd(n: number): string {
   if (n >= 1000) return `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
@@ -44,6 +47,8 @@ function formatUsd(n: number): string {
 
 export function AirfarmingTradeScreen() {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
+  const noticeDismissPrefix = user?.id ? `ema_airfarming_notice_${user.id}_` : 'ema_airfarming_notice_';
   const [status, setStatus] = useState<AirfarmingStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,9 +58,9 @@ export function AirfarmingTradeScreen() {
   const [activateModalOpen, setActivateModalOpen] = useState(false);
   const [returnModalOpen, setReturnModalOpen] = useState(false);
   const [autoFundSaving, setAutoFundSaving] = useState(false);
-  const [autoFundExpanded, setAutoFundExpanded] = useState(false);
   const [countdownSec, setCountdownSec] = useState(0);
   const [showOpportunityCircle, setShowOpportunityCircle] = useState(false);
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const [selectedDotDrop, setSelectedDotDrop] = useState<AirfarmingStatus['nextDrop'] | null>(null);
   const pulse = useSharedValue(1);
   const urgentPulse = useSharedValue(1);
@@ -121,10 +126,12 @@ export function AirfarmingTradeScreen() {
     void load();
   }, [load]);
 
+  const pollIntervalSec = status?.pollIntervalSec ?? DEFAULT_POLL_SEC;
+
   useEffect(() => {
-    const id = setInterval(() => void load(), POLL_MS);
+    const id = setInterval(() => void load(), pollIntervalSec * 1000);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, pollIntervalSec]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -208,17 +215,14 @@ export function AirfarmingTradeScreen() {
   const nextDrop = upcomingDrops[0] ?? status?.nextDrop ?? null;
   const trust = status?.withdrawalTrustScore;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
+  const displayDropPhase: AirfarmingDropPhase =
+    status?.lastSettledDrop?.dropPhase === 'rewarding'
+      ? 'rewarding'
+      : (nextDrop?.dropPhase ?? 'idle');
   const showRangeInfo = () => {
     Alert.alert(
       'How the required range works',
       'Each drop uses a fixed balance window shown in your upcoming drops list.\n\nEligibility is based on your airfarming balance recorded 24 hours before the drop — not on funds you add right before the drop opens.\n\nAuto-fund may still move excess balance back to cash when you are above the maximum. It cannot use late deposits to qualify if your 24-hour snapshot was outside the range.\n\nRanges are engineered from approximately $100 up to $2,000,000 to keep payouts fair across account sizes.'
-    );
-  };
-
-  const showPercentInfo = () => {
-    Alert.alert(
-      'Drop percentage',
-      'Before a drop goes live, the app shows a preview rate that changes every few seconds. When the drop window opens, the rate locks to the official percentage for that drop.\n\nPlatform interest on a single drop is capped at 57.9%. Rates may be revised at drop time for risk and liquidity controls. The locked rate is not a guarantee of returns.'
     );
   };
 
@@ -237,29 +241,7 @@ export function AirfarmingTradeScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
         <Text style={styles.title}>Airfarming</Text>
-        <Text style={styles.disclaimer}>
-          Funds in airfarming are separate from your cash wallet. At each drop, keep your balance within the required
-          range to earn the shown percentage as profit (credited to airfarming). Not financial advice.
-        </Text>
-
-        {status?.platformHighlight ? (
-          <Card>
-            <Text style={styles.section}>Platform highlight</Text>
-            <Text style={styles.meta}>
-              Reported +{status.platformHighlight.percent.toFixed(2)}% on{' '}
-              {(() => {
-                const [y, m, d] = status.platformHighlight.date.split('-').map(Number);
-                if (!y || !m || !d) return status.platformHighlight.date;
-                return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric',
-                  timeZone: 'UTC',
-                });
-              })()}
-            </Text>
-          </Card>
-        ) : null}
+        <Text style={styles.subtitle}>Earn on scheduled drops when your balance is in range.</Text>
 
         {error ? (
           <Card>
@@ -270,7 +252,7 @@ export function AirfarmingTradeScreen() {
 
         {status ? (
           <>
-            <View style={styles.grid}>
+            <View style={styles.gridTwo}>
               <Card style={styles.statCard}>
                 <Text style={styles.statLabel}>Cash wallet</Text>
                 <Text style={styles.statValue}>${Math.floor(status.cashWallet).toLocaleString()}</Text>
@@ -279,172 +261,41 @@ export function AirfarmingTradeScreen() {
                 <Text style={styles.statLabel}>Airfarming</Text>
                 <Text style={styles.statValue}>${Math.floor(status.airfarmingBalance).toLocaleString()}</Text>
               </Card>
-              <Card style={styles.statCard}>
-                <Text style={styles.statLabel}>Paid drops</Text>
-                <Text style={styles.statValue}>{status.dropsPaid ?? 0}</Text>
-              </Card>
-              <Card style={styles.statCard}>
-                <Text style={styles.statLabel}>Missed</Text>
-                <Text style={styles.statValue}>{status.dropsMissed ?? 0}</Text>
-              </Card>
             </View>
-
-            <Card>
-              <Pressable
-                style={styles.settingRow}
-                onPress={() => setAutoFundExpanded((v) => !v)}
-                hitSlop={10}
-                accessibilityRole='button'
-                accessibilityLabel='Toggle auto-fund details'
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.section}>Auto-fund drops</Text>
-                </View>
-                <Ionicons
-                  name={autoFundExpanded ? 'chevron-up' : 'chevron-down'}
-                  size={20}
-                  color={palette.textSecondary}
-                  style={{ marginRight: 8 }}
-                />
-                <Switch
-                  value={Boolean(status.autoFundEnabled)}
-                  onValueChange={(v) => void onToggleAutoFund(v)}
-                  disabled={autoFundSaving}
-                  trackColor={{ false: palette.border, true: palette.primary }}
-                  thumbColor={status.autoFundEnabled ? '#0B1220' : palette.textSecondary}
-                />
-              </Pressable>
-              {autoFundExpanded ? (
-                <>
-                  <Text style={styles.meta}>
-                    When enabled, Airfarms can move only the missing amount into airfarming at drop time, using cash first
-                    or available USDT crypto if cash cannot cover it.
-                  </Text>
-                  <Text style={styles.autoFundNote}>
-                    Auto-adjust runs at drop time. If your balance is low, it tops up from cash and then USDT balances.
-                    If your balance is above the allowed maximum, it moves excess back to cash. If total funds still
-                    cannot fit the required range, the standard not-in-range status is shown.
-                  </Text>
-                </>
-              ) : null}
-            </Card>
-
-            {status.eligibilityNotice ? (
-              <Card style={styles.noticeCard}>
-                <Text style={styles.section}>Eligibility notice</Text>
-                <Text style={styles.meta}>{status.eligibilityNotice}</Text>
-              </Card>
-            ) : null}
-
-            {trust ? (
-              <Card style={trust.stats.illegalCount90d > 0 ? styles.trustCardWarn : undefined}>
-                <View style={styles.trustHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.section}>Withdrawal trust score</Text>
-                    <Text style={styles.meta}>Affects potential drop payouts</Text>
-                  </View>
-                  <Pressable onPress={showTrustScoreInfo} hitSlop={10} accessibilityLabel='Explain trust score'>
-                    <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
-                  </Pressable>
-                </View>
-                <View style={styles.trustScoreRow}>
-                  <Text
-                    style={[
-                      styles.trustScoreValue,
-                      trust.score >= 85
-                        ? styles.trustExcellent
-                        : trust.score >= 50
-                          ? styles.trustFair
-                          : styles.trustPoor,
-                    ]}
-                  >
-                    {trust.score}%
-                  </Text>
-                  <Text style={styles.trustBand}>{trust.label}</Text>
-                </View>
-                <View style={styles.trustBarTrack}>
-                  <View
-                    style={[
-                      styles.trustBarFill,
-                      { width: `${Math.max(0, Math.min(100, trust.score))}%` },
-                      trust.score >= 85
-                        ? styles.trustBarExcellent
-                        : trust.score >= 50
-                          ? styles.trustBarFair
-                          : styles.trustBarPoor,
-                    ]}
-                  />
-                </View>
-                <Text style={styles.meta}>{trust.message}</Text>
-                {trust.stats.illegalCount90d > 0 ? (
-                  <Text style={styles.trustIllegal}>
-                    {trust.stats.illegalCount90d} rejected or failed withdrawal
-                    {trust.stats.illegalCount90d === 1 ? '' : 's'} in the last 90 days — this heavily lowers drop potential.
-                  </Text>
-                ) : null}
-                {trust.dropPotentialMultiplier < 1 && nextDrop?.percentLocked && nextDrop?.eligibleNow ? (
-                  <Text style={styles.trustAdjust}>
-                    Estimated drop profit uses {Math.round(trust.dropPotentialMultiplier * 100)}% of full potential based on
-                    your score.
-                  </Text>
-                ) : null}
-              </Card>
-            ) : null}
 
             <Animated.View style={[styles.heroRing, nearDrop ? urgentRingStyle : ringStyle]}>
               <Card style={nearDrop ? { ...styles.heroCard, ...styles.heroCardUrgent } : styles.heroCard}>
-                <Text style={styles.heroLabel}>Next drop</Text>
+                <View style={styles.heroTopRow}>
+                  <Text style={styles.heroLabel}>Next drop</Text>
+                  {nextDrop ? (
+                    <Pressable onPress={showRangeInfo} hitSlop={10} accessibilityLabel='How drops work'>
+                      <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
+                    </Pressable>
+                  ) : null}
+                </View>
                 {nextDrop ? (
                   <>
                     <Text style={styles.countdown}>{formatDropCountdown(countdownSec)}</Text>
-                    <Text style={styles.meta}>until eligibility check</Text>
-                    <View style={styles.percentRow}>
-                      <Text style={styles.heroBig}>
-                        {nextDrop.percent != null ? `+${nextDrop.percent.toFixed(0)}%` : '—'}
-                      </Text>
-                      <Pressable
-                        onPress={showPercentInfo}
-                        hitSlop={10}
-                        accessibilityRole='button'
-                        accessibilityLabel='Explain drop percentage and economic adjustments'
-                      >
-                        <Ionicons name='information-circle-outline' size={22} color={palette.textSecondary} />
-                      </Pressable>
-                    </View>
-                    <View style={styles.rangeRow}>
-                      <Text style={styles.rangeLine}>
-                        Required balance: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
-                      </Text>
-                      <Pressable onPress={showRangeInfo} hitSlop={10} accessibilityRole='button' accessibilityLabel='Explain required balance range'>
-                        <Ionicons name='information-circle-outline' size={20} color={palette.textSecondary} />
-                      </Pressable>
-                    </View>
-                    <View
-                      style={[
-                        styles.eligibilityPill,
-                        nextDrop.eligibleNow ? styles.eligibleYes : styles.eligibleNo,
-                      ]}
-                    >
-                      <Text style={styles.eligibilityText}>
-                        {nextDrop.eligibleNow === true
-                          ? 'Amount available for required range'
-                          : nextDrop.eligibleNow === false
-                            ? 'Amount not available for required range'
-                            : 'Checking availability…'}
-                      </Text>
-                    </View>
-                    <Text style={[styles.meta, { marginTop: 8 }]}>
-                      Drops every 2–5 hours (UTC week). Profit only if balance is inside the range at drop time.
+                    <Text style={styles.rangeLine}>
+                      Required: {formatUsd(nextDrop.minBalance)} – {formatUsd(nextDrop.maxBalance)}
+                      {nextDrop.percent != null ? ` · +${nextDrop.percent.toFixed(0)}%` : ''}
                     </Text>
+                    {displayDropPhase !== 'idle' ? (
+                      <AirfarmingDropProgress dropPhase={displayDropPhase} />
+                    ) : null}
+                    {status.lastSettledDrop?.status === 'paid' && displayDropPhase === 'rewarding' ? (
+                      <Text style={styles.meta}>
+                        Last drop paid +${(status.lastSettledDrop.profitAmount ?? 0).toFixed(2)}
+                      </Text>
+                    ) : null}
+                    {status.lastSettledDrop?.status === 'missed' && displayDropPhase === 'rewarding' ? (
+                      <Text style={styles.meta}>Last drop missed — outside required range</Text>
+                    ) : null}
                   </>
                 ) : (
                   <>
-                    <Text style={styles.emptyDropTitle}>No active drop scheduled yet</Text>
-                    <Text style={styles.meta}>
-                      Pull to refresh or try again shortly. If this stays empty, the server is still finishing the
-                      Airfarming update.
-                    </Text>
-                    <PrimaryButton label='Refresh schedule' onPress={() => void load()} style={{ marginTop: 12 }} />
+                    <Text style={styles.emptyDropTitle}>No drop scheduled</Text>
+                    <PrimaryButton label='Refresh' onPress={() => void load()} style={{ marginTop: 12 }} />
                   </>
                 )}
               </Card>
@@ -452,87 +303,159 @@ export function AirfarmingTradeScreen() {
 
             <Card>
               <Text style={styles.section}>Upcoming drops</Text>
-              <Text style={styles.meta}>
-                Showing next 2 drops with time and required amount.
-              </Text>
-              <Pressable style={styles.toggleCircleBtn} onPress={() => setShowOpportunityCircle((v) => !v)}>
-                <Ionicons name={showOpportunityCircle ? 'eye-off-outline' : 'eye-outline'} size={16} color={palette.primary} />
-                <Text style={styles.toggleCircleLabel}>
-                  {showOpportunityCircle ? 'Hide opportunity circle' : 'Show opportunity circle'}
-                </Text>
-              </Pressable>
-              {showOpportunityCircle ? (
-                <View style={styles.dotWrap}>
-                  <Animated.View style={[styles.dotRing, ringStyle]} />
-                  <View style={styles.dotRingInner}>
-                    {upcomingDrops.slice(0, 12).map((d, i) => {
-                      const angle = (i / Math.max(1, Math.min(12, upcomingDrops.length))) * Math.PI * 2 - Math.PI / 2;
-                      const radius = 74;
-                      const x = 88 + Math.cos(angle) * radius;
-                      const y = 88 + Math.sin(angle) * radius;
-                      const available = d.eligibleNow === true;
-                      const dotColor = available ? '#3b82f6' : '#ef4444';
-                      return (
-                        <Pressable
-                          key={d.previewKey}
-                          onPress={() => setSelectedDotDrop(d)}
-                          style={[
-                            styles.dot,
-                            {
-                              left: x,
-                              top: y,
-                              backgroundColor: dotColor,
-                              transform: [{ translateX: -6 }, { translateY: -6 }],
-                            },
-                          ]}
-                          hitSlop={12}
-                          accessibilityRole='button'
-                          accessibilityLabel={`Open drop ${i + 1} details`}
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
-              ) : null}
-
               <UpcomingDropsList drops={upcomingDrops} />
             </Card>
 
-            <Card>
-              <Text style={styles.section}>Week summary</Text>
+            <Pressable
+              style={styles.detailsToggle}
+              onPress={() => setDetailsExpanded((v) => !v)}
+              accessibilityRole='button'
+            >
+              <Text style={styles.detailsToggleText}>Details</Text>
               <Text style={styles.meta}>
-                Week starts {status.weekStart} (UTC). Drops are scheduled every 2–5 hours while the backend has an
-                active current-week schedule.
+                Paid {status.dropsPaid ?? 0} · Missed {status.dropsMissed ?? 0}
               </Text>
-            </Card>
+              <Ionicons
+                name={detailsExpanded ? 'chevron-up' : 'chevron-down'}
+                size={18}
+                color={palette.textSecondary}
+              />
+            </Pressable>
 
-            <Card>
-              <Text style={styles.section}>Drop history</Text>
-              {!status.history.length && <Text style={styles.meta}>No drops yet this week.</Text>}
-              {status.history.map((h) => (
-                <View key={h.id || String(h.createdAt)} style={styles.historyRow}>
-                  <Text style={styles.row}>
-                    {h.source === 'platform' ? 'Platform · ' : ''}
-                    {h.status === 'paid'
-                      ? `Paid +$${(h.profitAmount ?? 0).toFixed(2)}`
-                      : h.status === 'missed'
-                        ? 'Missed'
-                        : ''}{' '}
-                    · {h.percent.toFixed(0)}%
-                    {h.minBalance != null && h.maxBalance != null
-                      ? ` · ${formatUsd(h.minBalance)}–${formatUsd(h.maxBalance)}`
-                      : ''}
-                  </Text>
+            {detailsExpanded ? (
+              <>
+                <CollapsibleNotice
+                  noticeId='auto_fund'
+                  title='Auto-fund drops'
+                  storageKeyPrefix={noticeDismissPrefix}
+                >
+                  <View style={styles.settingRow}>
+                    <Text style={[styles.meta, { flex: 1, marginBottom: 0 }]}>
+                      Adjusts balance ~5 min before each drop (top-up or trim).
+                    </Text>
+                    <Switch
+                      value={Boolean(status.autoFundEnabled)}
+                      onValueChange={(v) => void onToggleAutoFund(v)}
+                      disabled={autoFundSaving}
+                      trackColor={{ false: palette.border, true: palette.primary }}
+                      thumbColor={status.autoFundEnabled ? '#0B1220' : palette.textSecondary}
+                    />
+                  </View>
+                </CollapsibleNotice>
+
+                {status.platformHighlight ? (
+                  <CollapsibleNotice
+                    noticeId='platform_highlight'
+                    title='Platform highlight'
+                    storageKeyPrefix={noticeDismissPrefix}
+                  >
+                    <Text style={styles.meta}>
+                      Reported +{status.platformHighlight.percent.toFixed(2)}% on{' '}
+                      {status.platformHighlight.date}
+                    </Text>
+                  </CollapsibleNotice>
+                ) : null}
+
+                {trust ? (
+                  <CollapsibleNotice
+                    noticeId='trust_score'
+                    title='Withdrawal trust score'
+                    dismissible
+                    storageKeyPrefix={noticeDismissPrefix}
+                  >
+                    <Pressable onPress={showTrustScoreInfo} hitSlop={10} style={{ marginBottom: 8 }}>
+                      <Text style={styles.meta}>Tap for how this affects drop payouts</Text>
+                    </Pressable>
+                    <View style={styles.trustScoreRow}>
+                      <Text style={styles.trustScoreValue}>{trust.score}%</Text>
+                      <Text style={styles.trustBand}>{trust.label}</Text>
+                    </View>
+                    <Text style={styles.meta}>{trust.message}</Text>
+                  </CollapsibleNotice>
+                ) : null}
+
+                {status.eligibilityNotice ? (
+                  <CollapsibleNotice
+                    noticeId='eligibility'
+                    title='Eligibility notice'
+                    dismissible
+                    storageKeyPrefix={noticeDismissPrefix}
+                  >
+                    <Text style={styles.meta}>{status.eligibilityNotice}</Text>
+                  </CollapsibleNotice>
+                ) : null}
+
+                <CollapsibleNotice
+                  noticeId='disclaimer'
+                  title='Important information'
+                  dismissible
+                  storageKeyPrefix={noticeDismissPrefix}
+                >
                   <Text style={styles.meta}>
-                    {h.createdAt ? new Date(h.createdAt).toLocaleString() : '—'}
-                    {h.eligibleBalance != null ? ` · balance $${h.eligibleBalance.toFixed(2)}` : ''}
-                    {(h.autoFundedCash ?? 0) > 0 || (h.autoFundedCrypto ?? 0) > 0
-                      ? ` · auto-funded $${((h.autoFundedCash ?? 0) + (h.autoFundedCrypto ?? 0)).toFixed(2)}`
-                      : ''}
+                    Funds in airfarming are separate from your cash wallet. Eligibility uses your balance recorded 24
+                    hours before each drop. Auto-fund may adjust live balance before settlement but cannot change a late
+                    snapshot. Not financial advice.
                   </Text>
-                </View>
-              ))}
-            </Card>
+                </CollapsibleNotice>
+
+                <CollapsibleNotice noticeId='week' title='Week summary' storageKeyPrefix={noticeDismissPrefix}>
+                  <Text style={styles.meta}>Week {status.weekStart} (UTC). Drops every 2–5 hours.</Text>
+                </CollapsibleNotice>
+
+                <CollapsibleNotice noticeId='history' title='Drop history' storageKeyPrefix={noticeDismissPrefix}>
+                  {!status.history.length && <Text style={styles.meta}>No drops yet this week.</Text>}
+                  {status.history.map((h) => (
+                    <View key={h.id || String(h.createdAt)} style={styles.historyRow}>
+                      <Text style={styles.row}>
+                        {h.status === 'paid'
+                          ? `Paid +$${(h.profitAmount ?? 0).toFixed(2)}`
+                          : h.status === 'missed'
+                            ? 'Missed'
+                            : ''}{' '}
+                        · {h.percent.toFixed(0)}%
+                      </Text>
+                    </View>
+                  ))}
+                </CollapsibleNotice>
+
+                <CollapsibleNotice noticeId='opportunity' title='Opportunity circle' storageKeyPrefix={noticeDismissPrefix}>
+                  <Pressable style={styles.toggleCircleBtn} onPress={() => setShowOpportunityCircle((v) => !v)}>
+                    <Text style={styles.toggleCircleLabel}>
+                      {showOpportunityCircle ? 'Hide circle' : 'Show circle'}
+                    </Text>
+                  </Pressable>
+                  {showOpportunityCircle ? (
+                    <View style={styles.dotWrap}>
+                      <Animated.View style={[styles.dotRing, ringStyle]} />
+                      <View style={styles.dotRingInner}>
+                        {upcomingDrops.slice(0, 12).map((d, i) => {
+                          const angle =
+                            (i / Math.max(1, Math.min(12, upcomingDrops.length))) * Math.PI * 2 - Math.PI / 2;
+                          const radius = 74;
+                          const x = 88 + Math.cos(angle) * radius;
+                          const y = 88 + Math.sin(angle) * radius;
+                          return (
+                            <Pressable
+                              key={d.previewKey}
+                              onPress={() => setSelectedDotDrop(d)}
+                              style={[
+                                styles.dot,
+                                {
+                                  left: x,
+                                  top: y,
+                                  backgroundColor: d.eligibleNow === true ? '#3b82f6' : '#ef4444',
+                                  transform: [{ translateX: -6 }, { translateY: -6 }],
+                                },
+                              ]}
+                            />
+                          );
+                        })}
+                      </View>
+                    </View>
+                  ) : null}
+                </CollapsibleNotice>
+              </>
+            ) : null}
           </>
         ) : !error ? (
           <Card>
@@ -740,8 +663,24 @@ export function AirfarmingTradeScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.background },
   container: { flex: 1 },
-  title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 8 },
+  title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 4 },
+  subtitle: { color: palette.textSecondary, marginBottom: 12, lineHeight: 18, fontSize: 14 },
   disclaimer: { color: palette.textSecondary, marginBottom: 14, lineHeight: 20 },
+  detailsToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingVertical: 8,
+  },
+  detailsToggleText: { color: palette.textPrimary, fontWeight: '700', fontSize: 15, flex: 1 },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 4,
+  },
   heroRing: { marginBottom: 12 },
   heroCard: { alignItems: 'center' },
   heroCardUrgent: { borderColor: palette.primary, borderWidth: 1 },
@@ -771,7 +710,8 @@ const styles = StyleSheet.create({
   section: { color: palette.textSecondary, marginBottom: 8, fontWeight: '700' },
   meta: { color: palette.textSecondary, marginBottom: 4 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },
-  statCard: { width: '48%', marginBottom: 0, padding: 14 },
+  gridTwo: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  statCard: { flex: 1, marginBottom: 0, padding: 14 },
   statLabel: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8 },
   statValue: { color: palette.textPrimary, fontSize: 22, fontWeight: '800' },
   settingRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
