@@ -347,7 +347,12 @@ function registerAdminRoutes(app) {
 
       const wallet = String(req.body?.wallet || '').toLowerCase();
       const mode = req.body?.mode === 'adjust' ? 'adjust' : 'set';
-      const amount = Number(req.body?.amount);
+      const direction = req.body?.direction === 'remove' ? 'remove' : 'add';
+      let amount = Number(req.body?.amount);
+      if (mode === 'adjust' && Number.isFinite(amount)) {
+        amount = Math.abs(amount);
+        if (direction === 'remove') amount = -amount;
+      }
       const reason = String(req.body?.reason || req.body?.note || '').trim();
 
       const result = await adminAdjustUserWallet(req.params.id, {

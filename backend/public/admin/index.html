@@ -721,8 +721,15 @@
                     </select>
                   </div>
                   <div>
+                    <label>Direction</label>
+                    <select id="adjustDirection">
+                      <option value="add">Add funds</option>
+                      <option value="remove">Remove funds</option>
+                    </select>
+                  </div>
+                  <div>
                     <label>Amount (USD)</label>
-                    <input id="adjustAmount" type="number" step="0.01" placeholder="0.00" />
+                    <input id="adjustAmount" type="number" step="0.01" min="0" placeholder="0.00" />
                   </div>
                 </div>
                 <label>Reason (required)</label>
@@ -1868,24 +1875,36 @@
       document.getElementById('adjustOk').classList.add('hidden');
       const amount = Number(document.getElementById('adjustAmount').value);
       const reason = document.getElementById('adjustReason').value.trim();
+      const mode = document.getElementById('adjustMode').value;
+      const wallet = document.getElementById('adjustWallet').value;
+      const direction = document.getElementById('adjustDirection').value === 'remove' ? 'remove' : 'add';
       if (!Number.isFinite(amount)) {
         showUserPageAlert('Enter a valid amount', 'error');
+        return;
+      }
+      if (mode === 'adjust' && amount <= 0) {
+        showUserPageAlert('Enter an amount greater than 0', 'error');
         return;
       }
       if (!reason) {
         showUserPageAlert('Reason is required', 'error');
         return;
       }
-      const mode = document.getElementById('adjustMode').value;
-      const wallet = document.getElementById('adjustWallet').value;
+      const signedAmount = mode === 'adjust'
+        ? (direction === 'remove' ? -Math.abs(amount) : Math.abs(amount))
+        : amount;
       const label = mode === 'adjust'
-        ? (amount >= 0 ? 'Add ' : 'Subtract ') + fmtMoney(Math.abs(amount)) + ' to ' + wallet + '?'
+        ? (direction === 'remove' ? 'Remove ' : 'Add ') +
+          fmtMoney(Math.abs(signedAmount)) +
+          (direction === 'remove' ? ' from ' : ' to ') +
+          wallet +
+          '?'
         : 'Set ' + wallet + ' balance to ' + fmtMoney(amount) + '?';
       if (!confirm(label + '\n\nReason: ' + reason)) return;
       try {
         const res = await api('/admin/api/users/' + viewingUserId + '/wallets/adjust', {
           method: 'POST',
-          body: JSON.stringify({ wallet, mode, amount, reason }),
+          body: JSON.stringify({ wallet, mode, direction, amount: signedAmount, reason }),
         });
         const adj = res.adjustment;
         showUserPageAlert(
@@ -1906,6 +1925,13 @@
       } catch (e) {
         showUserPageAlert(e.message, 'error');
       }
+    }
+
+    function refreshAdjustDirectionVisibility() {
+      const mode = document.getElementById('adjustMode').value;
+      const wrap = document.getElementById('adjustDirection')?.closest('div');
+      if (!wrap) return;
+      wrap.style.display = mode === 'adjust' ? '' : 'none';
     }
 
     async function moveToAirfarming() {
@@ -2872,6 +2898,8 @@
     document.getElementById('aiApprovePlanBtn').onclick = () => approveAiPlan().catch(showAiPlanErr);
     document.getElementById('refreshGlobalPauseBtn').onclick = () => loadGlobalPause();
     document.getElementById('applyAdjustBtn').onclick = () => applyWalletAdjust();
+    document.getElementById('adjustMode').onchange = () => refreshAdjustDirectionVisibility();
+    refreshAdjustDirectionVisibility();
     document.getElementById('userJournalPrev').onclick = () => shiftUserJournalMonth(-1);
     document.getElementById('userJournalNext').onclick = () => shiftUserJournalMonth(1);
     document.getElementById('userDropPlanAiBtn').onclick = () => aiSuggestUserDropPlan();
