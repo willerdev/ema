@@ -624,6 +624,7 @@
                     <th>Email</th>
                     <th>Cash</th>
                     <th>Airfarming</th>
+                    <th>VIP</th>
                     <th>Drops</th>
                     <th>Actions</th>
                   </tr>
@@ -1345,13 +1346,16 @@
       const tbody = document.getElementById('userRows');
       tbody.innerHTML = '';
       if (!users.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No users found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">No users found</td></tr>';
       }
       users.forEach((u) => {
         const tr = document.createElement('tr');
         let pausePill = u.dropsPaused
           ? '<span class="pill pill-paused">paused</span>'
           : '<span class="pill pill-ok">active</span>';
+        const vipCell = u.vipActive
+          ? '<span class="pill pill-ok">active</span><br><span style="color:var(--muted);font-size:0.7rem;">' + fmtMoney(u.vipPrincipalUsd || 0) + '</span>'
+          : '<span style="color:var(--muted);">—</span>';
         if (u.dropsPaused && u.dropsPauseUntil) {
           pausePill += '<br><span style="color:var(--muted);font-size:0.65rem;">until ' + new Date(u.dropsPauseUntil).toLocaleString() + '</span>';
         }
@@ -1359,6 +1363,7 @@
           '<td>' + escapeHtml(u.email) + '<br><span style="color:var(--muted);font-size:0.7rem;">' + escapeHtml(u.id.slice(0, 8)) + '…</span></td>' +
           '<td>' + fmtMoney(u.cashBalance) + '</td>' +
           '<td>' + fmtMoney(u.airfarmingBalance) + '</td>' +
+          '<td>' + vipCell + '</td>' +
           '<td>' + pausePill + '</td>' +
           '<td style="white-space:nowrap;">' +
           '<button type="button" class="' + (u.dropsPaused ? 'btn-primary' : 'btn-warn') + '" data-pause-user="' + u.id + '" style="width:auto;margin-right:6px;font-size:0.75rem;padding:6px 10px;">' +
@@ -1413,10 +1418,13 @@
         'Joined ' + new Date(d.user.createdAt).toLocaleString() +
         (d.user.transferCode ? ' · Transfer ' + d.user.transferCode : '');
       const af = d.airfarming;
+      const vip = d.vipInvestment;
       document.getElementById('userStatsGrid').innerHTML =
         '<div class="stat"><div class="val">' + fmtMoney(d.cashBalance) + '</div><div class="lbl">Cash</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.airfarmingBalance) + '</div><div class="lbl">Airfarming</div></div>' +
         '<div class="stat"><div class="val">' + fmtMoney(d.usdtBalance || 0) + '</div><div class="lbl">USDT</div></div>' +
+        '<div class="stat"><div class="val">' + (vip ? fmtMoney(vip.principalUsd || 0) : '—') + '</div><div class="lbl">VIP principal</div></div>' +
+        '<div class="stat"><div class="val">' + (vip ? (vip.matured ? 'Matured' : (vip.daysLeft + 'd left')) : 'No active') + '</div><div class="lbl">VIP status</div></div>' +
         '<div class="stat"><div class="val">' + (af?.dropsPaused ? 'Paused' : 'Active') + '</div><div class="lbl">Drops</div></div>' +
         '<div class="stat"><div class="val" id="statDeposits90">—</div><div class="lbl">Deposits 90d</div></div>' +
         '<div class="stat"><div class="val" id="statProfits90">—</div><div class="lbl">Profits 90d</div></div>' +

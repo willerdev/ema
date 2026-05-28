@@ -805,6 +805,7 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
   const cashByUser = new Map();
   const afByUser = new Map();
   const stateByUser = new Map();
+  const vipByUser = new Map();
 
   if (ids.length) {
     const walletsRes = await supabase.from('wallets').select('user_id, balance').in('user_id', ids);
@@ -838,6 +839,20 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
     if (!stateRes.error) {
       for (const s of stateRes.data || []) stateByUser.set(s.user_id, s);
     } else if (!isSchemaError(stateRes.error)) throw stateRes.error;
+
+    const vipRes = await supabase
+      .from('vip_investments')
+      .select('user_id, principal_usd, status, matures_at, created_at')
+      .eq('status', 'active')
+      .in('user_id', ids)
+      .order('created_at', { ascending: false });
+    if (!vipRes.error) {
+      for (const row of vipRes.data || []) {
+        if (!vipByUser.has(row.user_id)) vipByUser.set(row.user_id, row);
+      }
+    } else if (!isSchemaError(vipRes.error)) {
+      throw vipRes.error;
+    }
   }
 
   const { pauseStatusFromState } = require('./airfarmingPause');
@@ -851,6 +866,8 @@ async function listUsersAdmin({ limit = 100, search = '' } = {}) {
       transferCode: u.transfer_code || null,
       cashBalance: cashByUser.get(u.id) ?? 0,
       airfarmingBalance: afByUser.get(u.id) ?? 0,
+      vipPrincipalUsd: Number(vipByUser.get(u.id)?.principal_usd || 0),
+      vipActive: Boolean(vipByUser.get(u.id)),
       dropsPaused: pause.dropsPausedNow,
       dropsPauseUntil: pause.dropsPauseUntil,
       autoFundEnabled: Boolean(st?.auto_fund_enabled),
@@ -949,7 +966,7 @@ async function getAdminUserDetail(userId) {
   const user = await getUserById(userId);
   if (!user) return null;
 
-  const [wallet, afWallet, state, transactions, scheduledDrops, cryptoBalances] = await Promise.all([
+  const [wallet, afWallet, state, transactions, scheduledDrops, cryptoBalances, vipInvestment] = await Promise.all([
     getWalletByUserId(userId),
     getAirfarmingWalletByUserId(userId),
     getAirfarmingStateByUserId(userId),
@@ -962,6 +979,7 @@ async function getAdminUserDetail(userId) {
       .order('due_at', { ascending: true })
       .limit(10),
     getCryptoBalancesByUserId(userId).catch(() => []),
+    getActiveVipInvestmentForUser(userId).catch(() => null),
   ]);
 
   if (scheduledDrops.error && !isSchemaError(scheduledDrops.error)) throw scheduledDrops.error;
@@ -985,6 +1003,7 @@ async function getAdminUserDetail(userId) {
     cashBalance: Number.parseFloat(String(wallet?.balance ?? 0)) || 0,
     airfarmingBalance: Number.parseFloat(String(afWallet?.balance ?? 0)) || 0,
     usdtBalance: usdtAvailable,
+    vipInvestment: vipInvestmentToApi(vipInvestment),
     cryptoBalances: (cryptoBalances || []).map((b) => ({
       asset: b.asset,
       available: Number.parseFloat(String(b.available)) || 0,
