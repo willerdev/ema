@@ -24,7 +24,14 @@ export function TradeHistoryScreen() {
       const data = await userTradeService.getHistory(100);
       setTrades(data.trades || []);
     } catch (e: any) {
-      setError(e?.message || 'Failed to load trade history');
+      const status = (e as { status?: number })?.status;
+      if (status === 404 || status === 503) {
+        setError(
+          'Trade history is not available on the server yet. Deploy the latest backend (user trades API) and try again.'
+        );
+      } else {
+        setError(e?.message || 'Failed to load trade history');
+      }
       setTrades([]);
     }
   }, []);

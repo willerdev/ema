@@ -21,10 +21,16 @@ export function VipFarmersTradeScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [s, hist] = await Promise.all([vipFarmerService.getSummary(), vipFarmerService.getAccruals(60)]);
+      const s = await vipFarmerService.getSummary();
       setSummary(s);
-      setAccruals(hist.accruals || []);
-      setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
+      setCommissionRate(s.commissionRate ?? 0.3);
+      try {
+        const hist = await vipFarmerService.getAccruals(60);
+        setAccruals(hist.accruals || []);
+        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
+      } catch {
+        setAccruals([]);
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load VIP Farmers');
       setSummary(null);
