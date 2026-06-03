@@ -1,6 +1,7 @@
 const { isMissingTableError } = require('./db');
 const {
   getVipSummary,
+  listVipAccrualHistory,
   investVip,
   addCapitalVip,
   withdrawVipAtMaturity,
@@ -25,6 +26,16 @@ function registerVipFarmerRoutes(app, { authMiddleware }) {
     } catch (e) {
       if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
       return res.status(500).json({ message: e.message || 'VIP summary failed' });
+    }
+  });
+
+  app.get('/vip-farmers/accruals', authMiddleware, async (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 60));
+      return res.json(await listVipAccrualHistory(req.userId, limit));
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e.message || 'VIP accrual history failed' });
     }
   });
 

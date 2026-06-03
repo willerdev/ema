@@ -42,6 +42,8 @@ const {
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 const { registerAdminAiRoutes } = require('./adminAiRoutes');
 const { getJournalMonth, getJournalDay } = require('./journalService');
+const { adminCreateTradeForUser, listTradeHistory } = require('./userTradeService');
+const { listVipAccrualHistory } = require('./vipFarmerService');
 const {
   getUserDropScheduleView,
   saveUserDropScheduleDraft,
@@ -245,6 +247,48 @@ function registerAdminRoutes(app) {
         return res.status(503).json({ message: 'Journal schema not ready.' });
       }
       return res.status(500).json({ message: e.message || 'Failed to load journal day' });
+    }
+  });
+
+  const tradesSchemaMsg =
+    'Trade history schema missing. Run backend/sql/migrations/20260610_user_recorded_trades.sql in Supabase.';
+
+  app.get('/admin/api/users/:id/trades', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+      return res.json(await listTradeHistory(req.params.id, limit));
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: tradesSchemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to load trades' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/trades', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const result = await adminCreateTradeForUser(req.params.id, req.body, req.adminUser);
+      return res.status(201).json(result);
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) return res.status(503).json({ message: tradesSchemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to add trade' });
+    }
+  });
+
+  app.get('/admin/api/users/:id/vip-accruals', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+      return res.json(await listVipAccrualHistory(req.params.id, limit));
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'VIP schema not ready. Run 20260605_vip_farmers.sql and 20260610_vip_accrual_commission.sql.' });
+      }
+      return res.status(500).json({ message: e.message || 'Failed to load VIP accruals' });
     }
   });
 

@@ -2898,6 +2898,7 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
+const VIP_COMMISSION_RATE = 0.3;
 const VIP_LOCK_DAYS = 30;
 const VIP_MIN_INVEST_USD = 100;
 const VIP_EARLY_PENALTY_RATE = 0.3;
@@ -3032,6 +3033,100 @@ async function listVipAccrualsForUserOnDate(userId, dateYmd) {
     .eq('user_id', userId)
     .eq('accrual_date', dateYmd)
     .order('created_at', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listVipAccrualsForUserRecent(userId, limit = 60) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 60));
+  const { data, error } = await supabase
+    .from('vip_accruals')
+    .select('*')
+    .eq('user_id', userId)
+    .order('accrual_date', { ascending: false })
+    .limit(lim);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+function vipAccrualToApi(row) {
+  if (!row) return null;
+  const netUsd = roundWalletUsd(row.amount);
+  const grossUsd = roundWalletUsd(row.gross_amount != null ? row.gross_amount : row.amount);
+  const commissionRate = Number(row.commission_rate || 0);
+  const commissionUsd = roundWalletUsd(row.commission_amount || 0);
+  return {
+    id: row.id,
+    investmentId: row.investment_id,
+    accrualDate: String(row.accrual_date).slice(0, 10),
+    rate: Number(row.rate),
+    grossUsd,
+    commissionRate,
+    commissionUsd,
+    netUsd,
+    createdAt: row.created_at,
+  };
+}
+
+function userRecordedTradeToApi(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    symbol: row.symbol,
+    side: row.side,
+    volume: Number(row.volume),
+    openPrice: row.open_price != null ? Number(row.open_price) : null,
+    closePrice: row.close_price != null ? Number(row.close_price) : null,
+    profitUsd: Number(row.profit_usd),
+    tradedAt: row.traded_at,
+    notes: row.notes || null,
+    createdAt: row.created_at,
+  };
+}
+
+async function insertUserRecordedTrade({
+  userId,
+  symbol,
+  side,
+  volume,
+  openPrice,
+  closePrice,
+  profitUsd,
+  tradedAt,
+  notes,
+  createdBy,
+}) {
+  const now = new Date().toISOString();
+  const row = {
+    id: id(),
+    user_id: userId,
+    symbol: String(symbol || '').trim().toUpperCase(),
+    side: String(side || '').toLowerCase() === 'sell' ? 'sell' : 'buy',
+    volume: Math.max(0.0001, Number(volume) || 1),
+    open_price: openPrice != null && openPrice !== '' ? Number(openPrice) : null,
+    close_price: closePrice != null && closePrice !== '' ? Number(closePrice) : null,
+    profit_usd: roundWalletUsd(profitUsd),
+    traded_at: tradedAt || now,
+    notes: notes ? String(notes).trim() : null,
+    created_by: createdBy ? String(createdBy) : null,
+    created_at: now,
+  };
+  const { data, error } = await supabase.from('user_recorded_trades').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listUserRecordedTradesForUser(userId, limit = 50) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 50));
+  const { data, error } = await supabase
+    .from('user_recorded_trades')
+    .select('*')
+    .eq('user_id', userId)
+    .order('traded_at', { ascending: false })
+    .limit(lim);
   if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];
@@ -3318,10 +3413,12 @@ module.exports = {
   listLocalMoneyOrdersByUserId,
   listPendingLocalMoneyWithdrawalsByUserId,
   VIP_DAILY_RATE,
+  VIP_COMMISSION_RATE,
   VIP_LOCK_DAYS,
   VIP_MIN_INVEST_USD,
   VIP_EARLY_PENALTY_RATE,
   vipInvestmentToApi,
+  vipAccrualToApi,
   getActiveVipInvestmentForUser,
   getVipInvestmentById,
   createVipInvestment,
@@ -3331,6 +3428,10 @@ module.exports = {
   insertVipAccrual,
   listVipAccrualsForUserBetween,
   listVipAccrualsForUserOnDate,
+  listVipAccrualsForUserRecent,
+  userRecordedTradeToApi,
+  insertUserRecordedTrade,
+  listUserRecordedTradesForUser,
   listPaidAirfarmingDropsForUserBetween,
   listContractAccrualsForUserBetween,
   listContractAccrualsForUserOnDate,

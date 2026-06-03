@@ -12,10 +12,13 @@ const {
   getVipAccrualForInvestmentDay,
   insertVipAccrual,
   VIP_DAILY_RATE,
+  VIP_COMMISSION_RATE,
   VIP_LOCK_DAYS,
   VIP_MIN_INVEST_USD,
   VIP_EARLY_PENALTY_RATE,
   vipInvestmentToApi,
+  vipAccrualToApi,
+  listVipAccrualsForUserRecent,
   utcTodayYmd,
 } = require('./db');
 
@@ -41,9 +44,18 @@ async function getVipSummary(userId) {
     cashWalletUsd: cash,
     minInvestUsd: VIP_MIN_INVEST_USD,
     dailyRate: VIP_DAILY_RATE,
+    commissionRate: VIP_COMMISSION_RATE,
     lockDays: VIP_LOCK_DAYS,
     earlyPenaltyRate: VIP_EARLY_PENALTY_RATE,
     investment: vipInvestmentToApi(inv),
+  };
+}
+
+async function listVipAccrualHistory(userId, limit = 60) {
+  const rows = await listVipAccrualsForUserRecent(userId, limit);
+  return {
+    commissionRate: VIP_COMMISSION_RATE,
+    accruals: rows.map(vipAccrualToApi).filter(Boolean),
   };
 }
 
@@ -216,19 +228,21 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
     }
 
     const principal = roundUsd(inv.principal_usd);
-    const amount = roundUsd(principal * VIP_DAILY_RATE);
-    if (amount <= 0) {
+    const gross = roundUsd(principal * VIP_DAILY_RATE);
+    const commission = roundUsd(gross * VIP_COMMISSION_RATE);
+    const net = roundUsd(gross - commission);
+    if (net <= 0) {
       skipped += 1;
       continue;
     }
 
     const wallet = await getWalletByUserId(inv.user_id);
     const cash = roundUsd(wallet?.balance);
-    await setWalletBalance(inv.user_id, roundUsd(cash + amount));
+    await setWalletBalance(inv.user_id, roundUsd(cash + net));
     await createTransaction({
       userId: inv.user_id,
       type: 'deposit',
-      amount,
+      amount: net,
       status: 'completed',
     });
 
@@ -238,12 +252,15 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
       user_id: inv.user_id,
       accrual_date: planDate,
       rate: VIP_DAILY_RATE,
-      amount,
+      amount: net,
+      gross_amount: gross,
+      commission_rate: VIP_COMMISSION_RATE,
+      commission_amount: commission,
       created_at: new Date().toISOString(),
     });
 
     await updateVipInvestment(inv.id, {
-      totalAccruedUsd: roundUsd(Number(inv.total_accrued_usd) + amount),
+      totalAccruedUsd: roundUsd(Number(inv.total_accrued_usd) + net),
       daysAccrued: Number(inv.days_accrued) + 1,
     });
 
@@ -255,6 +272,7 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
 
 module.exports = {
   getVipSummary,
+  listVipAccrualHistory,
   investVip,
   addCapitalVip,
   withdrawVipAtMaturity,

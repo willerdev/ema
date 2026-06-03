@@ -12,7 +12,6 @@ import { AnnouncementBanner } from '../components/AnnouncementBanner';
 import { useAuth } from '../context/AuthContext';
 import { usePolling } from '../hooks/usePolling';
 import { useTransactionFeed } from '../hooks/useTransactionFeed';
-import { useTradingStore } from '../store/useTradingStore';
 import { palette } from '../theme/colors';
 import {
   navigateToSupport,
@@ -27,7 +26,6 @@ const HOME_NOTICE_DISMISS_KEY = 'ema_home_notice_dismissed_v2';
 export function HomeScreen() {
   const navigation = useNavigation();
   const { user } = useAuth();
-  const { account, refreshDashboard, loading, dashboardError } = useTradingStore();
   const { npSummary, rows, loading: feedLoading, error: cryptoError, refresh: refreshFeed } = useTransactionFeed();
   const [refreshing, setRefreshing] = useState(false);
   const [noticeVisible, setNoticeVisible] = useState(true);
@@ -44,8 +42,8 @@ export function HomeScreen() {
   };
 
   const refresh = useCallback(async () => {
-    await Promise.all([refreshFeed(), refreshDashboard()]);
-  }, [refreshFeed, refreshDashboard]);
+    await refreshFeed();
+  }, [refreshFeed]);
 
   usePolling(refresh, 60000, true);
 
@@ -57,11 +55,6 @@ export function HomeScreen() {
 
   const recentActivity = useMemo(() => filterActivityToday(rows, 5), [rows]);
   const balancesLoading = feedLoading && !npSummary && !cryptoError;
-
-  const alpacaEquity =
-    account?.equity !== undefined && account?.equity !== null ? `$${Number(account.equity).toFixed(2)}` : null;
-  const alpacaCash = account?.cash !== undefined && account?.cash !== null ? `$${Number(account.cash).toFixed(2)}` : null;
-  const showAlpaca = Boolean(alpacaEquity || alpacaCash || dashboardError);
 
   return (
     <ScrollView
@@ -170,19 +163,6 @@ export function HomeScreen() {
           ) : null}
         </Card>
       )}
-
-      {showAlpaca ? (
-        <View style={styles.alpacaFootnoteWrap}>
-          {dashboardError ? <Text style={styles.alpacaFootnote}>{dashboardError}</Text> : null}
-          {loading && !account && !dashboardError ? <Text style={styles.alpacaFootnote}>Broker sync…</Text> : null}
-          {alpacaEquity || alpacaCash ? (
-            <Text style={styles.alpacaFootnote}>
-              Linked broker{alpacaEquity ? ` · equity ${alpacaEquity}` : ''}
-              {alpacaCash ? ` · cash ${alpacaCash}` : ''}
-            </Text>
-          ) : null}
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
@@ -224,6 +204,4 @@ const styles = StyleSheet.create({
   badge: { marginTop: 6, fontSize: 11, fontWeight: '800', paddingVertical: 2, paddingHorizontal: 8, borderRadius: 999, overflow: 'hidden' },
   badgeIn: { color: '#052e16', backgroundColor: '#86efac' },
   badgeOut: { color: '#450a0a', backgroundColor: '#fca5a5' },
-  alpacaFootnoteWrap: { paddingHorizontal: 4, paddingBottom: 24 },
-  alpacaFootnote: { color: palette.textSecondary, fontSize: 11, lineHeight: 16, textAlign: 'center' },
 });

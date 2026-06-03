@@ -804,6 +804,91 @@
               </section>
 
               <section class="card admin-section">
+                <h3 class="admin-section-title">Record trade</h3>
+                <p class="admin-section-desc">Add a closed trade to this user&apos;s in-app trade history.</p>
+                <div class="form-grid-2">
+                  <div>
+                    <label>Symbol</label>
+                    <input id="userTradeSymbol" type="text" placeholder="EURUSD" />
+                  </div>
+                  <div>
+                    <label>Side</label>
+                    <select id="userTradeSide">
+                      <option value="buy">Buy</option>
+                      <option value="sell">Sell</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Volume</label>
+                    <input id="userTradeVolume" type="number" step="0.01" min="0.01" value="1" />
+                  </div>
+                  <div>
+                    <label>Profit (USD)</label>
+                    <input id="userTradeProfit" type="number" step="0.01" placeholder="125.50" />
+                  </div>
+                  <div>
+                    <label>Open price</label>
+                    <input id="userTradeOpen" type="number" step="0.000001" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label>Close price</label>
+                    <input id="userTradeClose" type="number" step="0.000001" placeholder="Optional" />
+                  </div>
+                  <div>
+                    <label>Trade time</label>
+                    <input id="userTradeAt" type="datetime-local" />
+                  </div>
+                  <div>
+                    <label>Notes</label>
+                    <input id="userTradeNotes" type="text" placeholder="Optional" />
+                  </div>
+                </div>
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-primary" id="userTradeAddBtn">Add trade</button>
+                </div>
+                <p id="userTradeOk" class="section-inline-ok hidden"></p>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Trade history</h3>
+                <p class="admin-section-desc">Trades shown to the user in the app.</p>
+                <div class="table-scroll tall">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Time</th>
+                        <th>Symbol</th>
+                        <th>Side</th>
+                        <th>Vol</th>
+                        <th>Profit</th>
+                        <th>Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody id="userTradeRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">VIP interest history</h3>
+                <p class="admin-section-desc">Daily VIP accruals: gross interest, 30% platform commission, net paid to cash.</p>
+                <div class="table-scroll tall">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Gross</th>
+                        <th>Commission</th>
+                        <th>Net to user</th>
+                        <th>Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody id="userVipAccrualRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
                 <h3 class="admin-section-title">Transactions</h3>
                 <p class="admin-section-desc">Latest 50 wallet transactions.</p>
                 <div class="table-scroll tall">
@@ -1876,6 +1961,122 @@
       void loadUserCharts(id);
       void loadUserJournal(id);
       void loadUserDropPlan(id);
+      void loadUserTrades(id);
+      void loadUserVipAccruals(id);
+    }
+
+    function renderUserTrades(trades) {
+      const body = document.getElementById('userTradeRows');
+      if (!body) return;
+      body.innerHTML = '';
+      (trades || []).forEach((t) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + new Date(t.tradedAt).toLocaleString() + '</td>' +
+          '<td>' + escapeHtml(t.symbol) + '</td>' +
+          '<td>' + escapeHtml(t.side) + '</td>' +
+          '<td>' + Number(t.volume || 0).toFixed(2) + '</td>' +
+          '<td>' + fmtMoney(t.profitUsd) + '</td>' +
+          '<td>' + escapeHtml(t.notes || '—') + '</td>';
+        body.appendChild(tr);
+      });
+      if (!(trades || []).length) {
+        body.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No trades recorded</td></tr>';
+      }
+    }
+
+    async function loadUserTrades(userId) {
+      const body = document.getElementById('userTradeRows');
+      if (body) body.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">Loading…</td></tr>';
+      try {
+        const data = await api('/admin/api/users/' + userId + '/trades?limit=100');
+        renderUserTrades(data.trades || []);
+      } catch (e) {
+        if (body) body.innerHTML = '<tr><td colspan="6" style="color:var(--err);">' + escapeHtml(e.message) + '</td></tr>';
+      }
+    }
+
+    function renderUserVipAccruals(accruals, commissionRate) {
+      const body = document.getElementById('userVipAccrualRows');
+      if (!body) return;
+      body.innerHTML = '';
+      const pct = Math.round(Number(commissionRate || 0.3) * 100);
+      (accruals || []).forEach((a) => {
+        const tr = document.createElement('tr');
+        const comm = Number(a.commissionUsd || 0);
+        tr.innerHTML =
+          '<td>' + escapeHtml(a.accrualDate) + '</td>' +
+          '<td>' + fmtMoney(a.grossUsd) + '</td>' +
+          '<td>' + fmtMoney(comm) + (comm > 0 ? ' <span style="color:var(--muted);font-size:0.7rem;">(' + pct + '%)</span>' : '') + '</td>' +
+          '<td>' + fmtMoney(a.netUsd) + '</td>' +
+          '<td>' + (Number(a.rate || 0) * 100).toFixed(1) + '%</td>';
+        body.appendChild(tr);
+      });
+      if (!(accruals || []).length) {
+        body.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No VIP accruals yet</td></tr>';
+      }
+    }
+
+    async function loadUserVipAccruals(userId) {
+      const body = document.getElementById('userVipAccrualRows');
+      if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">Loading…</td></tr>';
+      try {
+        const data = await api('/admin/api/users/' + userId + '/vip-accruals?limit=100');
+        renderUserVipAccruals(data.accruals || [], data.commissionRate);
+      } catch (e) {
+        if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--err);">' + escapeHtml(e.message) + '</td></tr>';
+      }
+    }
+
+    async function addUserTrade() {
+      clearUserPageAlert();
+      const okEl = document.getElementById('userTradeOk');
+      if (okEl) okEl.classList.add('hidden');
+      if (!viewingUserId) return;
+      const symbol = document.getElementById('userTradeSymbol').value.trim();
+      const profitUsd = Number(document.getElementById('userTradeProfit').value);
+      if (!symbol) {
+        showUserPageAlert('Symbol is required', 'error');
+        return;
+      }
+      if (!Number.isFinite(profitUsd)) {
+        showUserPageAlert('Profit USD is required', 'error');
+        return;
+      }
+      const tradedAtLocal = document.getElementById('userTradeAt').value;
+      let tradedAt;
+      if (tradedAtLocal) {
+        tradedAt = new Date(tradedAtLocal).toISOString();
+      }
+      const openRaw = document.getElementById('userTradeOpen').value;
+      const closeRaw = document.getElementById('userTradeClose').value;
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/trades', {
+          method: 'POST',
+          body: JSON.stringify({
+            symbol,
+            side: document.getElementById('userTradeSide').value,
+            volume: Number(document.getElementById('userTradeVolume').value) || 1,
+            profitUsd,
+            openPrice: openRaw !== '' ? Number(openRaw) : undefined,
+            closePrice: closeRaw !== '' ? Number(closeRaw) : undefined,
+            tradedAt,
+            notes: document.getElementById('userTradeNotes').value.trim() || undefined,
+          }),
+        });
+        document.getElementById('userTradeSymbol').value = '';
+        document.getElementById('userTradeProfit').value = '';
+        document.getElementById('userTradeOpen').value = '';
+        document.getElementById('userTradeClose').value = '';
+        document.getElementById('userTradeNotes').value = '';
+        if (okEl) {
+          okEl.textContent = 'Trade added.';
+          okEl.classList.remove('hidden');
+        }
+        await loadUserTrades(viewingUserId);
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to add trade', 'error');
+      }
     }
 
     async function applyWalletAdjust() {
@@ -2916,6 +3117,7 @@
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
+    document.getElementById('userTradeAddBtn').onclick = () => addUserTrade();
     async function sendAdminNotification() {
       document.getElementById('notifyErr').classList.add('hidden');
       document.getElementById('notifyOk').classList.add('hidden');

@@ -1,11 +1,11 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { ActivityIndicator, View } from 'react-native';
 import { MainTabNavigator } from './MainTabNavigator';
-import { AlpacaTradeScreen } from '../screens/AlpacaTradeScreen';
 import { AirfarmingTradeScreen } from '../screens/AirfarmingTradeScreen';
 import { VipFarmersTradeScreen } from '../screens/VipFarmersTradeScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
+import { TradeHistoryScreen } from '../screens/TradeHistoryScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { TransactionHistoryScreen } from '../screens/TransactionHistoryScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
@@ -43,11 +43,11 @@ export function RootNavigator() {
       }}
     >
       <Stack.Screen name='MainTabs' component={MainTabNavigator} options={{ headerShown: false }} />
-      <Stack.Screen name='AlpacaTrade' component={AlpacaTradeScreen} options={{ title: 'Forex market' }} />
       <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarmers' }} />
       <Stack.Screen name='VipFarmersTrade' component={VipFarmersTradeScreen} options={{ title: 'Live VIP Farmers' }} />
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
+      <Stack.Screen name='TradeHistory' component={TradeHistoryScreen} options={{ title: 'Trade history' }} />
       <Stack.Screen name='Notifications' component={NotificationsScreen} options={{ title: 'Notifications' }} />
       <Stack.Screen name='TransactionHistory' component={TransactionHistoryScreen} options={{ title: 'Asset history' }} />
       <Stack.Screen

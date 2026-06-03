@@ -229,7 +229,7 @@ export function AirfarmingTradeScreen() {
   const showTrustScoreInfo = () => {
     Alert.alert(
       'Withdrawal trust score',
-      'Your score (0–100%) reflects withdrawal activity across crypto payouts, cash wallet withdrawals, and mobile money.\n\nFewer withdrawals and no rejected or illegal withdrawals keep the score high. Heavy or frequent withdrawals lower it.\n\nThis score multiplies your potential airfarming drop payout. Rejected, failed, or flagged withdrawals have the largest negative impact.'
+      'Your score (0–100%) reflects withdrawal activity across crypto payouts and cash wallet withdrawals.\n\nFewer withdrawals and no rejected or illegal withdrawals keep the score high. Heavy or frequent withdrawals lower it.\n\nThis score multiplies your potential airfarming drop payout. Rejected, failed, or flagged withdrawals have the largest negative impact.'
     );
   };
 

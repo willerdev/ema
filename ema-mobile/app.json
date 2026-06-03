@@ -17,7 +17,6 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocationWhenInUseUsageDescription": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money.",
         "NSFaceIDUsageDescription": "AirFarmerPro uses Face ID to sign in quickly and unlock the app after inactivity."
       }
     },
@@ -26,12 +25,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
-      ],
+      "permissions": [],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.willer256.emamobile"
@@ -47,12 +41,6 @@
     "owner": "willer256",
     "plugins": [
       "expo-font",
-      [
-        "expo-location",
-        {
-          "locationWhenInUsePermission": "AirFarmerPro uses your location to show local currency rates for P2P and mobile money in your country."
-        }
-      ],
       "expo-secure-store",
       [
         "expo-local-authentication",

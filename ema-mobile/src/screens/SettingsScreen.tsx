@@ -18,7 +18,6 @@ import { canUseBiometrics } from '../utils/biometrics';
 import { generatePinSalt, hashPin } from '../utils/pin';
 import { usePolling } from '../hooks/usePolling';
 import { authService, TotpStatus } from '../services/authService';
-import { alpacaService } from '../services/alpacaService';
 import { complianceService } from '../services/complianceService';
 import { whitelistWalletService } from '../services/whitelistWalletService';
 import { useToast } from '../hooks/useToast';
@@ -89,8 +88,6 @@ export function SettingsScreen() {
   const { showToast } = useToast();
   const { suspendLock, refreshSecurityPrefs, pinEnabled, biometricLoginEnabled, biometricAvailable } = useAppLock();
   const [aboutModal, setAboutModal] = useState<AboutSectionKey | null>(null);
-  const [apiKey, setApiKey] = useState('');
-  const [secretKey, setSecretKey] = useState('');
   const [darkMode, setDarkMode] = useState(true);
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
@@ -102,7 +99,6 @@ export function SettingsScreen() {
 
   const [complianceModalOpen, setComplianceModalOpen] = useState(false);
   const [whitelistModalOpen, setWhitelistModalOpen] = useState(false);
-  const [alpacaModalOpen, setAlpacaModalOpen] = useState(false);
   const [securityModalOpen, setSecurityModalOpen] = useState(false);
   const [alertsModalOpen, setAlertsModalOpen] = useState(false);
   const [alertPrefs, setAlertPrefs] = useState<NotificationPreferences | null>(null);
@@ -348,22 +344,6 @@ export function SettingsScreen() {
     setRefreshing(false);
   }, [refreshAll]);
 
-  const saveKeys = async () => {
-    try {
-      await alpacaService.updateKeys(apiKey, secretKey);
-      try {
-        await alpacaService.getAccount();
-        Alert.alert('Saved', 'Alpaca keys saved and account access verified.');
-        setAlpacaModalOpen(false);
-      } catch {
-        Alert.alert('Saved', 'Keys saved. Verify account access from Home/Trades.');
-        setAlpacaModalOpen(false);
-      }
-    } catch (error: any) {
-      Alert.alert('API Key Error', String(error?.message || 'Failed to save keys'));
-    }
-  };
-
   const startTotpSetup = async () => {
     setTotpBusy(true);
     try {
@@ -600,7 +580,6 @@ export function SettingsScreen() {
             subtitle={whitelistSummary}
             onPress={() => setWhitelistModalOpen(true)}
           />
-          <SettingsRow title='Trading account keys' subtitle='Link your broker for forex trades' onPress={() => setAlpacaModalOpen(true)} />
           <SettingsRow title='Security' subtitle={securitySummary} onPress={() => setSecurityModalOpen(true)} />
           <SettingsRow
             title='Deposit & withdrawal alerts'
@@ -827,37 +806,6 @@ export function SettingsScreen() {
         ) : (
           <Text style={styles.value}>Maximum wallets registered. Remove one to add another.</Text>
         )}
-      </FormModal>
-
-      <FormModal
-        visible={alpacaModalOpen}
-        title='Trading account keys'
-        onClose={() => setAlpacaModalOpen(false)}
-        footer={
-          <View style={{ gap: 8, marginTop: 12 }}>
-            <PrimaryButton label='Validate & save' onPress={() => void saveKeys()} />
-            <PrimaryButton label='Close' onPress={() => setAlpacaModalOpen(false)} />
-          </View>
-        }
-      >
-        <Text style={styles.modalHint}>Keys are stored securely and used for trading features.</Text>
-        <TextInput
-          style={styles.input}
-          placeholder='API key'
-          placeholderTextColor={palette.textSecondary}
-          value={apiKey}
-          onChangeText={setApiKey}
-          autoCapitalize='none'
-        />
-        <TextInput
-          style={styles.input}
-          placeholder='Secret key'
-          placeholderTextColor={palette.textSecondary}
-          value={secretKey}
-          onChangeText={setSecretKey}
-          secureTextEntry
-          autoCapitalize='none'
-        />
       </FormModal>
 
       <FormModal

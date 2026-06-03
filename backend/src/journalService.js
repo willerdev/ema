@@ -127,11 +127,17 @@ async function getJournalDay(userId, dateYmd) {
     });
   }
   for (const v of vipRows) {
+    const net = roundUsd(v.amount);
+    const commission = roundUsd(v.commission_amount || 0);
+    const label =
+      commission > 0
+        ? `VIP Farmers interest (net after ${Math.round(Number(v.commission_rate || 0) * 100)}% fee)`
+        : 'VIP Farmers daily payout';
     items.push({
       id: v.id,
       source: 'vip',
-      label: 'VIP Farmers daily payout',
-      amountUsd: roundUsd(v.amount),
+      label,
+      amountUsd: net,
       at: v.created_at || `${date}T12:00:00.000Z`,
     });
   }

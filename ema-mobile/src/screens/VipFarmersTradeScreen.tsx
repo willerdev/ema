@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { vipFarmerService, type VipSummary } from '../services/vipFarmerService';
+import { vipFarmerService, type VipAccrual, type VipSummary } from '../services/vipFarmerService';
 import { palette } from '../theme/colors';
 
 function fmtUsd(n: number) {
@@ -11,6 +11,8 @@ function fmtUsd(n: number) {
 
 export function VipFarmersTradeScreen() {
   const [summary, setSummary] = useState<VipSummary | null>(null);
+  const [accruals, setAccruals] = useState<VipAccrual[]>([]);
+  const [commissionRate, setCommissionRate] = useState(0.3);
   const [amount, setAmount] = useState('');
   const [addAmount, setAddAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -19,10 +21,14 @@ export function VipFarmersTradeScreen() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setSummary(await vipFarmerService.getSummary());
+      const [s, hist] = await Promise.all([vipFarmerService.getSummary(), vipFarmerService.getAccruals(60)]);
+      setSummary(s);
+      setAccruals(hist.accruals || []);
+      setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
     } catch (e: any) {
       setError(e?.message || 'Failed to load VIP Farmers');
       setSummary(null);
+      setAccruals([]);
     }
   }, []);
 
@@ -132,7 +138,8 @@ export function VipFarmersTradeScreen() {
     >
       <Text style={styles.title}>Live VIP Farmers</Text>
       <Text style={styles.sub}>
-        30-day lock · {(summary?.dailyRate ?? 0.09) * 100}% daily on principal paid to cash · Min{' '}
+        30-day lock · {(summary?.dailyRate ?? 0.09) * 100}% daily gross on principal ·{' '}
+        {Math.round((summary?.commissionRate ?? commissionRate) * 100)}% platform fee on interest · net paid to cash · Min{' '}
         {fmtUsd(summary?.minInvestUsd ?? 100)}
       </Text>
 
@@ -202,6 +209,28 @@ export function VipFarmersTradeScreen() {
               <PrimaryButton label='Start VIP lock' onPress={() => void onInvest()} style={{ marginTop: 8 }} />
             </Card>
           )}
+
+          <Card>
+            <Text style={styles.label}>Interest history</Text>
+            <Text style={styles.disclaimer}>
+              Daily gross interest on principal, minus {Math.round(commissionRate * 100)}% platform commission. Net is credited to cash.
+            </Text>
+            {accruals.length === 0 ? (
+              <Text style={[styles.meta, { marginTop: 8 }]}>No interest payouts yet.</Text>
+            ) : (
+              accruals.map((a) => (
+                <View key={a.id} style={styles.accrualRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.accrualDate}>{a.accrualDate}</Text>
+                    <Text style={styles.meta}>
+                      Gross {fmtUsd(a.grossUsd)} · Fee {fmtUsd(a.commissionUsd)}
+                    </Text>
+                  </View>
+                  <Text style={styles.accrualNet}>+{fmtUsd(a.netUsd)}</Text>
+                </View>
+              ))
+            )}
+          </Card>
         </>
       ) : !error ? (
         <Card>
@@ -229,5 +258,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   disclaimer: { color: palette.textSecondary, fontSize: 12, lineHeight: 17 },
+  accrualRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: palette.border,
+    gap: 8,
+  },
+  accrualDate: { color: palette.textPrimary, fontWeight: '700', fontSize: 14 },
+  accrualNet: { color: palette.success, fontWeight: '800', fontSize: 15 },
   err: { color: '#fbbf24' },
 });

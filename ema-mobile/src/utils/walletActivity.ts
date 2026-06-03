@@ -39,8 +39,7 @@ function inferCategory(row: {
     if (row.direction === 'in') return 'deposit';
     return 'withdraw';
   }
-  if (src.includes('local_') || src.includes('mobile') || src.includes('fiat')) return 'fiat';
-  if (src.includes('p2p')) return 'p2p';
+  if (src.includes('local_') || src.includes('mobile') || src.includes('fiat') || src.includes('p2p')) return 'other';
   if (src.includes('peer')) return 'transfer';
   if (row.kind === 'payment' || (row.direction === 'in' && row.kind === 'ledger')) return 'deposit';
   if (row.kind === 'payout' || row.direction === 'out') return 'withdraw';
@@ -53,7 +52,6 @@ function methodLabelFor(row: WalletActivityRow): string {
     if (row.category === 'transfer') return 'Member transfer';
     return row.category === 'deposit' ? 'Trading wallet deposit' : 'Trading wallet withdrawal';
   }
-  if (row.category === 'fiat') return 'Mobile money';
   if (row.category === 'transfer') return 'Internal transfer';
   if (row.kind === 'payment') return 'On-chain deposit';
   if (row.kind === 'payout') return 'On-chain withdrawal';
@@ -227,8 +225,6 @@ export function filterActivityByTab(rows: WalletActivityRow[], tab: TransactionH
   if (tab === 'deposit') return rows.filter((r) => r.category === 'deposit');
   if (tab === 'withdraw') return rows.filter((r) => r.category === 'withdraw');
   if (tab === 'transfer') return rows.filter((r) => r.category === 'transfer');
-  if (tab === 'p2p') return rows.filter((r) => r.category === 'p2p');
-  if (tab === 'fiat') return rows.filter((r) => r.category === 'fiat');
   return rows;
 }
 
@@ -249,7 +245,6 @@ export function filterActivityByMethod(rows: WalletActivityRow[], methodFilter: 
     const label = (r.methodLabel || methodLabelFor(r)).toLowerCase();
     if (key === 'onchain') return label.includes('on-chain');
     if (key === 'internal') return label.includes('member') || label.includes('internal');
-    if (key === 'mobile') return label.includes('mobile');
     return label.includes(key);
   });
 }
@@ -289,9 +284,7 @@ export function activityStatusLabel(row: WalletActivityRow): string {
         ? 'Withdrawal'
         : cat === 'transfer'
           ? 'Transfer'
-          : cat === 'fiat'
-            ? 'Mobile money'
-            : 'Transaction';
+          : 'Transaction';
   return settled ? `${prefix} completed` : `${prefix} · ${formatActivityStatus(row.status)}`;
 }
 

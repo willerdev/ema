@@ -33,15 +33,12 @@ const TABS: { key: TransactionHistoryTab; label: string }[] = [
   { key: 'deposit', label: 'Deposit' },
   { key: 'withdraw', label: 'Withdraw' },
   { key: 'transfer', label: 'Transfer' },
-  { key: 'p2p', label: 'P2P' },
-  { key: 'fiat', label: 'Fiat' },
 ];
 
 const METHOD_OPTIONS = [
   { key: 'all', label: 'All methods' },
   { key: 'onchain', label: 'On-chain' },
   { key: 'internal', label: 'Member transfer' },
-  { key: 'mobile', label: 'Mobile money' },
 ];
 
 export function TransactionHistoryScreen() {

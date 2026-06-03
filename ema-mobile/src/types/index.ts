@@ -2,9 +2,6 @@ import type { NavigatorScreenParams } from '@react-navigation/native';
 
 export type ExtraStackParamList = {
   ExtraHub: undefined;
-  P2P: undefined;
-  SendById: undefined;
-  LocalMoney: undefined;
   MT5: undefined;
   Settings: { openSecurity?: boolean } | undefined;
 };
@@ -19,11 +16,11 @@ export type RootTabParamList = {
 
 export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<RootTabParamList> | undefined;
-  AlpacaTrade: undefined;
   AirfarmingTrade: undefined;
   VipFarmersTrade: undefined;
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
+  TradeHistory: undefined;
   Notifications: undefined;
   TransactionHistory: { initialTab?: TransactionHistoryTab } | undefined;
   TransactionDetail: { row: WalletActivityRow };
@@ -43,7 +40,7 @@ export interface NotificationPreferencesResponse {
   weeklyPriceUsd: number;
 }
 
-export type TransactionHistoryTab = 'all' | 'deposit' | 'withdraw' | 'transfer' | 'p2p' | 'fiat';
+export type TransactionHistoryTab = 'all' | 'deposit' | 'withdraw' | 'transfer';
 
 export type AppNotification = {
   id: string;
@@ -54,64 +51,9 @@ export type AppNotification = {
   createdAt: string;
 };
 
-export type ActivityFeedItem = {
-  id: string;
-  title: string;
-  subtitle: string;
-  amountLabel?: string;
-  directionLabel?: 'incoming' | 'outgoing' | 'neutral';
-  timestampLabel?: string;
-  kind: 'alpaca_order' | 'crypto_tx' | 'placeholder';
-};
-
-export type TradeSide = 'buy' | 'sell';
-export type OrderType = 'market' | 'limit' | 'stop';
-
 export interface User {
   id: string;
   email: string;
-}
-
-export interface Account {
-  equity: string;
-  buying_power: string;
-  cash: string;
-  portfolio_value?: string;
-  last_equity?: string;
-}
-
-export interface Quote {
-  symbol: string;
-  price: number;
-  bid?: number;
-  ask?: number;
-  spread?: number;
-}
-
-export interface MarketItem {
-  symbol: string;
-  price: number;
-  open?: number;
-  high?: number;
-  low?: number;
-  close?: number;
-  changePercent: number;
-}
-
-export interface Position {
-  symbol: string;
-  qty: string;
-  unrealized_pl?: string;
-  market_value?: string;
-}
-
-export interface Order {
-  id: string;
-  symbol: string;
-  side: string;
-  qty: string;
-  status: string;
-  submitted_at?: string;
 }
 
 export interface WalletTransaction {
@@ -181,7 +123,7 @@ export interface NowpaymentsPaymentRow {
 
 export type WalletActivityKind = 'ledger' | 'payment' | 'payout' | 'cash';
 
-export type TransactionCategory = 'deposit' | 'withdraw' | 'transfer' | 'p2p' | 'fiat' | 'other';
+export type TransactionCategory = 'deposit' | 'withdraw' | 'transfer' | 'other';
 
 export interface WalletActivityRow {
   id: string;

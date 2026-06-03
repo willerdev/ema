@@ -196,6 +196,13 @@ export function TradesHubScreen() {
             <PrimaryButton label='Show hidden options' onPress={() => setHiddenModalOpen(true)} style={{ marginTop: 12 }} />
           </Card>
         ) : null}
+
+        <Card style={styles.hubCard}>
+          <Pressable onPress={() => navigation.navigate('TradeHistory')}>
+            <Text style={styles.cardTitle}>Trade history</Text>
+            <Text style={styles.cardMeta}>View closed trades recorded on your account</Text>
+          </Pressable>
+        </Card>
       </ScrollView>
 
       <FormModal

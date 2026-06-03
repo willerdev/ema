@@ -78,35 +78,17 @@ export function ExtraHubScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
         <Text style={styles.title}>Extra</Text>
-        <Text style={styles.sub}>Peer trading and account settings</Text>
+        <Text style={styles.sub}>History, MT5, and account settings</Text>
 
         {loading ? (
-          <MenuListSkeleton rows={5} />
+          <MenuListSkeleton rows={3} />
         ) : (
           <Card style={styles.menuCard}>
             <ExtraMenuRow
               title='Asset history'
-              subtitle='Deposits, withdrawals, transfers, and more'
+              subtitle='Deposits, withdrawals, and transfers'
               icon='time-outline'
               onPress={openHistory}
-            />
-            <ExtraMenuRow
-              title='Send by ID'
-              subtitle='Transfer trading USD to another member'
-              icon='arrow-forward-circle-outline'
-              onPress={() => navigation.navigate('SendById')}
-            />
-            <ExtraMenuRow
-              title='P2P'
-              subtitle='USDT rates in your local currency'
-              icon='swap-horizontal-outline'
-              onPress={() => navigation.navigate('P2P')}
-            />
-            <ExtraMenuRow
-              title='Mobile money'
-              subtitle='Deposit or withdraw with your phone number'
-              icon='phone-portrait-outline'
-              onPress={() => navigation.navigate('LocalMoney')}
             />
             <ExtraMenuRow
               title='MT5'

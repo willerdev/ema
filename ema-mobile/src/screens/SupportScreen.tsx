@@ -29,7 +29,7 @@ const CATEGORIES: { key: SupportCategory; title: string; subtitle: string }[] = 
   { key: 'withdraw', title: 'Withdrawal issue', subtitle: 'Crypto or wallet payout problems' },
   { key: 'deposit', title: 'Deposit issue', subtitle: 'Payment not credited or wrong amount' },
   { key: 'daily_earning', title: 'Daily earning issue', subtitle: 'Airfarming, contracts, or yields' },
-  { key: 'transfer', title: 'Transfer issue', subtitle: 'Send by ID or member transfers' },
+  { key: 'transfer', title: 'Transfer issue', subtitle: 'Product transfers or wallet movements' },
 ];
 
 function RecentRow({ row, onPress }: { row: WalletActivityRow; onPress: () => void }) {
