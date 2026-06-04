@@ -21,6 +21,10 @@ export type RootStackParamList = {
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
   TradeHistory: undefined;
+  LiveTrading: undefined;
+  LiveTradingCreateBot: undefined;
+  LiveTradingCreateSetup: { botType: 'synthetix_ea' | 'quantix_ea' };
+  LiveTradingAccount: { accountId: string };
   Notifications: undefined;
   TransactionHistory: { initialTab?: TransactionHistoryTab } | undefined;
   TransactionDetail: { row: WalletActivityRow };

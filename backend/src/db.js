@@ -438,7 +438,9 @@ async function insertMt5EaCommand(row) {
 async function listPendingMt5EaCommands(mt5AccountId, limit = 50) {
   const { data, error } = await supabase
     .from('mt5_ea_commands')
-    .select('id, client_id, side, symbol, volume, stop_loss, take_profit, magic, status, created_at')
+    .select(
+      'id, client_id, side, symbol, volume, stop_loss, take_profit, magic, status, created_at, command_type, position_ticket, close_side'
+    )
     .eq('mt5_account_id', mt5AccountId)
     .eq('status', 'pending')
     .order('created_at', { ascending: true })
@@ -3208,6 +3210,199 @@ async function deleteScheduledAirfarmingDropsForUserWeek(userId, weekStart) {
   if (error) throw error;
 }
 
+async function getNextPlatformMt5Login() {
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('platform_login')
+    .eq('is_platform_provisioned', true)
+    .order('platform_login', { ascending: false })
+    .limit(1);
+  if (error && isSchemaError(error)) return 900100;
+  if (error) throw error;
+  const last = data?.[0]?.platform_login;
+  return Math.max(900100, Number(last || 900099) + 1);
+}
+
+async function createPlatformMt5AccountForUser(userId, { botType, password, accountName, leverage }) {
+  const login = String(await getNextPlatformMt5Login());
+  const server = String(process.env.MT5_LIVE_SERVER || 'Airfarms-Live').trim();
+  const token = crypto.randomUUID().replace(/-/g, '');
+  const row = {
+    id: id(),
+    user_id: userId,
+    metaapi_account_id: '',
+    login,
+    password,
+    server,
+    account_name: accountName || '',
+    is_platform_provisioned: true,
+    bot_type: botType,
+    platform_login: Number(login),
+    ea_webhook_token: token,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  const { data, error } = await supabase.from('mt5_accounts').insert(row).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function listPlatformMt5AccountsByUserId(userId) {
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_platform_provisioned', true)
+    .order('created_at', { ascending: false });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function getLiveTradingWalletByMt5AccountId(mt5AccountId) {
+  const { data, error } = await supabase
+    .from('live_trading_wallets')
+    .select('*')
+    .eq('mt5_account_id', mt5AccountId)
+    .maybeSingle();
+  if (error && isSchemaError(error)) return null;
+  if (error) throw error;
+  return data;
+}
+
+async function ensureLiveTradingWallet(userId, mt5AccountId) {
+  const existing = await getLiveTradingWalletByMt5AccountId(mt5AccountId);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  const { data, error } = await supabase
+    .from('live_trading_wallets')
+    .insert({
+      id: id(),
+      user_id: userId,
+      mt5_account_id: mt5AccountId,
+      balance: 0,
+      updated_at: now,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function setLiveTradingWalletBalance(walletId, balance) {
+  const { data, error } = await supabase
+    .from('live_trading_wallets')
+    .update({ balance: roundWalletUsd(balance), updated_at: new Date().toISOString() })
+    .eq('id', walletId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function insertLiveTradingTransfer({ userId, mt5AccountId, direction, amount }) {
+  const { data, error } = await supabase
+    .from('live_trading_transfers')
+    .insert({
+      id: id(),
+      user_id: userId,
+      mt5_account_id: mt5AccountId,
+      direction,
+      amount: roundWalletUsd(amount),
+      created_at: new Date().toISOString(),
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function listLiveTradingTransfersForUser(userId, limit = 30) {
+  const lim = Math.min(100, Math.max(1, Number(limit) || 30));
+  const { data, error } = await supabase
+    .from('live_trading_transfers')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listMarketPrices() {
+  const { data, error } = await supabase.from('market_prices').select('*').order('symbol', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function upsertMarketPriceRow(row) {
+  const { data, error } = await supabase.from('market_prices').upsert(row, { onConflict: 'symbol' }).select('*').single();
+  if (error) throw error;
+  return data;
+}
+
+async function updateMt5EaPositionsSnapshot(mt5AccountId, { positions, equity, balance }) {
+  const patch = {
+    ea_positions_snapshot: Array.isArray(positions) ? positions : [],
+    ea_snapshot_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+  if (balance != null) patch.cached_balance = balance;
+  if (equity != null) patch.cached_equity = equity;
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .update(patch)
+    .eq('id', mt5AccountId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+async function insertMt5EaCloseCommand({ mt5AccountId, positionTicket, closeSide, clientId }) {
+  return insertMt5EaCommand({
+    id: id(),
+    mt5_account_id: mt5AccountId,
+    client_id: clientId || `close-${positionTicket}-${Date.now()}`,
+    command_type: 'close_position',
+    side: closeSide || 'sell',
+    symbol: 'CLOSE',
+    volume: 0.01,
+    position_ticket: Number(positionTicket),
+    close_side: closeSide || null,
+    magic: 0,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  });
+}
+
+async function listAllPlatformLiveTradingAccountsAdmin(limit = 500) {
+  const lim = Math.min(1000, Math.max(1, Number(limit) || 500));
+  const { data, error } = await supabase
+    .from('mt5_accounts')
+    .select('*, live_trading_wallets(balance)')
+    .eq('is_platform_provisioned', true)
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+async function listRecentLiveTradingTransfersAdmin(limit = 80) {
+  const lim = Math.min(200, Math.max(1, Number(limit) || 80));
+  const { data, error } = await supabase
+    .from('live_trading_transfers')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(lim);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
 async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
   const { data, error } = await supabase
     .from('airfarming_drops')
@@ -3432,6 +3627,20 @@ module.exports = {
   userRecordedTradeToApi,
   insertUserRecordedTrade,
   listUserRecordedTradesForUser,
+  getNextPlatformMt5Login,
+  createPlatformMt5AccountForUser,
+  listPlatformMt5AccountsByUserId,
+  getLiveTradingWalletByMt5AccountId,
+  ensureLiveTradingWallet,
+  setLiveTradingWalletBalance,
+  insertLiveTradingTransfer,
+  listLiveTradingTransfersForUser,
+  listMarketPrices,
+  upsertMarketPriceRow,
+  updateMt5EaPositionsSnapshot,
+  insertMt5EaCloseCommand,
+  listAllPlatformLiveTradingAccountsAdmin,
+  listRecentLiveTradingTransfersAdmin,
   listPaidAirfarmingDropsForUserBetween,
   listContractAccrualsForUserBetween,
   listContractAccrualsForUserOnDate,

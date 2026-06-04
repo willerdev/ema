@@ -31,6 +31,8 @@
       min-height: 100vh;
     }
     .hidden { display: none !important; }
+    .superadmin-only { display: none !important; }
+    body.role-superadmin .superadmin-only { display: block !important; }
 
     /* Mobile-style login */
     .login-screen {
@@ -581,6 +583,9 @@
         <button type="button" class="nav-item" data-tab="drops">
           <span class="nav-icon">📉</span> Drops
         </button>
+        <button type="button" class="nav-item superadmin-only" data-tab="livetrading">
+          <span class="nav-icon">📈</span> Live trading
+        </button>
         <button type="button" class="nav-item" data-tab="announce">
           <span class="nav-icon">📢</span> Notify
         </button>
@@ -657,6 +662,40 @@
                 <div class="btn-toolbar">
                   <button type="button" id="toggleUserPauseBtn" class="btn-warn">Pause drops</button>
                 </div>
+              </section>
+
+              <section id="directDropSection" class="card admin-section superadmin-only">
+                <h3 class="admin-section-title">Send direct drop</h3>
+                <p class="admin-section-desc">Schedule a one-off VIP-priority drop for this user (runs before other scheduled drops this week).</p>
+                <div class="form-grid-2">
+                  <div>
+                    <label>Delay</label>
+                    <input id="directDropDelay" type="number" min="0" step="1" value="30" />
+                  </div>
+                  <div>
+                    <label>Delay unit</label>
+                    <select id="directDropDelayUnit">
+                      <option value="minutes">Minutes</option>
+                      <option value="hours">Hours</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Drop %</label>
+                    <input id="directDropPercent" type="number" min="0.01" step="0.01" placeholder="25" />
+                  </div>
+                  <div>
+                    <label>Min balance (USD)</label>
+                    <input id="directDropMin" type="number" min="0" step="0.01" placeholder="100" />
+                  </div>
+                  <div>
+                    <label>Max balance (USD)</label>
+                    <input id="directDropMax" type="number" min="0" step="0.01" placeholder="500" />
+                  </div>
+                </div>
+                <div class="btn-toolbar">
+                  <button type="button" class="btn-primary" id="sendDirectDropBtn">Send direct drop</button>
+                </div>
+                <p id="directDropOk" class="section-inline-ok hidden"></p>
               </section>
 
               <section class="card admin-section">
@@ -983,6 +1022,38 @@
           </div>
         </div>
 
+        <div id="panelLivetrading" class="hidden">
+          <div class="stat-grid" id="ltStatsGrid" style="max-width:900px;margin-bottom:16px;"></div>
+          <div class="card">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Platform live accounts</h3>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Program</th>
+                    <th>Name</th>
+                    <th>Deposited</th>
+                    <th>Open P/L</th>
+                    <th>Display</th>
+                  </tr>
+                </thead>
+                <tbody id="ltAccountRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Recent transfers</h3>
+            <div class="table-scroll tall">
+              <table>
+                <thead><tr><th>User</th><th>Direction</th><th>Amount</th><th>When</th></tr></thead>
+                <tbody id="ltTransferRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <p id="livetradingErr" class="err hidden"></p>
+        </div>
+
         <div id="panelAnnounce" class="hidden">
           <div class="card">
             <h3 style="margin:0 0 8px;font-size:1rem;">In-app announcement</h3>
@@ -1292,6 +1363,7 @@
       tiers: 'Drop tiers',
       drops: 'Airfarming drops',
       announce: 'Announce & notify',
+      livetrading: 'Live trading',
     };
     let drops = [];
     let users = [];
@@ -1315,6 +1387,11 @@
     let aiAllocations = [];
     let aiPlanSummary = null;
     let aiPlansList = [];
+    let adminRole = 'admin';
+
+    function applyAdminRoleUI() {
+      document.body.classList.toggle('role-superadmin', adminRole === 'superadmin');
+    }
 
     function api(path, opts = {}) {
       const token = localStorage.getItem(TOKEN_KEY);
@@ -1410,6 +1487,7 @@
       document.getElementById('panelAiEarnings').classList.toggle('hidden', tab !== 'aiearnings');
       document.getElementById('panelTiers').classList.toggle('hidden', tab !== 'tiers');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
+      document.getElementById('panelLivetrading').classList.toggle('hidden', tab !== 'livetrading');
       document.getElementById('panelAnnounce').classList.toggle('hidden', tab !== 'announce');
       document.getElementById('pageTitle').textContent = PAGE_TITLES[tab] || 'Admin';
       closeSidebar();
@@ -1420,6 +1498,7 @@
         else if (tab === 'aiearnings') showAiPlanErr(e);
         else if (tab === 'tiers') showTiersErr(e);
         else if (tab === 'drops') showDropsErr(e);
+        else if (tab === 'livetrading') showLivetradingErr(e);
         else if (tab === 'announce') {
           document.getElementById('announceErr').textContent = e.message;
           document.getElementById('announceErr').classList.remove('hidden');
@@ -2788,7 +2867,54 @@
       else if (activeTab === 'aiearnings') await loadAiPlan();
       else if (activeTab === 'tiers') await loadTiers();
       else if (activeTab === 'drops') await loadDrops();
+      else if (activeTab === 'livetrading') await loadLiveTradingOverview();
       else if (activeTab === 'announce') await loadAnnouncements();
+    }
+
+    function showLivetradingErr(e) {
+      document.getElementById('livetradingErr').textContent = e.message;
+      document.getElementById('livetradingErr').classList.remove('hidden');
+    }
+
+    async function loadLiveTradingOverview() {
+      document.getElementById('livetradingErr').classList.add('hidden');
+      const data = await api('/admin/api/live-trading/overview');
+      const s = data.stats || {};
+      document.getElementById('ltStatsGrid').innerHTML =
+        '<div class="stat"><div class="val">' + (s.users || 0) + '</div><div class="lbl">Users</div></div>' +
+        '<div class="stat"><div class="val">' + (s.accounts || 0) + '</div><div class="lbl">Accounts</div></div>' +
+        '<div class="stat"><div class="val">' + fmtMoney(s.totalDepositedUsd || 0) + '</div><div class="lbl">Total deposited</div></div>' +
+        '<div class="stat"><div class="val">' + fmtMoney(s.totalOpenProfitUsd || 0) + '</div><div class="lbl">Open P/L</div></div>';
+      const accBody = document.getElementById('ltAccountRows');
+      accBody.innerHTML = '';
+      (data.accounts || []).forEach((a) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(a.userEmail) + '</td>' +
+          '<td>' + escapeHtml(a.botType || '—') + '</td>' +
+          '<td>' + escapeHtml(a.accountName || '—') + '</td>' +
+          '<td>' + fmtMoney(a.depositedBalance) + '</td>' +
+          '<td>' + fmtMoney(a.openProfit) + '</td>' +
+          '<td>' + fmtMoney(a.displayBalance) + '</td>';
+        accBody.appendChild(tr);
+      });
+      if (!(data.accounts || []).length) {
+        accBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No platform accounts</td></tr>';
+      }
+      const txBody = document.getElementById('ltTransferRows');
+      txBody.innerHTML = '';
+      (data.transfers || []).forEach((t) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(t.userId?.slice(0, 8) || '—') + '</td>' +
+          '<td>' + escapeHtml(t.direction) + '</td>' +
+          '<td>' + fmtMoney(t.amount) + '</td>' +
+          '<td>' + new Date(t.createdAt).toLocaleString() + '</td>';
+        txBody.appendChild(tr);
+      });
+      if (!(data.transfers || []).length) {
+        txBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No transfers</td></tr>';
+      }
     }
 
     function showTiersErr(e) {
@@ -3066,6 +3192,8 @@
           }),
         });
         localStorage.setItem(TOKEN_KEY, data.token);
+        adminRole = data.role || 'admin';
+        applyAdminRoleUI();
         showDash();
         setTab('users');
       } catch (e) {
@@ -3118,6 +3246,44 @@
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
     document.getElementById('userTradeAddBtn').onclick = () => addUserTrade();
+
+    async function sendDirectDrop() {
+      clearUserPageAlert();
+      const okEl = document.getElementById('directDropOk');
+      if (okEl) okEl.classList.add('hidden');
+      if (!viewingUserId) return;
+      const delayVal = Number(document.getElementById('directDropDelay').value);
+      const unit = document.getElementById('directDropDelayUnit').value;
+      const delayMinutes = unit === 'hours' ? delayVal * 60 : delayVal;
+      const percent = Number(document.getElementById('directDropPercent').value);
+      const minBalance = Number(document.getElementById('directDropMin').value);
+      const maxBalance = Number(document.getElementById('directDropMax').value);
+      if (!Number.isFinite(percent) || percent <= 0) {
+        showUserPageAlert('Enter a valid drop percent', 'error');
+        return;
+      }
+      if (!Number.isFinite(minBalance) || !Number.isFinite(maxBalance) || maxBalance < minBalance) {
+        showUserPageAlert('Invalid min/max balance window', 'error');
+        return;
+      }
+      try {
+        const res = await api('/admin/api/users/' + viewingUserId + '/drops/direct', {
+          method: 'POST',
+          body: JSON.stringify({ delayMinutes, percent, minBalance, maxBalance }),
+        });
+        const due = res.drop?.dueAt ? new Date(res.drop.dueAt).toLocaleString() : '—';
+        if (okEl) {
+          okEl.textContent = 'Direct drop scheduled for ' + due + ' (' + res.drop.percent + '%).';
+          okEl.classList.remove('hidden');
+        }
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to send direct drop', 'error');
+      }
+    }
+
+    document.getElementById('sendDirectDropBtn').onclick = () => sendDirectDrop();
     async function sendAdminNotification() {
       document.getElementById('notifyErr').classList.add('hidden');
       document.getElementById('notifyOk').classList.add('hidden');
@@ -3167,6 +3333,8 @@
       api('/admin/api/me')
         .then((me) => {
           document.getElementById('adminUserLabel').textContent = me.username || 'admin';
+          adminRole = me.role || 'admin';
+          applyAdminRoleUI();
           showDash();
           setTab('users');
         })

@@ -1,6 +1,11 @@
 const INTERNAL_PATTERNS = [
   'supabase',
   'metaapi',
+  'mt5',
+  'bridge',
+  'ema',
+  'ea ',
+  'webhook',
   'nowpayments',
   'tatum',
   'render.com',

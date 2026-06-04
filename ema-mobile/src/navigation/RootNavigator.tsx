@@ -6,6 +6,10 @@ import { VipFarmersTradeScreen } from '../screens/VipFarmersTradeScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
 import { TradeHistoryScreen } from '../screens/TradeHistoryScreen';
+import { LiveTradingScreen } from '../screens/LiveTradingScreen';
+import { LiveTradingCreateBotScreen } from '../screens/LiveTradingCreateBotScreen';
+import { LiveTradingCreateSetupScreen } from '../screens/LiveTradingCreateSetupScreen';
+import { LiveTradingAccountScreen } from '../screens/LiveTradingAccountScreen';
 import { NotificationsScreen } from '../screens/NotificationsScreen';
 import { TransactionHistoryScreen } from '../screens/TransactionHistoryScreen';
 import { TransactionDetailScreen } from '../screens/TransactionDetailScreen';
@@ -48,6 +52,10 @@ export function RootNavigator() {
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
       <Stack.Screen name='TradeHistory' component={TradeHistoryScreen} options={{ title: 'Trade history' }} />
+      <Stack.Screen name='LiveTrading' component={LiveTradingScreen} options={{ title: 'Live trading' }} />
+      <Stack.Screen name='LiveTradingCreateBot' component={LiveTradingCreateBotScreen} options={{ title: 'New account' }} />
+      <Stack.Screen name='LiveTradingCreateSetup' component={LiveTradingCreateSetupScreen} options={{ title: 'Setup' }} />
+      <Stack.Screen name='LiveTradingAccount' component={LiveTradingAccountScreen} options={{ title: 'Account' }} />
       <Stack.Screen name='Notifications' component={NotificationsScreen} options={{ title: 'Notifications' }} />
       <Stack.Screen name='TransactionHistory' component={TransactionHistoryScreen} options={{ title: 'Asset history' }} />
       <Stack.Screen

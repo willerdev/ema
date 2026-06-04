@@ -198,6 +198,13 @@ export function TradesHubScreen() {
         ) : null}
 
         <Card style={styles.hubCard}>
+          <Pressable onPress={() => navigation.navigate('LiveTrading')}>
+            <Text style={styles.cardTitle}>Live trading</Text>
+            <Text style={styles.cardMeta}>Platform accounts, live quotes, and open trades</Text>
+          </Pressable>
+        </Card>
+
+        <Card style={styles.hubCard}>
           <Pressable onPress={() => navigation.navigate('TradeHistory')}>
             <Text style={styles.cardTitle}>Trade history</Text>
             <Text style={styles.cardMeta}>View closed trades recorded on your account</Text>

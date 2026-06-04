@@ -32,7 +32,10 @@ const {
 } = require('./db');
 const { normalizeTargetUserId } = require('./notificationRoutes');
 const { approveWithdrawal, rejectWithdrawal } = require('./adminWithdrawals');
-const { adminAuthMiddleware, ADMIN_PURPOSE } = require('./middleware/adminAuth');
+const { adminAuthMiddleware, requireSuperAdmin, isSuperAdminUsername, ADMIN_PURPOSE } =
+  require('./middleware/adminAuth');
+const { createDirectDropForUser } = require('./directDropService');
+const { registerAdminLiveTradingRoutes } = require('./adminLiveTradingRoutes');
 const {
   clampAirfarmingPercent,
   MAX_AIRFARMING_PERCENT,
@@ -154,22 +157,24 @@ async function validateDropPatch(body) {
 
 function registerAdminRoutes(app) {
   registerAdminAiRoutes(app);
+  registerAdminLiveTradingRoutes(app, { adminAuthMiddleware });
   app.post('/admin/api/login', (req, res) => {
     const { username, password } = req.body || {};
     const creds = adminCredentials();
     if (String(username || '').trim() !== creds.username || String(password || '') !== creds.password) {
       return res.status(401).json({ message: 'Invalid admin credentials' });
     }
+    const role = isSuperAdminUsername(creds.username) ? 'superadmin' : 'admin';
     const token = jwt.sign(
-      { purpose: ADMIN_PURPOSE, sub: creds.username },
+      { purpose: ADMIN_PURPOSE, sub: creds.username, role },
       process.env.JWT_SECRET || 'ema-dev-secret',
       { expiresIn: '12h' }
     );
-    return res.json({ token, expiresInHours: 12 });
+    return res.json({ token, expiresInHours: 12, role });
   });
 
   app.get('/admin/api/me', adminAuthMiddleware, (req, res) => {
-    return res.json({ username: req.adminUser });
+    return res.json({ username: req.adminUser, role: req.adminRole });
   });
 
   app.get('/admin/api/users', adminAuthMiddleware, async (req, res) => {
@@ -345,6 +350,27 @@ function registerAdminRoutes(app) {
       if (isMissingTableError(e)) return res.status(503).json({ message: dropScheduleSchemaMsg });
       console.error('[admin/drop-schedule/ai-suggest]', e);
       return res.status(500).json({ message: e.message || 'AI suggest failed' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drops/direct', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const row = await createDirectDropForUser(req.params.id, req.body || {});
+      const emailByUserId = new Map([[user.id, user.email]]);
+      const pausedByUserId = await getAirfarmingDropsPausedByUserIds([user.id]);
+      return res.status(201).json({
+        ok: true,
+        drop: dropToAdminRow(row, emailByUserId, pausedByUserId),
+      });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming drops schema not ready.' });
+      }
+      console.error('[admin/users/:id/drops/direct]', e);
+      return res.status(500).json({ message: e.message || 'Failed to schedule direct drop' });
     }
   });
 

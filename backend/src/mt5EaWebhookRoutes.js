@@ -6,8 +6,11 @@ const {
   insertMt5EaTelemetry,
   listPendingMt5EaCommands,
   ackMt5EaCommand,
+  updateMt5EaPositionsSnapshot,
+  upsertMarketPriceRow,
   isMissingTableError,
 } = require('./db');
+const { priceRowFromPayload } = require('./services/priceFeedNormalize');
 
 function parseBearer(req) {
   const h = req.headers.authorization;
@@ -64,6 +67,13 @@ function registerMt5EaWebhookRoutes(app) {
         if (!account) return res.status(401).json({ message: 'Unauthorized' });
         const payload = req.body && typeof req.body === 'object' ? req.body : {};
         await insertMt5EaTelemetry({ mt5AccountId: account.id, payload });
+        if (Array.isArray(payload.positions) || payload.balance != null || payload.equity != null) {
+          await updateMt5EaPositionsSnapshot(account.id, {
+            positions: payload.positions,
+            balance: payload.balance,
+            equity: payload.equity,
+          });
+        }
         return res.json({ ok: true });
       } catch (e) {
         if (isMissingTableError(e)) {
@@ -88,11 +98,14 @@ function registerMt5EaWebhookRoutes(app) {
         commands: rows.map((r) => ({
           id: r.id,
           clientId: r.client_id,
+          commandType: r.command_type || 'place_order',
           side: r.side,
           symbol: r.symbol,
           volume: Number(r.volume),
           stopLoss: r.stop_loss != null ? Number(r.stop_loss) : null,
           takeProfit: r.take_profit != null ? Number(r.take_profit) : null,
+          positionTicket: r.position_ticket != null ? Number(r.position_ticket) : null,
+          closeSide: r.close_side || null,
           magic: r.magic,
           createdAt: r.created_at,
         })),
@@ -133,6 +146,46 @@ function registerMt5EaWebhookRoutes(app) {
       return res.status(500).json({ message: e?.message || 'ack failed' });
     }
   });
+
+  router.post(
+    '/prices',
+    express.json({ limit: '1mb' }),
+    async (req, res) => {
+      try {
+        const secret = process.env.MT5_PRICE_FEED_SECRET;
+        const got = req.headers['x-price-feed-secret'] || req.body?.secret;
+        if (!secret || String(got || '') !== String(secret)) {
+          return res.status(401).json({ message: 'Unauthorized' });
+        }
+        const items = Array.isArray(req.body?.prices) ? req.body.prices : Array.isArray(req.body) ? req.body : [];
+        const now = new Date().toISOString();
+        const today = now.slice(0, 10);
+        let updated = 0;
+        for (const item of items) {
+          const row = priceRowFromPayload(item);
+          if (!row) continue;
+          await upsertMarketPriceRow({
+            symbol: row.symbol,
+            bid: row.bid,
+            ask: row.ask,
+            updated_at: now,
+            day_open: row.dayOpen,
+            day_high: row.dayHigh,
+            day_low: row.dayLow,
+            day_stats_date: today,
+          });
+          updated += 1;
+        }
+        return res.json({ ok: true, updated });
+      } catch (e) {
+        if (isMissingTableError(e)) {
+          return res.status(503).json({ message: 'Market prices schema missing.' });
+        }
+        console.error('mt5-ea prices', e);
+        return res.status(500).json({ message: e?.message || 'prices failed' });
+      }
+    }
+  );
 
   app.use('/webhooks/mt5-ea', router);
 }
