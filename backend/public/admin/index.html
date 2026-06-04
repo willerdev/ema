@@ -33,6 +33,19 @@
     .hidden { display: none !important; }
     .superadmin-only { display: none !important; }
     body.role-superadmin .superadmin-only { display: block !important; }
+    .direct-drop-card {
+      border: 1px solid rgba(201, 162, 39, 0.45);
+      background: var(--gold-dim);
+    }
+    .role-hint {
+      margin: 0 0 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: rgba(251, 191, 36, 0.12);
+      border: 1px solid rgba(251, 191, 36, 0.35);
+      font-size: 0.85rem;
+      color: var(--warn);
+    }
 
     /* Mobile-style login */
     .login-screen {
@@ -604,6 +617,7 @@
         </div>
         <div class="topbar-actions">
           <span id="adminUserLabel" style="color:var(--muted);font-size:0.85rem;"></span>
+          <span id="adminRoleBadge" style="font-size:0.75rem;margin-left:8px;"></span>
         </div>
       </header>
 
@@ -664,9 +678,9 @@
                 </div>
               </section>
 
-              <section id="directDropSection" class="card admin-section superadmin-only">
-                <h3 class="admin-section-title">Send direct drop</h3>
-                <p class="admin-section-desc">Schedule a one-off VIP-priority drop for this user (runs before other scheduled drops this week).</p>
+              <section id="directDropSection" class="card admin-section direct-drop-card">
+                <h3 class="admin-section-title">VIP priority drop</h3>
+                <p class="admin-section-desc">Schedule a one-off VIP-priority drop for this user (runs before other scheduled drops this week). Open any user from <strong>Users</strong> to use this form.</p>
                 <div class="form-grid-2">
                   <div>
                     <label>Delay</label>
@@ -731,10 +745,24 @@
 
               <section class="card admin-section">
                 <h3 class="admin-section-title">Scheduled drops</h3>
-                <p class="admin-section-desc">Upcoming airfarming drops for this user (current week).</p>
+                <p class="admin-section-desc">Required balance window (min–max USD) for each upcoming drop. Edit one row or apply the same window to all scheduled drops.</p>
+                <div class="form-grid-2" style="margin-bottom:14px;">
+                  <div>
+                    <label>Required min balance (USD)</label>
+                    <input id="userBalanceMin" type="number" min="0" step="0.01" placeholder="100" />
+                  </div>
+                  <div>
+                    <label>Required max balance (USD)</label>
+                    <input id="userBalanceMax" type="number" min="0" step="0.01" placeholder="500" />
+                  </div>
+                </div>
+                <div class="btn-toolbar" style="margin-bottom:14px;">
+                  <button type="button" class="btn-primary" id="applyUserBalanceWindowBtn">Apply to all scheduled drops</button>
+                </div>
+                <p id="userBalanceWindowOk" class="section-inline-ok hidden"></p>
                 <div class="table-scroll">
                   <table>
-                    <thead><tr><th>#</th><th>Due</th><th>%</th><th>Tier &amp; balance window</th></tr></thead>
+                    <thead><tr><th>#</th><th>Due</th><th>%</th><th>Required balance</th><th></th></tr></thead>
                     <tbody id="userDropRows"></tbody>
                   </table>
                 </div>
@@ -1369,6 +1397,7 @@
     let users = [];
     let tickets = [];
     let editingId = null;
+    let editingFromUserPage = false;
     let maxPercent = 57.9;
     let maxProfitPerDrop = 5000;
     let activeTab = 'users';
@@ -1391,6 +1420,11 @@
 
     function applyAdminRoleUI() {
       document.body.classList.toggle('role-superadmin', adminRole === 'superadmin');
+      const badge = document.getElementById('adminRoleBadge');
+      if (badge) {
+        badge.textContent = adminRole === 'superadmin' ? 'Superadmin' : 'Admin';
+        badge.style.color = adminRole === 'superadmin' ? 'var(--gold)' : 'var(--muted)';
+      }
     }
 
     function api(path, opts = {}) {
@@ -1612,17 +1646,87 @@
       }
       const dropBody = document.getElementById('userDropRows');
       dropBody.innerHTML = '';
-      (d.scheduledDrops || []).forEach((drop) => {
+      const scheduled = d.scheduledDrops || [];
+      scheduled.forEach((drop) => {
         const tr = document.createElement('tr');
+        const tier = drop.bandIndex != null ? escapeHtml(bandTierLabel(drop.bandIndex)) + '<br>' : '';
         tr.innerHTML =
           '<td>' + drop.dropIndex + '</td><td>' + new Date(drop.dueAt).toLocaleString() + '</td>' +
           '<td>' + drop.percent + '%</td>' +
-          '<td>' + escapeHtml(bandTierLabel(drop.bandIndex)) + '<br><span style="color:var(--muted);font-size:0.7rem;">$' +
-          drop.minBalance + ' – $' + drop.maxBalance + '</span></td>';
+          '<td>' + tier + '<span style="color:var(--muted);font-size:0.85rem;">$' +
+          drop.minBalance + ' – $' + drop.maxBalance + '</span></td>' +
+          '<td><button type="button" class="btn-ghost btn-sm" data-drop-edit="' + escapeHtml(drop.id) + '">Edit</button></td>';
         dropBody.appendChild(tr);
       });
-      if (!(d.scheduledDrops || []).length) {
-        dropBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No scheduled drops</td></tr>';
+      dropBody.querySelectorAll('[data-drop-edit]').forEach((btn) => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-drop-edit');
+          const drop = scheduled.find((x) => x.id === id);
+          if (drop) openUserDropEdit(drop);
+        };
+      });
+      if (!scheduled.length) {
+        dropBody.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No scheduled drops</td></tr>';
+      }
+      const firstDrop = scheduled[0];
+      const balMin = document.getElementById('userBalanceMin');
+      const balMax = document.getElementById('userBalanceMax');
+      if (balMin && balMax) {
+        if (firstDrop) {
+          balMin.value = firstDrop.minBalance;
+          balMax.value = firstDrop.maxBalance;
+        } else {
+          const afBal = Number(d.airfarmingBalance) || 0;
+          balMin.value = afBal > 0 ? Math.max(0, Math.floor(afBal * 0.9)) : '';
+          balMax.value = afBal > 0 ? Math.ceil(afBal * 1.1) : '';
+        }
+      }
+      if (firstDrop) {
+        document.getElementById('directDropMin').value = firstDrop.minBalance;
+        document.getElementById('directDropMax').value = firstDrop.maxBalance;
+        document.getElementById('directDropPercent').value = firstDrop.percent;
+      }
+      const bwOk = document.getElementById('userBalanceWindowOk');
+      if (bwOk) bwOk.classList.add('hidden');
+    }
+
+    function openUserDropEdit(drop) {
+      editingFromUserPage = true;
+      editingId = drop.id;
+      document.getElementById('editMeta').textContent = 'User drop #' + drop.dropIndex;
+      document.getElementById('editPercent').value = drop.percent;
+      document.getElementById('editMin').value = drop.minBalance;
+      document.getElementById('editMax').value = drop.maxBalance;
+      document.getElementById('editDue').value = toLocalInput(drop.dueAt);
+      document.getElementById('editLocked').checked = true;
+      document.getElementById('editErr').classList.add('hidden');
+      document.getElementById('editModal').classList.remove('hidden');
+    }
+
+    async function applyUserBalanceWindow() {
+      clearUserPageAlert();
+      const okEl = document.getElementById('userBalanceWindowOk');
+      if (okEl) okEl.classList.add('hidden');
+      if (!viewingUserId) return;
+      const minBalance = Number(document.getElementById('userBalanceMin').value);
+      const maxBalance = Number(document.getElementById('userBalanceMax').value);
+      if (!Number.isFinite(minBalance) || !Number.isFinite(maxBalance) || maxBalance < minBalance) {
+        showUserPageAlert('Invalid min/max balance window', 'error');
+        return;
+      }
+      try {
+        const res = await api('/admin/api/users/' + viewingUserId + '/drops/balance-window', {
+          method: 'PATCH',
+          body: JSON.stringify({ minBalance, maxBalance }),
+        });
+        if (okEl) {
+          okEl.textContent = 'Updated required balance on ' + res.updatedCount + ' scheduled drop(s).';
+          okEl.classList.remove('hidden');
+        }
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to update balance window', 'error');
       }
     }
 
@@ -2029,6 +2133,12 @@
       userJournalMonthData = null;
       userDropPlanView = null;
       document.getElementById('userDropPlanWeek').value = mondayUtcYmdClient();
+      const ddOk = document.getElementById('directDropOk');
+      if (ddOk) ddOk.classList.add('hidden');
+      ['directDropPercent', 'directDropMin', 'directDropMax'].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
       chartDepositsInst = destroyChart(chartDepositsInst);
       chartProfitsInst = destroyChart(chartProfitsInst);
       document.getElementById('panelUsersList').classList.add('hidden');
@@ -2683,6 +2793,7 @@
     function openEdit(id) {
       const d = drops.find((x) => x.id === id);
       if (!d) return;
+      editingFromUserPage = false;
       editingId = id;
       document.getElementById('editMeta').textContent = d.userEmail + ' · drop #' + d.dropIndex;
       document.getElementById('editPercent').value = d.percent;
@@ -2704,15 +2815,25 @@
           dueAt: new Date(document.getElementById('editDue').value).toISOString(),
           percentLocked: document.getElementById('editLocked').checked,
         };
-        const data = await api('/admin/api/airfarming/drops/' + editingId, {
-          method: 'PATCH',
-          body: JSON.stringify(body),
-        });
-        const idx = drops.findIndex((x) => x.id === editingId);
-        if (idx >= 0) drops[idx] = data.drop;
-        renderDropsTable();
+        if (editingFromUserPage && viewingUserId) {
+          await api('/admin/api/users/' + viewingUserId + '/drops/' + editingId, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+          });
+          const d = await api('/admin/api/users/' + viewingUserId);
+          renderUserDetail(d);
+        } else {
+          const data = await api('/admin/api/airfarming/drops/' + editingId, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+          });
+          const idx = drops.findIndex((x) => x.id === editingId);
+          if (idx >= 0) drops[idx] = data.drop;
+          renderDropsTable();
+        }
         closeModal('editModal');
         editingId = null;
+        editingFromUserPage = false;
       } catch (e) {
         document.getElementById('editErr').textContent = e.message;
         document.getElementById('editErr').classList.remove('hidden');
@@ -3284,6 +3405,7 @@
     }
 
     document.getElementById('sendDirectDropBtn').onclick = () => sendDirectDrop();
+    document.getElementById('applyUserBalanceWindowBtn').onclick = () => applyUserBalanceWindow();
     async function sendAdminNotification() {
       document.getElementById('notifyErr').classList.add('hidden');
       document.getElementById('notifyOk').classList.add('hidden');

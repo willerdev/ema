@@ -32,9 +32,10 @@ const {
 } = require('./db');
 const { normalizeTargetUserId } = require('./notificationRoutes');
 const { approveWithdrawal, rejectWithdrawal } = require('./adminWithdrawals');
-const { adminAuthMiddleware, requireSuperAdmin, isSuperAdminUsername, ADMIN_PURPOSE } =
+const { adminAuthMiddleware, isSuperAdminUsername, ADMIN_PURPOSE } =
   require('./middleware/adminAuth');
 const { createDirectDropForUser } = require('./directDropService');
+const { updateUserScheduledDropsBalanceWindow } = require('./userDropBalanceService');
 const { registerAdminLiveTradingRoutes } = require('./adminLiveTradingRoutes');
 const {
   clampAirfarmingPercent,
@@ -353,7 +354,77 @@ function registerAdminRoutes(app) {
     }
   });
 
-  app.post('/admin/api/users/:id/drops/direct', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.patch('/admin/api/users/:id/drops/balance-window', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const minBalance = Number(req.body?.minBalance);
+      const maxBalance = Number(req.body?.maxBalance);
+      if (!Number.isFinite(minBalance) || !Number.isFinite(maxBalance)) {
+        return res.status(400).json({ message: 'minBalance and maxBalance are required' });
+      }
+      const result = await updateUserScheduledDropsBalanceWindow(req.params.id, minBalance, maxBalance);
+      return res.json({
+        ok: true,
+        updatedCount: result.updatedCount,
+        drops: result.drops.map((d) => ({
+          id: d.id,
+          dropIndex: Number(d.drop_index),
+          minBalance: Number(d.min_balance),
+          maxBalance: Number(d.max_balance),
+        })),
+      });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming drops schema not ready.' });
+      }
+      console.error('[admin/users/:id/drops/balance-window]', e);
+      return res.status(500).json({ message: e.message || 'Failed to update balance window' });
+    }
+  });
+
+  app.patch('/admin/api/users/:id/drops/:dropId', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const existing = await getAirfarmingDropById(req.params.dropId);
+      if (!existing || existing.user_id !== user.id) {
+        return res.status(404).json({ message: 'Drop not found' });
+      }
+      if (existing.status !== 'scheduled') {
+        return res.status(400).json({ message: 'Only scheduled drops can be edited' });
+      }
+      const { patch, error } = await validateDropPatch(req.body || {});
+      if (error) return res.status(400).json({ message: error });
+      const minBal = patch.min_balance != null ? patch.min_balance : Number(existing.min_balance);
+      const maxBal = patch.max_balance != null ? patch.max_balance : Number(existing.max_balance);
+      if (maxBal < minBal) {
+        return res.status(400).json({ message: 'maxBalance must be >= minBalance' });
+      }
+      const updated = await updateAirfarmingDrop(existing.id, patch);
+      return res.json({
+        drop: {
+          id: updated.id,
+          dropIndex: Number(updated.drop_index),
+          dueAt: updated.due_at,
+          percent: Number(updated.percent),
+          minBalance: Number(updated.min_balance),
+          maxBalance: Number(updated.max_balance),
+          bandIndex: updated.band_index,
+          status: updated.status,
+        },
+      });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming drops schema not ready.' });
+      }
+      console.error('[admin/users/:id/drops/:dropId]', e);
+      return res.status(500).json({ message: e.message || 'Failed to update drop' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drops/direct', adminAuthMiddleware, async (req, res) => {
     try {
       const user = await getUserById(req.params.id);
       if (!user) return res.status(404).json({ message: 'User not found' });

@@ -1037,6 +1037,7 @@ async function getAdminUserDetail(userId) {
       percent: Number(d.percent),
       minBalance: Number(d.min_balance),
       maxBalance: Number(d.max_balance),
+      bandIndex: d.band_index,
       status: d.status,
     })),
   };
