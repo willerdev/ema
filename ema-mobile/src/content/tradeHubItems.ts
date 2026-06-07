@@ -19,7 +19,7 @@ export const TRADE_HUB_ITEMS: TradeHubItem[] = [
   {
     id: 'vip',
     title: 'Live VIP Farmers',
-    meta: '30-day lock · 9% daily on principal to cash',
+    meta: '30 weekday accruals · 9% daily Mon–Fri to cash',
     roi: 'Locked yield program',
     route: 'VipFarmersTrade',
   },

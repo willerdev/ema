@@ -9,9 +9,17 @@ export type VipInvestment = {
   totalAccruedUsd: number;
   daysAccrued: number;
   daysLeft: number;
+  calendarDaysLeft?: number;
   matured: boolean;
   dailyRate: number;
   lockDays: number;
+  accrualWeekdays?: number;
+  dailyInterestUsd?: number;
+  remainingInterestUsd?: number;
+  remainingAccrualDays?: number;
+  todayIsAccrualDay?: boolean;
+  todayAccrued?: boolean;
+  todayInterestUsd?: number;
 };
 
 export type VipAccrual = {
@@ -31,6 +39,7 @@ export type VipSummary = {
   minInvestUsd: number;
   dailyRate: number;
   commissionRate?: number;
+  accrualWeekdays?: number;
   lockDays: number;
   earlyPenaltyRate: number;
   investment: VipInvestment | null;

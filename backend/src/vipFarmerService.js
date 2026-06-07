@@ -13,6 +13,7 @@ const {
   insertVipAccrual,
   VIP_DAILY_RATE,
   VIP_COMMISSION_RATE,
+  VIP_ACCRUAL_WEEKDAYS,
   VIP_LOCK_DAYS,
   VIP_MIN_INVEST_USD,
   VIP_EARLY_PENALTY_RATE,
@@ -21,6 +22,7 @@ const {
   listVipAccrualsForUserRecent,
   utcTodayYmd,
 } = require('./db');
+const { addUtcWeekdays, isVipAccrualDayYmd } = require('./vipFarmerSchedule');
 
 function newId() {
   return crypto.randomUUID();
@@ -30,10 +32,24 @@ function roundUsd(n) {
   return Math.round(Number(n || 0) * 100) / 100;
 }
 
-function addDaysUtc(iso, days) {
-  const d = new Date(iso);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString();
+function maturityAtFromStart(startedAt) {
+  return addUtcWeekdays(startedAt, VIP_LOCK_DAYS);
+}
+
+async function enrichVipInvestmentApi(inv) {
+  const api = vipInvestmentToApi(inv);
+  if (!api || inv.status !== 'active') return api;
+  const today = utcTodayYmd();
+  const todayIsAccrualDay = isVipAccrualDayYmd(today);
+  const todayAccrued = todayIsAccrualDay
+    ? Boolean(await getVipAccrualForInvestmentDay(inv.id, today))
+    : false;
+  return {
+    ...api,
+    todayIsAccrualDay,
+    todayAccrued,
+    todayInterestUsd: todayIsAccrualDay && !todayAccrued ? api.dailyInterestUsd : 0,
+  };
 }
 
 async function getVipSummary(userId) {
@@ -45,9 +61,10 @@ async function getVipSummary(userId) {
     minInvestUsd: VIP_MIN_INVEST_USD,
     dailyRate: VIP_DAILY_RATE,
     commissionRate: VIP_COMMISSION_RATE,
+    accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
     lockDays: VIP_LOCK_DAYS,
     earlyPenaltyRate: VIP_EARLY_PENALTY_RATE,
-    investment: vipInvestmentToApi(inv),
+    investment: await enrichVipInvestmentApi(inv),
   };
 }
 
@@ -83,7 +100,7 @@ async function investVip(userId, amount) {
   }
 
   const now = new Date().toISOString();
-  const maturesAt = addDaysUtc(now, VIP_LOCK_DAYS);
+  const maturesAt = maturityAtFromStart(now);
   await setWalletBalance(userId, roundUsd(cash - amt));
   const row = await createVipInvestment({
     userId,
@@ -92,7 +109,7 @@ async function investVip(userId, amount) {
     maturesAt,
   });
 
-  return { investment: vipInvestmentToApi(row), cashWalletUsd: roundUsd(cash - amt) };
+  return { investment: await enrichVipInvestmentApi(row), cashWalletUsd: roundUsd(cash - amt) };
 }
 
 async function addCapitalVip(userId, amount) {
@@ -119,7 +136,7 @@ async function addCapitalVip(userId, amount) {
   }
 
   const now = new Date().toISOString();
-  const maturesAt = addDaysUtc(now, VIP_LOCK_DAYS);
+  const maturesAt = maturityAtFromStart(now);
   const newPrincipal = roundUsd(Number(inv.principal_usd) + amt);
   await setWalletBalance(userId, roundUsd(cash - amt));
   const row = await updateVipInvestment(inv.id, {
@@ -131,7 +148,7 @@ async function addCapitalVip(userId, amount) {
   });
 
   return {
-    investment: vipInvestmentToApi(row),
+    investment: await enrichVipInvestmentApi(row),
     cashWalletUsd: roundUsd(cash - amt),
     addedUsd: amt,
     lockReset: true,
@@ -145,8 +162,10 @@ async function withdrawVipAtMaturity(userId) {
     err.statusCode = 400;
     throw err;
   }
-  if (Date.now() < new Date(inv.matures_at).getTime()) {
-    const err = new Error('Investment is still locked until maturity date');
+  const accrualsComplete = Number(inv.days_accrued) >= VIP_LOCK_DAYS;
+  const calendarMature = Date.now() >= new Date(inv.matures_at).getTime();
+  if (!accrualsComplete && !calendarMature) {
+    const err = new Error('Investment is still locked until all weekday accruals complete');
     err.statusCode = 400;
     throw err;
   }
@@ -216,7 +235,13 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
   let applied = 0;
   let skipped = 0;
 
+  const isAccrualDay = isVipAccrualDayYmd(planDate);
+
   for (const inv of rows) {
+    if (!isAccrualDay) {
+      skipped += 1;
+      continue;
+    }
     if (Number(inv.days_accrued) >= VIP_LOCK_DAYS) {
       skipped += 1;
       continue;
@@ -267,7 +292,14 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
     applied += 1;
   }
 
-  return { ok: true, planDate, investmentsChecked: rows.length, accrualsApplied: applied, skipped };
+  return {
+    ok: true,
+    planDate,
+    isAccrualDay,
+    investmentsChecked: rows.length,
+    accrualsApplied: applied,
+    skipped,
+  };
 }
 
 module.exports = {

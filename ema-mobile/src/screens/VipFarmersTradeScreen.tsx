@@ -12,7 +12,7 @@ function fmtUsd(n: number) {
 export function VipFarmersTradeScreen() {
   const [summary, setSummary] = useState<VipSummary | null>(null);
   const [accruals, setAccruals] = useState<VipAccrual[]>([]);
-  const [commissionRate, setCommissionRate] = useState(0.3);
+  const [commissionRate, setCommissionRate] = useState(0);
   const [amount, setAmount] = useState('');
   const [addAmount, setAddAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +23,11 @@ export function VipFarmersTradeScreen() {
     try {
       const s = await vipFarmerService.getSummary();
       setSummary(s);
-      setCommissionRate(s.commissionRate ?? 0.3);
+      setCommissionRate(s.commissionRate ?? 0);
       try {
         const hist = await vipFarmerService.getAccruals(60);
         setAccruals(hist.accruals || []);
-        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
+        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0);
       } catch {
         setAccruals([]);
       }
@@ -84,7 +84,7 @@ export function VipFarmersTradeScreen() {
     if (!n || n <= 0) return Alert.alert('Amount', 'Enter a valid amount');
     Alert.alert(
       'Add capital',
-      'Adding funds increases your principal and restarts the 30-day lock from today. Daily accrual resets to day 0.',
+      'Adding funds increases your principal and restarts the 30-weekday accrual lock from today.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -144,9 +144,8 @@ export function VipFarmersTradeScreen() {
     >
       <Text style={styles.title}>Live VIP Farmers</Text>
       <Text style={styles.sub}>
-        30-day lock · {(summary?.dailyRate ?? 0.09) * 100}% daily gross on principal ·{' '}
-        {Math.round((summary?.commissionRate ?? commissionRate) * 100)}% platform fee on interest · net paid to cash · Min{' '}
-        {fmtUsd(summary?.minInvestUsd ?? 100)}
+        {summary?.lockDays ?? 30} weekday accruals (Mon–Fri) · {(summary?.dailyRate ?? 0.09) * 100}% daily on principal
+        paid to cash · Min {fmtUsd(summary?.minInvestUsd ?? 100)}
       </Text>
 
       {error ? (
@@ -167,10 +166,23 @@ export function VipFarmersTradeScreen() {
               <Text style={styles.label}>Active investment</Text>
               <Text style={styles.big}>{fmtUsd(inv.principalUsd)}</Text>
               <Text style={styles.meta}>Earned so far: {fmtUsd(inv.totalAccruedUsd)}</Text>
-              <Text style={styles.meta}>
-                Days {inv.daysAccrued}/{inv.lockDays} · {inv.daysLeft} day{inv.daysLeft === 1 ? '' : 's'} left
+              <Text style={styles.highlight}>
+                Daily interest: {fmtUsd(inv.dailyInterestUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09))}
               </Text>
-              <Text style={styles.meta}>Matures {new Date(inv.maturesAt).toLocaleString()}</Text>
+              <Text style={styles.highlight}>
+                Remaining interest: {fmtUsd(inv.remainingInterestUsd ?? 0)} ({inv.remainingAccrualDays ?? inv.daysLeft}{' '}
+                weekday{inv.remainingAccrualDays === 1 || inv.daysLeft === 1 ? '' : 's'} left)
+              </Text>
+              {inv.todayIsAccrualDay && !inv.todayAccrued && (inv.todayInterestUsd ?? 0) > 0 ? (
+                <Text style={styles.meta}>Today&apos;s payout pending: {fmtUsd(inv.todayInterestUsd ?? 0)}</Text>
+              ) : null}
+              {inv.todayIsAccrualDay === false ? (
+                <Text style={styles.meta}>No accrual on weekends — next payout on the next weekday.</Text>
+              ) : null}
+              <Text style={styles.meta}>
+                Weekdays accrued {inv.daysAccrued}/{inv.lockDays}
+              </Text>
+              <Text style={styles.meta}>Est. maturity {new Date(inv.maturesAt).toLocaleString()}</Text>
               {!inv.matured ? (
                 <>
                   <Text style={[styles.disclaimer, { marginTop: 10 }]}>
@@ -210,7 +222,7 @@ export function VipFarmersTradeScreen() {
                 keyboardType='numeric'
               />
               <Text style={styles.disclaimer}>
-                Funds are locked for 30 UTC days. No withdrawal before maturity except early exit with penalty.
+                Principal is locked for 30 weekday accruals (Mon–Fri). Early exit has a penalty.
               </Text>
               <PrimaryButton label='Start VIP lock' onPress={() => void onInvest()} style={{ marginTop: 8 }} />
             </Card>
@@ -218,9 +230,7 @@ export function VipFarmersTradeScreen() {
 
           <Card>
             <Text style={styles.label}>Interest history</Text>
-            <Text style={styles.disclaimer}>
-              Daily gross interest on principal, minus {Math.round(commissionRate * 100)}% platform commission. Net is credited to cash.
-            </Text>
+            <Text style={styles.disclaimer}>Weekday payouts (Mon–Fri UTC) credited to your cash wallet.</Text>
             {accruals.length === 0 ? (
               <Text style={[styles.meta, { marginTop: 8 }]}>No interest payouts yet.</Text>
             ) : (
@@ -228,9 +238,11 @@ export function VipFarmersTradeScreen() {
                 <View key={a.id} style={styles.accrualRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.accrualDate}>{a.accrualDate}</Text>
-                    <Text style={styles.meta}>
-                      Gross {fmtUsd(a.grossUsd)} · Fee {fmtUsd(a.commissionUsd)}
-                    </Text>
+                    {commissionRate > 0 ? (
+                      <Text style={styles.meta}>
+                        Gross {fmtUsd(a.grossUsd)} · Fee {fmtUsd(a.commissionUsd)}
+                      </Text>
+                    ) : null}
                   </View>
                   <Text style={styles.accrualNet}>+{fmtUsd(a.netUsd)}</Text>
                 </View>
@@ -254,6 +266,7 @@ const styles = StyleSheet.create({
   label: { color: palette.textSecondary, marginBottom: 6 },
   big: { color: palette.primary, fontSize: 28, fontWeight: '800' },
   meta: { color: palette.textSecondary, marginTop: 4, fontSize: 13 },
+  highlight: { color: palette.textPrimary, marginTop: 6, fontSize: 14, fontWeight: '700' },
   input: {
     backgroundColor: palette.surfaceElevated,
     borderWidth: 1,

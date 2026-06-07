@@ -2901,7 +2901,8 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
-const VIP_COMMISSION_RATE = 0.3;
+const VIP_COMMISSION_RATE = 0;
+const VIP_ACCRUAL_WEEKDAYS = 5;
 const VIP_LOCK_DAYS = 30;
 const VIP_MIN_INVEST_USD = 100;
 const VIP_EARLY_PENALTY_RATE = 0.3;
@@ -2912,9 +2913,14 @@ function roundWalletUsd(value) {
 
 function vipInvestmentToApi(row) {
   if (!row) return null;
+  const { vipInterestProjection } = require('./vipFarmerSchedule');
   const now = Date.now();
   const maturesMs = new Date(row.matures_at).getTime();
-  const daysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
+  const daysAccrued = Number(row.days_accrued);
+  const accrualDaysLeft = Math.max(0, VIP_LOCK_DAYS - daysAccrued);
+  const calendarDaysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
+  const projection = vipInterestProjection(row.principal_usd, daysAccrued, VIP_LOCK_DAYS, VIP_DAILY_RATE);
+  const accrualsComplete = daysAccrued >= VIP_LOCK_DAYS;
   return {
     id: row.id,
     userId: row.user_id,
@@ -2923,11 +2929,16 @@ function vipInvestmentToApi(row) {
     maturesAt: row.matures_at,
     status: row.status,
     totalAccruedUsd: Number(row.total_accrued_usd),
-    daysAccrued: Number(row.days_accrued),
-    daysLeft,
-    matured: now >= maturesMs,
+    daysAccrued,
+    daysLeft: accrualDaysLeft,
+    calendarDaysLeft,
+    matured: accrualsComplete || now >= maturesMs,
     dailyRate: VIP_DAILY_RATE,
     lockDays: VIP_LOCK_DAYS,
+    accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
+    dailyInterestUsd: projection.dailyInterestUsd,
+    remainingInterestUsd: projection.remainingInterestUsd,
+    remainingAccrualDays: projection.remainingAccrualDays,
   };
 }
 
@@ -3610,6 +3621,7 @@ module.exports = {
   listPendingLocalMoneyWithdrawalsByUserId,
   VIP_DAILY_RATE,
   VIP_COMMISSION_RATE,
+  VIP_ACCRUAL_WEEKDAYS,
   VIP_LOCK_DAYS,
   VIP_MIN_INVEST_USD,
   VIP_EARLY_PENALTY_RATE,
