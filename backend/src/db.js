@@ -1139,6 +1139,18 @@ async function getAirfarmingDropById(id) {
   return data;
 }
 
+async function deleteScheduledAirfarmingDrop(id) {
+  const { data, error } = await supabase
+    .from('airfarming_drops')
+    .delete()
+    .eq('id', id)
+    .eq('status', 'scheduled')
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 async function listScheduledAirfarmingDropsAdmin({ upcomingOnly = false, limit = 500 } = {}) {
   let query = supabase
     .from('airfarming_drops')
@@ -2901,7 +2913,7 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
-const VIP_COMMISSION_RATE = 0;
+const VIP_COMMISSION_RATE = 0.3;
 const VIP_ACCRUAL_WEEKDAYS = 5;
 const VIP_LOCK_DAYS = 30;
 const VIP_MIN_INVEST_USD = 100;
@@ -2919,7 +2931,13 @@ function vipInvestmentToApi(row) {
   const daysAccrued = Number(row.days_accrued);
   const accrualDaysLeft = Math.max(0, VIP_LOCK_DAYS - daysAccrued);
   const calendarDaysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
-  const projection = vipInterestProjection(row.principal_usd, daysAccrued, VIP_LOCK_DAYS, VIP_DAILY_RATE);
+  const projection = vipInterestProjection(
+    row.principal_usd,
+    daysAccrued,
+    VIP_LOCK_DAYS,
+    VIP_DAILY_RATE,
+    VIP_COMMISSION_RATE
+  );
   const accrualsComplete = daysAccrued >= VIP_LOCK_DAYS;
   return {
     id: row.id,
@@ -2936,6 +2954,9 @@ function vipInvestmentToApi(row) {
     dailyRate: VIP_DAILY_RATE,
     lockDays: VIP_LOCK_DAYS,
     accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
+    commissionRate: VIP_COMMISSION_RATE,
+    dailyGrossUsd: projection.dailyGrossUsd,
+    dailyPlatformFeeUsd: projection.dailyPlatformFeeUsd,
     dailyInterestUsd: projection.dailyInterestUsd,
     remainingInterestUsd: projection.remainingInterestUsd,
     remainingAccrualDays: projection.remainingAccrualDays,
@@ -3525,6 +3546,7 @@ module.exports = {
   insertAirfarmingDrop,
   updateAirfarmingDrop,
   getAirfarmingDropById,
+  deleteScheduledAirfarmingDrop,
   listScheduledAirfarmingDropsAdmin,
   getUsersByIds,
   listAirfarmingDropsByUserId,

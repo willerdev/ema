@@ -22,15 +22,24 @@ function addUtcWeekdays(startIso, weekdayCount) {
   return d.toISOString();
 }
 
-function vipInterestProjection(principalUsd, daysAccrued, lockDays, dailyRate) {
+function vipInterestProjection(principalUsd, daysAccrued, lockDays, dailyRate, commissionRate = 0) {
   const principal = Math.round(Number(principalUsd || 0) * 100) / 100;
   const rate = Number(dailyRate) || 0;
+  const feeRate = Math.max(0, Number(commissionRate) || 0);
   const lock = Math.max(0, Number(lockDays) || 0);
   const accrued = Math.max(0, Number(daysAccrued) || 0);
-  const dailyInterestUsd = Math.round(principal * rate * 100) / 100;
+  const dailyGrossUsd = Math.round(principal * rate * 100) / 100;
+  const dailyPlatformFeeUsd = Math.round(dailyGrossUsd * feeRate * 100) / 100;
+  const dailyInterestUsd = Math.round((dailyGrossUsd - dailyPlatformFeeUsd) * 100) / 100;
   const remainingAccrualDays = Math.max(0, lock - accrued);
   const remainingInterestUsd = Math.round(dailyInterestUsd * remainingAccrualDays * 100) / 100;
-  return { dailyInterestUsd, remainingAccrualDays, remainingInterestUsd };
+  return {
+    dailyGrossUsd,
+    dailyPlatformFeeUsd,
+    dailyInterestUsd,
+    remainingAccrualDays,
+    remainingInterestUsd,
+  };
 }
 
 module.exports = {

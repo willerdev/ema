@@ -14,6 +14,9 @@ export type VipInvestment = {
   dailyRate: number;
   lockDays: number;
   accrualWeekdays?: number;
+  commissionRate?: number;
+  dailyGrossUsd?: number;
+  dailyPlatformFeeUsd?: number;
   dailyInterestUsd?: number;
   remainingInterestUsd?: number;
   remainingAccrualDays?: number;

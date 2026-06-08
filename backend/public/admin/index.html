@@ -745,7 +745,7 @@
 
               <section class="card admin-section">
                 <h3 class="admin-section-title">Scheduled drops</h3>
-                <p class="admin-section-desc">Required balance window (min–max USD) for each upcoming drop. Edit one row or apply the same window to all scheduled drops.</p>
+                <p class="admin-section-desc">Required balance window (min–max USD) for each upcoming drop. Edit or delete individual rows, or apply the same window to all scheduled drops.</p>
                 <div class="form-grid-2" style="margin-bottom:14px;">
                   <div>
                     <label>Required min balance (USD)</label>
@@ -1655,7 +1655,9 @@
           '<td>' + drop.percent + '%</td>' +
           '<td>' + tier + '<span style="color:var(--muted);font-size:0.85rem;">$' +
           drop.minBalance + ' – $' + drop.maxBalance + '</span></td>' +
-          '<td><button type="button" class="btn-ghost btn-sm" data-drop-edit="' + escapeHtml(drop.id) + '">Edit</button></td>';
+          '<td style="white-space:nowrap;">' +
+          '<button type="button" class="btn-ghost btn-sm" data-drop-edit="' + escapeHtml(drop.id) + '">Edit</button> ' +
+          '<button type="button" class="btn-danger btn-sm" data-drop-delete="' + escapeHtml(drop.id) + '">Delete</button></td>';
         dropBody.appendChild(tr);
       });
       dropBody.querySelectorAll('[data-drop-edit]').forEach((btn) => {
@@ -1663,6 +1665,13 @@
           const id = btn.getAttribute('data-drop-edit');
           const drop = scheduled.find((x) => x.id === id);
           if (drop) openUserDropEdit(drop);
+        };
+      });
+      dropBody.querySelectorAll('[data-drop-delete]').forEach((btn) => {
+        btn.onclick = () => {
+          const id = btn.getAttribute('data-drop-delete');
+          const drop = scheduled.find((x) => x.id === id);
+          if (drop) void deleteUserDrop(drop);
         };
       });
       if (!scheduled.length) {
@@ -1701,6 +1710,39 @@
       document.getElementById('editLocked').checked = true;
       document.getElementById('editErr').classList.add('hidden');
       document.getElementById('editModal').classList.remove('hidden');
+    }
+
+    async function deleteUserDrop(drop) {
+      if (!viewingUserId || !drop) return;
+      const when = new Date(drop.dueAt).toLocaleString();
+      if (!confirm('Delete drop #' + drop.dropIndex + ' due ' + when + '? This cannot be undone.')) return;
+      clearUserPageAlert();
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/drops/' + drop.id, { method: 'DELETE' });
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        showUserPageAlert('Scheduled drop deleted.', 'success');
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to delete drop', 'error');
+      }
+    }
+
+    async function deleteDrop(id) {
+      const d = drops.find((x) => x.id === id);
+      if (!d) return;
+      const when = new Date(d.dueAt).toLocaleString();
+      if (!confirm('Delete drop for ' + d.userEmail + ' (#' + d.dropIndex + ', due ' + when + ')? This cannot be undone.')) {
+        return;
+      }
+      document.getElementById('loadErr').classList.add('hidden');
+      try {
+        await api('/admin/api/airfarming/drops/' + id, { method: 'DELETE' });
+        drops = drops.filter((x) => x.id !== id);
+        renderDropsTable();
+      } catch (e) {
+        document.getElementById('loadErr').textContent = e.message;
+        document.getElementById('loadErr').classList.remove('hidden');
+      }
     }
 
     async function applyUserBalanceWindow() {
@@ -2586,11 +2628,16 @@
           '<td><strong>' + d.percent + '%</strong>' + (d.percentLocked ? ' <span class="pill">locked</span>' : '') + '</td>' +
           '<td>$' + d.minBalance + '</td><td>$' + d.maxBalance + '</td>' +
           '<td>' + escapeHtml(bandTierLabel(d.bandIndex)) + '</td>' +
-          '<td><button type="button" class="btn-ghost" data-id="' + d.id + '">Edit</button></td>';
+          '<td style="white-space:nowrap;">' +
+          '<button type="button" class="btn-ghost" data-id="' + d.id + '">Edit</button> ' +
+          '<button type="button" class="btn-danger" data-delete-id="' + d.id + '">Delete</button></td>';
         tbody.appendChild(tr);
       });
       tbody.querySelectorAll('button[data-id]').forEach((btn) => {
         btn.onclick = () => openEdit(btn.getAttribute('data-id'));
+      });
+      tbody.querySelectorAll('button[data-delete-id]').forEach((btn) => {
+        btn.onclick = () => void deleteDrop(btn.getAttribute('data-delete-id'));
       });
       document.getElementById('stats').textContent = drops.length + ' scheduled drop(s) · max ' + maxPercent + '%';
     }

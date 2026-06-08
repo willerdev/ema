@@ -4,6 +4,7 @@ const {
   listScheduledAirfarmingDropsAdmin,
   getAirfarmingDropById,
   updateAirfarmingDrop,
+  deleteScheduledAirfarmingDrop,
   getUsersByIds,
   getUserById,
   updateUserPasswordHash,
@@ -381,6 +382,29 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/users/:id/drops/balance-window]', e);
       return res.status(500).json({ message: e.message || 'Failed to update balance window' });
+    }
+  });
+
+  app.delete('/admin/api/users/:id/drops/:dropId', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const existing = await getAirfarmingDropById(req.params.dropId);
+      if (!existing || existing.user_id !== user.id) {
+        return res.status(404).json({ message: 'Drop not found' });
+      }
+      if (existing.status !== 'scheduled') {
+        return res.status(400).json({ message: 'Only scheduled drops can be deleted' });
+      }
+      const deleted = await deleteScheduledAirfarmingDrop(existing.id);
+      if (!deleted) return res.status(404).json({ message: 'Drop not found or not scheduled' });
+      return res.json({ ok: true, deletedId: deleted.id });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming drops schema not ready.' });
+      }
+      console.error('[admin/users/:id/drops/:dropId DELETE]', e);
+      return res.status(500).json({ message: e.message || 'Failed to delete drop' });
     }
   });
 
@@ -939,6 +963,25 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/airfarming/drops/patch]', e);
       return res.status(500).json({ message: 'Failed to update drop' });
+    }
+  });
+
+  app.delete('/admin/api/airfarming/drops/:id', adminAuthMiddleware, async (req, res) => {
+    try {
+      const existing = await getAirfarmingDropById(req.params.id);
+      if (!existing) return res.status(404).json({ message: 'Drop not found' });
+      if (existing.status !== 'scheduled') {
+        return res.status(400).json({ message: 'Only scheduled drops can be deleted' });
+      }
+      const deleted = await deleteScheduledAirfarmingDrop(existing.id);
+      if (!deleted) return res.status(404).json({ message: 'Drop not found or not scheduled' });
+      return res.json({ ok: true, deletedId: deleted.id });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Airfarming drops schema not ready.' });
+      }
+      console.error('[admin/airfarming/drops/delete]', e);
+      return res.status(500).json({ message: e.message || 'Failed to delete drop' });
     }
   });
 

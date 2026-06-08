@@ -12,7 +12,7 @@ function fmtUsd(n: number) {
 export function VipFarmersTradeScreen() {
   const [summary, setSummary] = useState<VipSummary | null>(null);
   const [accruals, setAccruals] = useState<VipAccrual[]>([]);
-  const [commissionRate, setCommissionRate] = useState(0);
+  const [commissionRate, setCommissionRate] = useState(0.3);
   const [amount, setAmount] = useState('');
   const [addAmount, setAddAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +23,11 @@ export function VipFarmersTradeScreen() {
     try {
       const s = await vipFarmerService.getSummary();
       setSummary(s);
-      setCommissionRate(s.commissionRate ?? 0);
+      setCommissionRate(s.commissionRate ?? 0.3);
       try {
         const hist = await vipFarmerService.getAccruals(60);
         setAccruals(hist.accruals || []);
-        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0);
+        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
       } catch {
         setAccruals([]);
       }
@@ -55,7 +55,10 @@ export function VipFarmersTradeScreen() {
       await vipFarmerService.invest(n);
       setAmount('');
       await load();
-      Alert.alert('Invested', 'Your VIP Farmers lock has started.');
+      Alert.alert(
+        'Invested',
+        `Your VIP Farmers lock has started. Ema charges ${Math.round((summary?.commissionRate ?? commissionRate) * 100)}% of interest earned; you receive the rest in cash.`
+      );
     } catch (e: any) {
       Alert.alert('VIP Farmers', e?.message || 'Invest failed');
     }
@@ -135,6 +138,8 @@ export function VipFarmersTradeScreen() {
   };
 
   const inv = summary?.investment;
+  const feePct = Math.round((summary?.commissionRate ?? commissionRate) * 100);
+  const netPct = 100 - feePct;
 
   return (
     <ScrollView
@@ -144,9 +149,17 @@ export function VipFarmersTradeScreen() {
     >
       <Text style={styles.title}>Live VIP Farmers</Text>
       <Text style={styles.sub}>
-        {summary?.lockDays ?? 30} weekday accruals (Mon–Fri) · {(summary?.dailyRate ?? 0.09) * 100}% daily on principal
-        paid to cash · Min {fmtUsd(summary?.minInvestUsd ?? 100)}
+        {summary?.lockDays ?? 30} weekday accruals (Mon–Fri) · {(summary?.dailyRate ?? 0.09) * 100}% daily gross on
+        principal · Min {fmtUsd(summary?.minInvestUsd ?? 100)}
       </Text>
+
+      <View style={styles.feeNotice}>
+        <Text style={styles.feeNoticeTitle}>Platform fee — please read</Text>
+        <Text style={styles.feeNoticeBody}>
+          Ema charges {feePct}% of the interest VIP Farmers generates for you. You receive {netPct}% of each weekday
+          payout in your cash wallet (after the platform fee is deducted).
+        </Text>
+      </View>
 
       {error ? (
         <Card>
@@ -167,14 +180,21 @@ export function VipFarmersTradeScreen() {
               <Text style={styles.big}>{fmtUsd(inv.principalUsd)}</Text>
               <Text style={styles.meta}>Earned so far: {fmtUsd(inv.totalAccruedUsd)}</Text>
               <Text style={styles.highlight}>
-                Daily interest: {fmtUsd(inv.dailyInterestUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09))}
+                Daily to you (after {feePct}% fee):{' '}
+                {fmtUsd(inv.dailyInterestUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09) * (1 - commissionRate))}
+              </Text>
+              <Text style={styles.meta}>
+                Gross {fmtUsd(inv.dailyGrossUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09))} · Platform fee{' '}
+                {fmtUsd(inv.dailyPlatformFeeUsd ?? 0)}
               </Text>
               <Text style={styles.highlight}>
-                Remaining interest: {fmtUsd(inv.remainingInterestUsd ?? 0)} ({inv.remainingAccrualDays ?? inv.daysLeft}{' '}
+                Remaining to you: {fmtUsd(inv.remainingInterestUsd ?? 0)} ({inv.remainingAccrualDays ?? inv.daysLeft}{' '}
                 weekday{inv.remainingAccrualDays === 1 || inv.daysLeft === 1 ? '' : 's'} left)
               </Text>
               {inv.todayIsAccrualDay && !inv.todayAccrued && (inv.todayInterestUsd ?? 0) > 0 ? (
-                <Text style={styles.meta}>Today&apos;s payout pending: {fmtUsd(inv.todayInterestUsd ?? 0)}</Text>
+                <Text style={styles.meta}>
+                  Today&apos;s net payout pending: {fmtUsd(inv.todayInterestUsd ?? 0)} (after {feePct}% fee)
+                </Text>
               ) : null}
               {inv.todayIsAccrualDay === false ? (
                 <Text style={styles.meta}>No accrual on weekends — next payout on the next weekday.</Text>
@@ -186,7 +206,7 @@ export function VipFarmersTradeScreen() {
               {!inv.matured ? (
                 <>
                   <Text style={[styles.disclaimer, { marginTop: 10 }]}>
-                    Add capital from cash to grow principal. This restarts the 30-day lock from today.
+                    Add capital from cash to grow principal. This restarts the 30-weekday accrual lock from today.
                   </Text>
                   <TextInput
                     style={[styles.input, { marginTop: 8 }]}
@@ -222,7 +242,8 @@ export function VipFarmersTradeScreen() {
                 keyboardType='numeric'
               />
               <Text style={styles.disclaimer}>
-                Principal is locked for 30 weekday accruals (Mon–Fri). Early exit has a penalty.
+                Principal is locked for 30 weekday accruals (Mon–Fri). Ema keeps {feePct}% of interest earned; you
+                receive {netPct}% in cash. Early exit has a separate penalty on principal.
               </Text>
               <PrimaryButton label='Start VIP lock' onPress={() => void onInvest()} style={{ marginTop: 8 }} />
             </Card>
@@ -230,7 +251,10 @@ export function VipFarmersTradeScreen() {
 
           <Card>
             <Text style={styles.label}>Interest history</Text>
-            <Text style={styles.disclaimer}>Weekday payouts (Mon–Fri UTC) credited to your cash wallet.</Text>
+            <Text style={styles.disclaimer}>
+              Weekday payouts (Mon–Fri UTC). Each row shows gross interest, the {feePct}% platform fee, and net credited
+              to cash.
+            </Text>
             {accruals.length === 0 ? (
               <Text style={[styles.meta, { marginTop: 8 }]}>No interest payouts yet.</Text>
             ) : (
@@ -238,11 +262,9 @@ export function VipFarmersTradeScreen() {
                 <View key={a.id} style={styles.accrualRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.accrualDate}>{a.accrualDate}</Text>
-                    {commissionRate > 0 ? (
-                      <Text style={styles.meta}>
-                        Gross {fmtUsd(a.grossUsd)} · Fee {fmtUsd(a.commissionUsd)}
-                      </Text>
-                    ) : null}
+                    <Text style={styles.meta}>
+                      Gross {fmtUsd(a.grossUsd)} · {feePct}% fee {fmtUsd(a.commissionUsd)}
+                    </Text>
                   </View>
                   <Text style={styles.accrualNet}>+{fmtUsd(a.netUsd)}</Text>
                 </View>
@@ -263,6 +285,16 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
   title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 4 },
   sub: { color: palette.textSecondary, marginBottom: 12, lineHeight: 18 },
+  feeNotice: {
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(201, 162, 39, 0.55)',
+    backgroundColor: 'rgba(201, 162, 39, 0.12)',
+  },
+  feeNoticeTitle: { color: palette.primary, fontWeight: '800', fontSize: 14, marginBottom: 6 },
+  feeNoticeBody: { color: palette.textPrimary, fontSize: 13, lineHeight: 19 },
   label: { color: palette.textSecondary, marginBottom: 6 },
   big: { color: palette.primary, fontSize: 28, fontWeight: '800' },
   meta: { color: palette.textSecondary, marginTop: 4, fontSize: 13 },
