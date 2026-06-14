@@ -2913,7 +2913,7 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
-const VIP_COMMISSION_RATE = 0.3;
+const VIP_COMMISSION_RATE = 0.03;
 const VIP_ACCRUAL_WEEKDAYS = 5;
 const VIP_LOCK_DAYS = 30;
 const VIP_MIN_INVEST_USD = 100;
@@ -3084,6 +3084,41 @@ async function listVipAccrualsForUserRecent(userId, limit = 60) {
   if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];
+}
+
+async function listVipAccrualsForInvestment(investmentId) {
+  const { data, error } = await supabase
+    .from('vip_accruals')
+    .select('*')
+    .eq('investment_id', investmentId)
+    .order('accrual_date', { ascending: true });
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
+function sumVipAccrualTotals(rows) {
+  let grossUsd = 0;
+  let commissionUsd = 0;
+  let netUsd = 0;
+  for (const row of rows || []) {
+    const a = vipAccrualToApi(row);
+    if (!a) continue;
+    grossUsd += a.grossUsd;
+    commissionUsd += a.commissionUsd;
+    netUsd += a.netUsd;
+  }
+  return {
+    weekdayCount: (rows || []).length,
+    totalGrossEarnedUsd: roundWalletUsd(grossUsd),
+    totalCommissionUsd: roundWalletUsd(commissionUsd),
+    totalNetEarnedUsd: roundWalletUsd(netUsd),
+  };
+}
+
+async function sumVipAccrualsForInvestment(investmentId) {
+  const rows = await listVipAccrualsForInvestment(investmentId);
+  return sumVipAccrualTotals(rows);
 }
 
 function vipAccrualToApi(row) {
@@ -3659,6 +3694,9 @@ module.exports = {
   listVipAccrualsForUserBetween,
   listVipAccrualsForUserOnDate,
   listVipAccrualsForUserRecent,
+  listVipAccrualsForInvestment,
+  sumVipAccrualTotals,
+  sumVipAccrualsForInvestment,
   userRecordedTradeToApi,
   insertUserRecordedTrade,
   listUserRecordedTradesForUser,

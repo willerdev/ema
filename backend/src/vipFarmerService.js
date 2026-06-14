@@ -20,6 +20,8 @@ const {
   vipInvestmentToApi,
   vipAccrualToApi,
   listVipAccrualsForUserRecent,
+  sumVipAccrualTotals,
+  sumVipAccrualsForInvestment,
   utcTodayYmd,
 } = require('./db');
 const { addUtcWeekdays, isVipAccrualDayYmd } = require('./vipFarmerSchedule');
@@ -44,8 +46,11 @@ async function enrichVipInvestmentApi(inv) {
   const todayAccrued = todayIsAccrualDay
     ? Boolean(await getVipAccrualForInvestmentDay(inv.id, today))
     : false;
+  const earned = await sumVipAccrualsForInvestment(inv.id);
   return {
     ...api,
+    ...earned,
+    totalAccruedUsd: earned.totalNetEarnedUsd,
     todayIsAccrualDay,
     todayAccrued,
     todayInterestUsd: todayIsAccrualDay && !todayAccrued ? api.dailyInterestUsd : 0,
@@ -70,9 +75,21 @@ async function getVipSummary(userId) {
 
 async function listVipAccrualHistory(userId, limit = 60) {
   const rows = await listVipAccrualsForUserRecent(userId, limit);
+  const accruals = rows.map(vipAccrualToApi).filter(Boolean);
+  const inv = await getActiveVipInvestmentForUser(userId);
+  const earned =
+    inv != null
+      ? await sumVipAccrualsForInvestment(inv.id)
+      : sumVipAccrualTotals(rows);
   return {
     commissionRate: VIP_COMMISSION_RATE,
-    accruals: rows.map(vipAccrualToApi).filter(Boolean),
+    accruals,
+    totals: {
+      weekdayCount: earned.weekdayCount,
+      grossUsd: earned.totalGrossEarnedUsd,
+      commissionUsd: earned.totalCommissionUsd,
+      netUsd: earned.totalNetEarnedUsd,
+    },
   };
 }
 
@@ -144,6 +161,7 @@ async function addCapitalVip(userId, amount) {
     startedAt: now,
     maturesAt,
     daysAccrued: 0,
+    totalAccruedUsd: 0,
     status: 'active',
   });
 

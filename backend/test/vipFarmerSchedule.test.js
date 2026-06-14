@@ -19,11 +19,11 @@ test('addUtcWeekdays skips weekends', () => {
   assert.equal(new Date(end).getUTCDay(), 1); // next Monday
 });
 
-test('vipInterestProjection applies platform fee to remaining net interest', () => {
-  const p = vipInterestProjection(1000, 5, 30, 0.09, 0.3);
+test('vipInterestProjection applies 3% platform fee to remaining net interest', () => {
+  const p = vipInterestProjection(1000, 5, 30, 0.09, 0.03);
   assert.equal(p.dailyGrossUsd, 90);
-  assert.equal(p.dailyPlatformFeeUsd, 27);
-  assert.equal(p.dailyInterestUsd, 63);
+  assert.equal(p.dailyPlatformFeeUsd, 2.7);
+  assert.equal(p.dailyInterestUsd, 87.3);
   assert.equal(p.remainingAccrualDays, 25);
-  assert.equal(p.remainingInterestUsd, 1575);
+  assert.equal(p.remainingInterestUsd, 2182.5);
 });

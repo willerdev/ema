@@ -23,6 +23,17 @@ export type VipInvestment = {
   todayIsAccrualDay?: boolean;
   todayAccrued?: boolean;
   todayInterestUsd?: number;
+  weekdayCount?: number;
+  totalGrossEarnedUsd?: number;
+  totalCommissionUsd?: number;
+  totalNetEarnedUsd?: number;
+};
+
+export type VipEarningsTotals = {
+  weekdayCount: number;
+  grossUsd: number;
+  commissionUsd: number;
+  netUsd: number;
 };
 
 export type VipAccrual = {
@@ -51,7 +62,9 @@ export type VipSummary = {
 export const vipFarmerService = {
   getSummary: () => api.get<VipSummary>('/vip-farmers/summary'),
   getAccruals: (limit = 60) =>
-    api.get<{ commissionRate: number; accruals: VipAccrual[] }>(`/vip-farmers/accruals?limit=${limit}`),
+    api.get<{ commissionRate: number; accruals: VipAccrual[]; totals: VipEarningsTotals }>(
+      `/vip-farmers/accruals?limit=${limit}`
+    ),
   invest: (amount: number) =>
     api.post<{ investment: VipInvestment; cashWalletUsd: number }>('/vip-farmers/invest', { amount }),
   addCapital: (amount: number) =>

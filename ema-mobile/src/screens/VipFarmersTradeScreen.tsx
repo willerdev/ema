@@ -2,17 +2,22 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { vipFarmerService, type VipAccrual, type VipSummary } from '../services/vipFarmerService';
+import { vipFarmerService, type VipAccrual, type VipEarningsTotals, type VipSummary } from '../services/vipFarmerService';
 import { palette } from '../theme/colors';
 
 function fmtUsd(n: number) {
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fmtPct(rate: number) {
+  return String(Math.round(rate * 1000) / 10).replace(/\.0$/, '');
+}
+
 export function VipFarmersTradeScreen() {
   const [summary, setSummary] = useState<VipSummary | null>(null);
   const [accruals, setAccruals] = useState<VipAccrual[]>([]);
-  const [commissionRate, setCommissionRate] = useState(0.3);
+  const [earningsTotals, setEarningsTotals] = useState<VipEarningsTotals | null>(null);
+  const [commissionRate, setCommissionRate] = useState(0.03);
   const [amount, setAmount] = useState('');
   const [addAmount, setAddAmount] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -23,13 +28,15 @@ export function VipFarmersTradeScreen() {
     try {
       const s = await vipFarmerService.getSummary();
       setSummary(s);
-      setCommissionRate(s.commissionRate ?? 0.3);
+      setCommissionRate(s.commissionRate ?? 0.03);
       try {
         const hist = await vipFarmerService.getAccruals(60);
         setAccruals(hist.accruals || []);
-        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.3);
+        setEarningsTotals(hist.totals || null);
+        setCommissionRate(hist.commissionRate ?? s.commissionRate ?? 0.03);
       } catch {
         setAccruals([]);
+        setEarningsTotals(null);
       }
     } catch (e: any) {
       setError(e?.message || 'Failed to load VIP Farmers');
@@ -138,8 +145,12 @@ export function VipFarmersTradeScreen() {
   };
 
   const inv = summary?.investment;
-  const feePct = Math.round((summary?.commissionRate ?? commissionRate) * 100);
-  const netPct = 100 - feePct;
+  const feePct = fmtPct(summary?.commissionRate ?? commissionRate);
+  const netPct = fmtPct(1 - (summary?.commissionRate ?? commissionRate));
+  const grossEarned = inv?.totalGrossEarnedUsd ?? earningsTotals?.grossUsd ?? 0;
+  const commissionEarned = inv?.totalCommissionUsd ?? earningsTotals?.commissionUsd ?? 0;
+  const netEarned = inv?.totalNetEarnedUsd ?? inv?.totalAccruedUsd ?? earningsTotals?.netUsd ?? 0;
+  const weekdayCount = inv?.weekdayCount ?? inv?.daysAccrued ?? earningsTotals?.weekdayCount ?? 0;
 
   return (
     <ScrollView
@@ -156,8 +167,8 @@ export function VipFarmersTradeScreen() {
       <View style={styles.feeNotice}>
         <Text style={styles.feeNoticeTitle}>Platform fee — please read</Text>
         <Text style={styles.feeNoticeBody}>
-          Ema charges {feePct}% of the interest VIP Farmers generates for you. You receive {netPct}% of each weekday
-          payout in your cash wallet (after the platform fee is deducted).
+          Interest accrues on weekdays only (Mon–Fri). Each day earns {(summary?.dailyRate ?? 0.09) * 100}% gross on
+          your principal. Ema keeps {feePct}% of that daily interest as commission; you receive {netPct}% in cash.
         </Text>
       </View>
 
@@ -178,7 +189,23 @@ export function VipFarmersTradeScreen() {
             <Card>
               <Text style={styles.label}>Active investment</Text>
               <Text style={styles.big}>{fmtUsd(inv.principalUsd)}</Text>
-              <Text style={styles.meta}>Earned so far: {fmtUsd(inv.totalAccruedUsd)}</Text>
+
+              <View style={styles.earningsBox}>
+                <Text style={styles.earningsTitle}>Earned so far ({weekdayCount} weekday{weekdayCount === 1 ? '' : 's'})</Text>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Gross interest</Text>
+                  <Text style={styles.earningsVal}>{fmtUsd(grossEarned)}</Text>
+                </View>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Platform commission ({feePct}%)</Text>
+                  <Text style={[styles.earningsVal, styles.commissionVal]}>-{fmtUsd(commissionEarned)}</Text>
+                </View>
+                <View style={[styles.earningsRow, styles.earningsRowTotal]}>
+                  <Text style={styles.earningsLabelStrong}>Net to you</Text>
+                  <Text style={styles.earningsNet}>{fmtUsd(netEarned)}</Text>
+                </View>
+              </View>
+
               <Text style={styles.highlight}>
                 Daily to you (after {feePct}% fee):{' '}
                 {fmtUsd(inv.dailyInterestUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09) * (1 - commissionRate))}
@@ -251,9 +278,29 @@ export function VipFarmersTradeScreen() {
 
           <Card>
             <Text style={styles.label}>Interest history</Text>
+            {earningsTotals ? (
+              <View style={[styles.earningsBox, { marginBottom: 12 }]}>
+                <Text style={styles.earningsTitle}>All-time totals (this lock)</Text>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Weekdays paid</Text>
+                  <Text style={styles.earningsVal}>{earningsTotals.weekdayCount}</Text>
+                </View>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Gross</Text>
+                  <Text style={styles.earningsVal}>{fmtUsd(earningsTotals.grossUsd)}</Text>
+                </View>
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Commission ({feePct}%)</Text>
+                  <Text style={[styles.earningsVal, styles.commissionVal]}>-{fmtUsd(earningsTotals.commissionUsd)}</Text>
+                </View>
+                <View style={[styles.earningsRow, styles.earningsRowTotal]}>
+                  <Text style={styles.earningsLabelStrong}>Net earned</Text>
+                  <Text style={styles.earningsNet}>{fmtUsd(earningsTotals.netUsd)}</Text>
+                </View>
+              </View>
+            ) : null}
             <Text style={styles.disclaimer}>
-              Weekday payouts (Mon–Fri UTC). Each row shows gross interest, the {feePct}% platform fee, and net credited
-              to cash.
+              Weekday payouts only (Mon–Fri UTC). Each row: gross · {feePct}% commission · net to cash.
             </Text>
             {accruals.length === 0 ? (
               <Text style={[styles.meta, { marginTop: 8 }]}>No interest payouts yet.</Text>
@@ -295,6 +342,22 @@ const styles = StyleSheet.create({
   },
   feeNoticeTitle: { color: palette.primary, fontWeight: '800', fontSize: 14, marginBottom: 6 },
   feeNoticeBody: { color: palette.textPrimary, fontSize: 13, lineHeight: 19 },
+  earningsBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: palette.surfaceElevated,
+    borderWidth: 1,
+    borderColor: palette.border,
+  },
+  earningsTitle: { color: palette.textSecondary, fontSize: 12, fontWeight: '700', marginBottom: 8, textTransform: 'uppercase' },
+  earningsRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 4 },
+  earningsRowTotal: { marginTop: 6, paddingTop: 8, borderTopWidth: 1, borderTopColor: palette.border },
+  earningsLabel: { color: palette.textSecondary, fontSize: 13 },
+  earningsLabelStrong: { color: palette.textPrimary, fontSize: 14, fontWeight: '700' },
+  earningsVal: { color: palette.textPrimary, fontSize: 14, fontWeight: '600' },
+  commissionVal: { color: '#fbbf24' },
+  earningsNet: { color: palette.success, fontSize: 16, fontWeight: '800' },
   label: { color: palette.textSecondary, marginBottom: 6 },
   big: { color: palette.primary, fontSize: 28, fontWeight: '800' },
   meta: { color: palette.textSecondary, marginTop: 4, fontSize: 13 },
