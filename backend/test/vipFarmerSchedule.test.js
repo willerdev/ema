@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const {
   isVipAccrualDayYmd,
   addUtcWeekdays,
+  countWeekdaysInclusive,
+  weekdaysElapsedSinceStart,
+  vipEarningsForWeekdays,
   vipInterestProjection,
 } = require('../src/vipFarmerSchedule');
 
@@ -19,6 +22,24 @@ test('addUtcWeekdays skips weekends', () => {
   assert.equal(new Date(end).getUTCDay(), 1); // next Monday
 });
 
+test('countWeekdaysInclusive counts from deposit day through today', () => {
+  assert.equal(countWeekdaysInclusive('2026-06-02', '2026-06-02'), 1); // Mon only
+  assert.equal(countWeekdaysInclusive('2026-06-05', '2026-06-08'), 2); // Fri + Mon
+  assert.equal(countWeekdaysInclusive('2026-06-06', '2026-06-07'), 0); // Sat–Sun only
+});
+
+test('weekdaysElapsedSinceStart caps at lock days', () => {
+  const count = weekdaysElapsedSinceStart('2026-01-01T10:00:00.000Z', '2026-06-01', 30);
+  assert.equal(count, 30);
+});
+
+test('vipEarningsForWeekdays totals from weekday count', () => {
+  const e = vipEarningsForWeekdays(1000, 3, 0.09, 0.03);
+  assert.equal(e.weekdayCount, 3);
+  assert.equal(e.totalGrossEarnedUsd, 270);
+  assert.equal(e.totalCommissionUsd, 8.1);
+  assert.equal(e.totalNetEarnedUsd, 261.9);
+});
 test('vipInterestProjection applies 3% platform fee to remaining net interest', () => {
   const p = vipInterestProjection(1000, 5, 30, 0.09, 0.03);
   assert.equal(p.dailyGrossUsd, 90);

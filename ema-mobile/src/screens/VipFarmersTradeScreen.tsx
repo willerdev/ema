@@ -150,7 +150,9 @@ export function VipFarmersTradeScreen() {
   const grossEarned = inv?.totalGrossEarnedUsd ?? earningsTotals?.grossUsd ?? 0;
   const commissionEarned = inv?.totalCommissionUsd ?? earningsTotals?.commissionUsd ?? 0;
   const netEarned = inv?.totalNetEarnedUsd ?? inv?.totalAccruedUsd ?? earningsTotals?.netUsd ?? 0;
+  const paidToCash = inv?.paidToCashUsd ?? earningsTotals?.paidToCashUsd ?? 0;
   const weekdayCount = inv?.weekdayCount ?? inv?.daysAccrued ?? earningsTotals?.weekdayCount ?? 0;
+  const lockStarted = inv?.startedAtYmd ?? inv?.startedAt?.slice(0, 10);
 
   return (
     <ScrollView
@@ -191,7 +193,9 @@ export function VipFarmersTradeScreen() {
               <Text style={styles.big}>{fmtUsd(inv.principalUsd)}</Text>
 
               <View style={styles.earningsBox}>
-                <Text style={styles.earningsTitle}>Earned so far ({weekdayCount} weekday{weekdayCount === 1 ? '' : 's'})</Text>
+                <Text style={styles.earningsTitle}>
+                  Earned since {lockStarted || 'lock start'} ({weekdayCount} weekday{weekdayCount === 1 ? '' : 's'})
+                </Text>
                 <View style={styles.earningsRow}>
                   <Text style={styles.earningsLabel}>Gross interest</Text>
                   <Text style={styles.earningsVal}>{fmtUsd(grossEarned)}</Text>
@@ -201,9 +205,14 @@ export function VipFarmersTradeScreen() {
                   <Text style={[styles.earningsVal, styles.commissionVal]}>-{fmtUsd(commissionEarned)}</Text>
                 </View>
                 <View style={[styles.earningsRow, styles.earningsRowTotal]}>
-                  <Text style={styles.earningsLabelStrong}>Net to you</Text>
+                  <Text style={styles.earningsLabelStrong}>Net accrued</Text>
                   <Text style={styles.earningsNet}>{fmtUsd(netEarned)}</Text>
                 </View>
+                {paidToCash !== netEarned ? (
+                  <Text style={styles.meta}>
+                    Paid to cash so far: {fmtUsd(paidToCash)} (payouts run on weekdays via server cron)
+                  </Text>
+                ) : null}
               </View>
 
               <Text style={styles.highlight}>
@@ -227,7 +236,8 @@ export function VipFarmersTradeScreen() {
                 <Text style={styles.meta}>No accrual on weekends — next payout on the next weekday.</Text>
               ) : null}
               <Text style={styles.meta}>
-                Weekdays accrued {inv.daysAccrued}/{inv.lockDays}
+                Lock started {lockStarted ? new Date(lockStarted + 'T12:00:00').toLocaleDateString() : '—'} · Weekdays{' '}
+                {weekdayCount}/{inv.lockDays}
               </Text>
               <Text style={styles.meta}>Est. maturity {new Date(inv.maturesAt).toLocaleString()}</Text>
               {!inv.matured ? (

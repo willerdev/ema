@@ -24,7 +24,14 @@ const {
   sumVipAccrualsForInvestment,
   utcTodayYmd,
 } = require('./db');
-const { addUtcWeekdays, isVipAccrualDayYmd } = require('./vipFarmerSchedule');
+const {
+  addUtcWeekdays,
+  isVipAccrualDayYmd,
+  utcYmdFromIso,
+  nextUtcYmd,
+  weekdaysElapsedSinceStart,
+  vipEarningsForWeekdays,
+} = require('./vipFarmerSchedule');
 
 function newId() {
   return crypto.randomUUID();
@@ -46,14 +53,31 @@ async function enrichVipInvestmentApi(inv) {
   const todayAccrued = todayIsAccrualDay
     ? Boolean(await getVipAccrualForInvestmentDay(inv.id, today))
     : false;
-  const earned = await sumVipAccrualsForInvestment(inv.id);
+  const paid = await sumVipAccrualsForInvestment(inv.id);
+  const weekdaysElapsed = weekdaysElapsedSinceStart(inv.started_at, today, VIP_LOCK_DAYS);
+  const earned = vipEarningsForWeekdays(
+    inv.principal_usd,
+    weekdaysElapsed,
+    VIP_DAILY_RATE,
+    VIP_COMMISSION_RATE
+  );
+  const remainingAccrualDays = Math.max(0, VIP_LOCK_DAYS - weekdaysElapsed);
+  const remainingInterestUsd = Math.round(earned.dailyInterestUsd * remainingAccrualDays * 100) / 100;
   return {
     ...api,
     ...earned,
+    weekdayCount: weekdaysElapsed,
+    daysAccrued: weekdaysElapsed,
+    daysLeft: remainingAccrualDays,
+    remainingAccrualDays,
+    remainingInterestUsd,
     totalAccruedUsd: earned.totalNetEarnedUsd,
+    paidToCashUsd: paid.totalNetEarnedUsd,
+    paidWeekdayCount: paid.weekdayCount,
+    startedAtYmd: utcYmdFromIso(inv.started_at),
     todayIsAccrualDay,
     todayAccrued,
-    todayInterestUsd: todayIsAccrualDay && !todayAccrued ? api.dailyInterestUsd : 0,
+    todayInterestUsd: todayIsAccrualDay && !todayAccrued ? earned.dailyInterestUsd : 0,
   };
 }
 
@@ -77,10 +101,25 @@ async function listVipAccrualHistory(userId, limit = 60) {
   const rows = await listVipAccrualsForUserRecent(userId, limit);
   const accruals = rows.map(vipAccrualToApi).filter(Boolean);
   const inv = await getActiveVipInvestmentForUser(userId);
-  const earned =
+  const paid =
     inv != null
       ? await sumVipAccrualsForInvestment(inv.id)
       : sumVipAccrualTotals(rows);
+  const today = utcTodayYmd();
+  const earned =
+    inv != null
+      ? vipEarningsForWeekdays(
+          inv.principal_usd,
+          weekdaysElapsedSinceStart(inv.started_at, today, VIP_LOCK_DAYS),
+          VIP_DAILY_RATE,
+          VIP_COMMISSION_RATE
+        )
+      : {
+          weekdayCount: paid.weekdayCount,
+          totalGrossEarnedUsd: paid.totalGrossEarnedUsd,
+          totalCommissionUsd: paid.totalCommissionUsd,
+          totalNetEarnedUsd: paid.totalNetEarnedUsd,
+        };
   return {
     commissionRate: VIP_COMMISSION_RATE,
     accruals,
@@ -89,6 +128,7 @@ async function listVipAccrualHistory(userId, limit = 60) {
       grossUsd: earned.totalGrossEarnedUsd,
       commissionUsd: earned.totalCommissionUsd,
       netUsd: earned.totalNetEarnedUsd,
+      paidToCashUsd: paid.totalNetEarnedUsd,
     },
   };
 }
@@ -248,72 +288,86 @@ async function earlyWithdrawVip(userId) {
   };
 }
 
+async function tryAccrueVipDay(inv, planDate) {
+  const startYmd = utcYmdFromIso(inv.started_at);
+  if (planDate < startYmd) {
+    return { applied: false, skipped: true, inv };
+  }
+  if (!isVipAccrualDayYmd(planDate)) {
+    return { applied: false, skipped: true, inv };
+  }
+  if (Number(inv.days_accrued) >= VIP_LOCK_DAYS) {
+    return { applied: false, skipped: true, inv };
+  }
+  const existing = await getVipAccrualForInvestmentDay(inv.id, planDate);
+  if (existing) {
+    return { applied: false, skipped: true, inv };
+  }
+
+  const principal = roundUsd(inv.principal_usd);
+  const gross = roundUsd(principal * VIP_DAILY_RATE);
+  const commission = roundUsd(gross * VIP_COMMISSION_RATE);
+  const net = roundUsd(gross - commission);
+  if (net <= 0) {
+    return { applied: false, skipped: true, inv };
+  }
+
+  const wallet = await getWalletByUserId(inv.user_id);
+  const cash = roundUsd(wallet?.balance);
+  await setWalletBalance(inv.user_id, roundUsd(cash + net));
+  await createTransaction({
+    userId: inv.user_id,
+    type: 'deposit',
+    amount: net,
+    status: 'completed',
+  });
+
+  await insertVipAccrual({
+    id: newId(),
+    investment_id: inv.id,
+    user_id: inv.user_id,
+    accrual_date: planDate,
+    rate: VIP_DAILY_RATE,
+    amount: net,
+    gross_amount: gross,
+    commission_rate: VIP_COMMISSION_RATE,
+    commission_amount: commission,
+    created_at: new Date().toISOString(),
+  });
+
+  const updated = await updateVipInvestment(inv.id, {
+    totalAccruedUsd: roundUsd(Number(inv.total_accrued_usd) + net),
+    daysAccrued: Number(inv.days_accrued) + 1,
+  });
+
+  return { applied: true, skipped: false, inv: updated };
+}
+
 async function runVipDailyAccrual(planDate = utcTodayYmd()) {
   const rows = await listActiveVipInvestments();
   let applied = 0;
   let skipped = 0;
 
-  const isAccrualDay = isVipAccrualDayYmd(planDate);
-
   for (const inv of rows) {
-    if (!isAccrualDay) {
-      skipped += 1;
-      continue;
+    const startYmd = utcYmdFromIso(inv.started_at);
+    let cursor = startYmd;
+    let current = inv;
+    while (cursor <= planDate && Number(current.days_accrued) < VIP_LOCK_DAYS) {
+      const result = await tryAccrueVipDay(current, cursor);
+      if (result.applied) {
+        applied += 1;
+        current = result.inv;
+      } else if (result.skipped) {
+        skipped += 1;
+      }
+      cursor = nextUtcYmd(cursor);
     }
-    if (Number(inv.days_accrued) >= VIP_LOCK_DAYS) {
-      skipped += 1;
-      continue;
-    }
-    const existing = await getVipAccrualForInvestmentDay(inv.id, planDate);
-    if (existing) {
-      skipped += 1;
-      continue;
-    }
-
-    const principal = roundUsd(inv.principal_usd);
-    const gross = roundUsd(principal * VIP_DAILY_RATE);
-    const commission = roundUsd(gross * VIP_COMMISSION_RATE);
-    const net = roundUsd(gross - commission);
-    if (net <= 0) {
-      skipped += 1;
-      continue;
-    }
-
-    const wallet = await getWalletByUserId(inv.user_id);
-    const cash = roundUsd(wallet?.balance);
-    await setWalletBalance(inv.user_id, roundUsd(cash + net));
-    await createTransaction({
-      userId: inv.user_id,
-      type: 'deposit',
-      amount: net,
-      status: 'completed',
-    });
-
-    await insertVipAccrual({
-      id: newId(),
-      investment_id: inv.id,
-      user_id: inv.user_id,
-      accrual_date: planDate,
-      rate: VIP_DAILY_RATE,
-      amount: net,
-      gross_amount: gross,
-      commission_rate: VIP_COMMISSION_RATE,
-      commission_amount: commission,
-      created_at: new Date().toISOString(),
-    });
-
-    await updateVipInvestment(inv.id, {
-      totalAccruedUsd: roundUsd(Number(inv.total_accrued_usd) + net),
-      daysAccrued: Number(inv.days_accrued) + 1,
-    });
-
-    applied += 1;
   }
 
   return {
     ok: true,
     planDate,
-    isAccrualDay,
+    isAccrualDay: isVipAccrualDayYmd(planDate),
     investmentsChecked: rows.length,
     accrualsApplied: applied,
     skipped,

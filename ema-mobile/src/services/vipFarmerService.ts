@@ -27,6 +27,9 @@ export type VipInvestment = {
   totalGrossEarnedUsd?: number;
   totalCommissionUsd?: number;
   totalNetEarnedUsd?: number;
+  paidToCashUsd?: number;
+  paidWeekdayCount?: number;
+  startedAtYmd?: string;
 };
 
 export type VipEarningsTotals = {
@@ -34,6 +37,7 @@ export type VipEarningsTotals = {
   grossUsd: number;
   commissionUsd: number;
   netUsd: number;
+  paidToCashUsd?: number;
 };
 
 export type VipAccrual = {
