@@ -38,6 +38,7 @@ export type VipInvestment = {
   dailyRate: number;
   lockDays: number;
   accrualWeekdays?: number;
+  weekendsExcluded?: boolean;
   commissionRate?: number;
   dailyGrossUsd?: number;
   dailyPlatformFeeUsd?: number;
@@ -86,6 +87,7 @@ export type VipSummary = {
   commissionRate?: number;
   accrualWeekdays?: number;
   lockDays: number;
+  weekendsExcluded?: boolean;
   earlyPenaltyRate: number;
   investment: VipInvestment | null;
 };

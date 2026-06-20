@@ -2925,20 +2925,27 @@ function roundWalletUsd(value) {
 
 function vipInvestmentToApi(row) {
   if (!row) return null;
-  const { vipInterestProjection } = require('./vipFarmerSchedule');
+  const { buildVipLockProjection } = require('./vipFarmerSchedule');
   const now = Date.now();
   const maturesMs = new Date(row.matures_at).getTime();
-  const daysAccrued = Number(row.days_accrued);
-  const accrualDaysLeft = Math.max(0, VIP_LOCK_DAYS - daysAccrued);
+  const paidWeekdays = Number(row.days_accrued);
+  const today = utcTodayYmd();
+  const isActive = row.status === 'active';
+  const projection = isActive
+    ? buildVipLockProjection({
+        startedAt: row.started_at,
+        maturesAt: row.matures_at,
+        principalUsd: row.principal_usd,
+        lockDays: VIP_LOCK_DAYS,
+        dailyRate: VIP_DAILY_RATE,
+        commissionRate: VIP_COMMISSION_RATE,
+        asOfYmd: today,
+      })
+    : null;
+  const weekdaysElapsed = projection ? projection.weekdaysElapsed : paidWeekdays;
+  const weekdaysRemaining = projection ? projection.weekdaysRemaining : Math.max(0, VIP_LOCK_DAYS - paidWeekdays);
+  const accrualsComplete = paidWeekdays >= VIP_LOCK_DAYS || weekdaysElapsed >= VIP_LOCK_DAYS;
   const calendarDaysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
-  const projection = vipInterestProjection(
-    row.principal_usd,
-    daysAccrued,
-    VIP_LOCK_DAYS,
-    VIP_DAILY_RATE,
-    VIP_COMMISSION_RATE
-  );
-  const accrualsComplete = daysAccrued >= VIP_LOCK_DAYS;
   return {
     id: row.id,
     userId: row.user_id,
@@ -2946,20 +2953,23 @@ function vipInvestmentToApi(row) {
     startedAt: row.started_at,
     maturesAt: row.matures_at,
     status: row.status,
-    totalAccruedUsd: Number(row.total_accrued_usd),
-    daysAccrued,
-    daysLeft: accrualDaysLeft,
+    totalAccruedUsd: projection ? projection.earnedSoFarNetUsd : Number(row.total_accrued_usd),
+    daysAccrued: weekdaysElapsed,
+    paidWeekdaysAccrued: paidWeekdays,
+    daysLeft: weekdaysRemaining,
     calendarDaysLeft,
     matured: accrualsComplete || now >= maturesMs,
     dailyRate: VIP_DAILY_RATE,
     lockDays: VIP_LOCK_DAYS,
     accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
+    weekendsExcluded: true,
     commissionRate: VIP_COMMISSION_RATE,
-    dailyGrossUsd: projection.dailyGrossUsd,
-    dailyPlatformFeeUsd: projection.dailyPlatformFeeUsd,
-    dailyInterestUsd: projection.dailyInterestUsd,
-    remainingInterestUsd: projection.remainingInterestUsd,
-    remainingAccrualDays: projection.remainingAccrualDays,
+    dailyGrossUsd: projection?.dailyGrossUsd ?? 0,
+    dailyPlatformFeeUsd: projection?.dailyCommissionUsd ?? 0,
+    dailyInterestUsd: projection?.dailyNetUsd ?? 0,
+    remainingInterestUsd: projection?.remainingNetUsd ?? 0,
+    remainingAccrualDays: weekdaysRemaining,
+    startedAtYmd: projection?.startedAtYmd ?? String(row.started_at).slice(0, 10),
   };
 }
 

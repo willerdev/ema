@@ -96,6 +96,7 @@ async function getVipSummary(userId) {
     dailyRate: VIP_DAILY_RATE,
     commissionRate: VIP_COMMISSION_RATE,
     accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
+    weekendsExcluded: true,
     lockDays: VIP_LOCK_DAYS,
     earlyPenaltyRate: VIP_EARLY_PENALTY_RATE,
     investment: await enrichVipInvestmentApi(inv),

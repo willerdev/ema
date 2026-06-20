@@ -121,7 +121,7 @@ export function VipFarmersTradeScreen() {
     const pct = Math.round((summary?.earlyPenaltyRate ?? 0.3) * 100);
     Alert.alert(
       'Early exit',
-      `30-day lock applies. Early exit forfeits ${pct}% of your locked principal. Daily payouts already received stay in cash.`,
+      `30-weekday lock applies. Early exit forfeits ${pct}% of your locked principal. Daily payouts already received stay in cash.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -177,8 +177,9 @@ export function VipFarmersTradeScreen() {
       <View style={styles.feeNotice}>
         <Text style={styles.feeNoticeTitle}>Platform fee — please read</Text>
         <Text style={styles.feeNoticeBody}>
-          Interest accrues on weekdays only (Mon–Fri). Each day earns {(summary?.dailyRate ?? 0.09) * 100}% gross on
-          your principal. Ema keeps {feePct}% of that daily interest as commission; you receive {netPct}% in cash.
+          The 9% daily rate applies on weekdays only (Mon–Fri UTC). Saturday and Sunday are never counted and earn
+          no interest. Each weekday earns {(summary?.dailyRate ?? 0.09) * 100}% gross on your principal. Ema keeps{' '}
+          {feePct}% of that daily interest as commission; you receive {netPct}% in cash.
         </Text>
       </View>
 

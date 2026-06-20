@@ -41,6 +41,24 @@ test('vipEarningsForWeekdays totals from weekday count', () => {
   assert.equal(e.totalCommissionUsd, 8.1);
   assert.equal(e.totalNetEarnedUsd, 261.9);
 });
+test('countWeekdaysInclusive excludes Sat and Sun in a full calendar week', () => {
+  assert.equal(countWeekdaysInclusive('2026-06-01', '2026-06-07'), 5);
+});
+
+test('buildVipLockProjection earns nothing across a weekend-only range', () => {
+  const p = buildVipLockProjection({
+    startedAt: '2026-06-06T12:00:00.000Z',
+    maturesAt: '2026-08-01T12:00:00.000Z',
+    principalUsd: 1000,
+    lockDays: 30,
+    dailyRate: 0.09,
+    commissionRate: 0.03,
+    asOfYmd: '2026-06-07',
+  });
+  assert.equal(p.weekdaysElapsed, 0);
+  assert.equal(p.earnedSoFarNetUsd, 0);
+});
+
 test('buildVipLockProjection uses started_at for earned and full lock totals', () => {
   const p = buildVipLockProjection({
     startedAt: '2026-06-02T15:00:00.000Z',
