@@ -6,6 +6,7 @@ const {
   countWeekdaysInclusive,
   weekdaysElapsedSinceStart,
   vipEarningsForWeekdays,
+  buildVipLockProjection,
   vipInterestProjection,
 } = require('../src/vipFarmerSchedule');
 
@@ -40,6 +41,23 @@ test('vipEarningsForWeekdays totals from weekday count', () => {
   assert.equal(e.totalCommissionUsd, 8.1);
   assert.equal(e.totalNetEarnedUsd, 261.9);
 });
+test('buildVipLockProjection uses started_at for earned and full lock totals', () => {
+  const p = buildVipLockProjection({
+    startedAt: '2026-06-02T15:00:00.000Z',
+    maturesAt: '2026-07-15T15:00:00.000Z',
+    principalUsd: 1000,
+    lockDays: 30,
+    dailyRate: 0.09,
+    commissionRate: 0.03,
+    asOfYmd: '2026-06-04',
+  });
+  assert.equal(p.startedAtYmd, '2026-06-02');
+  assert.equal(p.weekdaysElapsed, 3);
+  assert.equal(p.weekdaysRemaining, 27);
+  assert.equal(p.earnedSoFarNetUsd, 261.9);
+  assert.equal(p.fullLockNetUsd, 2619);
+});
+
 test('vipInterestProjection applies 3% platform fee to remaining net interest', () => {
   const p = vipInterestProjection(1000, 5, 30, 0.09, 0.03);
   assert.equal(p.dailyGrossUsd, 90);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { vipFarmerService, type VipAccrual, type VipEarningsTotals, type VipSummary } from '../services/vipFarmerService';
+import { vipFarmerService, type VipAccrual, type VipEarningsTotals, type VipLockProjection, type VipSummary } from '../services/vipFarmerService';
 import { palette } from '../theme/colors';
 
 function fmtUsd(n: number) {
@@ -145,14 +145,22 @@ export function VipFarmersTradeScreen() {
   };
 
   const inv = summary?.investment;
+  const proj: VipLockProjection | null | undefined = inv?.projection;
   const feePct = fmtPct(summary?.commissionRate ?? commissionRate);
   const netPct = fmtPct(1 - (summary?.commissionRate ?? commissionRate));
-  const grossEarned = inv?.totalGrossEarnedUsd ?? earningsTotals?.grossUsd ?? 0;
-  const commissionEarned = inv?.totalCommissionUsd ?? earningsTotals?.commissionUsd ?? 0;
-  const netEarned = inv?.totalNetEarnedUsd ?? inv?.totalAccruedUsd ?? earningsTotals?.netUsd ?? 0;
+  const grossEarned = proj?.earnedSoFarGrossUsd ?? inv?.totalGrossEarnedUsd ?? earningsTotals?.grossUsd ?? 0;
+  const commissionEarned = proj?.earnedSoFarCommissionUsd ?? inv?.totalCommissionUsd ?? earningsTotals?.commissionUsd ?? 0;
+  const netEarned = proj?.earnedSoFarNetUsd ?? inv?.totalNetEarnedUsd ?? inv?.totalAccruedUsd ?? earningsTotals?.netUsd ?? 0;
+  const remainingNet = proj?.remainingNetUsd ?? inv?.remainingInterestUsd ?? earningsTotals?.remainingNetUsd ?? 0;
+  const fullLockNet = proj?.fullLockNetUsd ?? earningsTotals?.fullLockNetUsd ?? 0;
   const paidToCash = inv?.paidToCashUsd ?? earningsTotals?.paidToCashUsd ?? 0;
-  const weekdayCount = inv?.weekdayCount ?? inv?.daysAccrued ?? earningsTotals?.weekdayCount ?? 0;
-  const lockStarted = inv?.startedAtYmd ?? inv?.startedAt?.slice(0, 10);
+  const weekdayCount = proj?.weekdaysElapsed ?? inv?.weekdayCount ?? inv?.daysAccrued ?? earningsTotals?.weekdayCount ?? 0;
+  const lockWeekdays = proj?.lockWeekdays ?? inv?.lockDays ?? summary?.lockDays ?? 30;
+  const weekdaysRemaining = proj?.weekdaysRemaining ?? inv?.remainingAccrualDays ?? inv?.daysLeft ?? Math.max(0, lockWeekdays - weekdayCount);
+  const progressPct = proj?.progressPercent ?? (lockWeekdays > 0 ? Math.round((weekdayCount / lockWeekdays) * 1000) / 10 : 0);
+  const lockStarted = proj?.startedAtYmd ?? inv?.startedAtYmd ?? inv?.startedAt?.slice(0, 10);
+  const lockStartedLabel = lockStarted ? new Date(lockStarted + 'T12:00:00').toLocaleDateString() : '—';
+  const dailyNet = proj?.dailyNetUsd ?? inv?.dailyInterestUsd ?? 0;
 
   return (
     <ScrollView
@@ -192,41 +200,61 @@ export function VipFarmersTradeScreen() {
               <Text style={styles.label}>Active investment</Text>
               <Text style={styles.big}>{fmtUsd(inv.principalUsd)}</Text>
 
-              <View style={styles.earningsBox}>
-                <Text style={styles.earningsTitle}>
-                  Earned since {lockStarted || 'lock start'} ({weekdayCount} weekday{weekdayCount === 1 ? '' : 's'})
+              <View style={styles.projectionBox}>
+                <Text style={styles.projectionTitle}>Earnings projection</Text>
+                <Text style={styles.projectionSub}>
+                  Based on lock start {lockStartedLabel} · weekdays only (Mon–Fri UTC)
                 </Text>
+
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${Math.min(100, progressPct)}%` }]} />
+                </View>
+                <Text style={styles.progressLabel}>
+                  {weekdayCount} of {lockWeekdays} weekdays · {progressPct}% of lock
+                </Text>
+
                 <View style={styles.earningsRow}>
-                  <Text style={styles.earningsLabel}>Gross interest</Text>
-                  <Text style={styles.earningsVal}>{fmtUsd(grossEarned)}</Text>
+                  <Text style={styles.earningsLabel}>Per weekday (net to you)</Text>
+                  <Text style={styles.earningsVal}>{fmtUsd(dailyNet)}</Text>
+                </View>
+
+                <View style={[styles.earningsBox, { marginTop: 10, marginBottom: 0 }]}>
+                  <Text style={styles.earningsTitle}>Earned so far (projected)</Text>
+                  <View style={styles.earningsRow}>
+                    <Text style={styles.earningsLabel}>Gross</Text>
+                    <Text style={styles.earningsVal}>{fmtUsd(grossEarned)}</Text>
+                  </View>
+                  <View style={styles.earningsRow}>
+                    <Text style={styles.earningsLabel}>Commission ({feePct}%)</Text>
+                    <Text style={[styles.earningsVal, styles.commissionVal]}>-{fmtUsd(commissionEarned)}</Text>
+                  </View>
+                  <View style={[styles.earningsRow, styles.earningsRowTotal]}>
+                    <Text style={styles.earningsLabelStrong}>Net accrued</Text>
+                    <Text style={styles.earningsNet}>{fmtUsd(netEarned)}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.earningsRow}>
+                  <Text style={styles.earningsLabel}>Still to earn (projected)</Text>
+                  <Text style={styles.earningsVal}>{fmtUsd(remainingNet)}</Text>
                 </View>
                 <View style={styles.earningsRow}>
-                  <Text style={styles.earningsLabel}>Platform commission ({feePct}%)</Text>
-                  <Text style={[styles.earningsVal, styles.commissionVal]}>-{fmtUsd(commissionEarned)}</Text>
+                  <Text style={styles.earningsLabel}>Full {lockWeekdays}-weekday lock (projected net)</Text>
+                  <Text style={[styles.earningsVal, styles.earningsNet]}>{fmtUsd(fullLockNet)}</Text>
                 </View>
-                <View style={[styles.earningsRow, styles.earningsRowTotal]}>
-                  <Text style={styles.earningsLabelStrong}>Net accrued</Text>
-                  <Text style={styles.earningsNet}>{fmtUsd(netEarned)}</Text>
-                </View>
+
                 {paidToCash !== netEarned ? (
                   <Text style={styles.meta}>
-                    Paid to cash so far: {fmtUsd(paidToCash)} (payouts run on weekdays via server cron)
+                    Paid to cash so far: {fmtUsd(paidToCash)} · {weekdaysRemaining} weekday
+                    {weekdaysRemaining === 1 ? '' : 's'} left
                   </Text>
-                ) : null}
+                ) : (
+                  <Text style={styles.meta}>
+                    {weekdaysRemaining} weekday{weekdaysRemaining === 1 ? '' : 's'} remaining in this lock
+                  </Text>
+                )}
               </View>
 
-              <Text style={styles.highlight}>
-                Daily to you (after {feePct}% fee):{' '}
-                {fmtUsd(inv.dailyInterestUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09) * (1 - commissionRate))}
-              </Text>
-              <Text style={styles.meta}>
-                Gross {fmtUsd(inv.dailyGrossUsd ?? inv.principalUsd * (inv.dailyRate ?? 0.09))} · Platform fee{' '}
-                {fmtUsd(inv.dailyPlatformFeeUsd ?? 0)}
-              </Text>
-              <Text style={styles.highlight}>
-                Remaining to you: {fmtUsd(inv.remainingInterestUsd ?? 0)} ({inv.remainingAccrualDays ?? inv.daysLeft}{' '}
-                weekday{inv.remainingAccrualDays === 1 || inv.daysLeft === 1 ? '' : 's'} left)
-              </Text>
               {inv.todayIsAccrualDay && !inv.todayAccrued && (inv.todayInterestUsd ?? 0) > 0 ? (
                 <Text style={styles.meta}>
                   Today&apos;s net payout pending: {fmtUsd(inv.todayInterestUsd ?? 0)} (after {feePct}% fee)
@@ -235,10 +263,6 @@ export function VipFarmersTradeScreen() {
               {inv.todayIsAccrualDay === false ? (
                 <Text style={styles.meta}>No accrual on weekends — next payout on the next weekday.</Text>
               ) : null}
-              <Text style={styles.meta}>
-                Lock started {lockStarted ? new Date(lockStarted + 'T12:00:00').toLocaleDateString() : '—'} · Weekdays{' '}
-                {weekdayCount}/{inv.lockDays}
-              </Text>
               <Text style={styles.meta}>Est. maturity {new Date(inv.maturesAt).toLocaleString()}</Text>
               {!inv.matured ? (
                 <>
@@ -352,6 +376,29 @@ const styles = StyleSheet.create({
   },
   feeNoticeTitle: { color: palette.primary, fontWeight: '800', fontSize: 14, marginBottom: 6 },
   feeNoticeBody: { color: palette.textPrimary, fontSize: 13, lineHeight: 19 },
+  projectionBox: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(201, 162, 39, 0.45)',
+    backgroundColor: 'rgba(201, 162, 39, 0.08)',
+  },
+  projectionTitle: { color: palette.primary, fontSize: 16, fontWeight: '800', marginBottom: 4 },
+  projectionSub: { color: palette.textSecondary, fontSize: 12, lineHeight: 17, marginBottom: 12 },
+  progressTrack: {
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: palette.surfaceElevated,
+    overflow: 'hidden',
+    marginBottom: 6,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: palette.primary,
+  },
+  progressLabel: { color: palette.textSecondary, fontSize: 12, marginBottom: 10 },
   earningsBox: {
     marginTop: 12,
     padding: 12,

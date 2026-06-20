@@ -74,6 +74,47 @@ function vipEarningsForWeekdays(principalUsd, weekdayCount, dailyRate, commissio
   };
 }
 
+function buildVipLockProjection({
+  startedAt,
+  maturesAt,
+  principalUsd,
+  lockDays = 30,
+  dailyRate = 0.09,
+  commissionRate = 0,
+  asOfYmd,
+}) {
+  const startYmd = utcYmdFromIso(startedAt);
+  const today = String(asOfYmd || '').slice(0, 10);
+  const weekdaysElapsed = weekdaysElapsedSinceStart(startedAt, today, lockDays);
+  const weekdaysRemaining = Math.max(0, lockDays - weekdaysElapsed);
+  const earned = vipEarningsForWeekdays(principalUsd, weekdaysElapsed, dailyRate, commissionRate);
+  const remaining = vipEarningsForWeekdays(principalUsd, weekdaysRemaining, dailyRate, commissionRate);
+  const fullLock = vipEarningsForWeekdays(principalUsd, lockDays, dailyRate, commissionRate);
+  return {
+    startedAt,
+    startedAtYmd: startYmd,
+    maturesAt,
+    maturesAtYmd: utcYmdFromIso(maturesAt),
+    asOfDate: today,
+    lockWeekdays: lockDays,
+    weekdaysElapsed,
+    weekdaysRemaining,
+    progressPercent: lockDays > 0 ? Math.round((weekdaysElapsed / lockDays) * 1000) / 10 : 0,
+    dailyGrossUsd: earned.dailyGrossUsd,
+    dailyCommissionUsd: earned.dailyPlatformFeeUsd,
+    dailyNetUsd: earned.dailyInterestUsd,
+    earnedSoFarGrossUsd: earned.totalGrossEarnedUsd,
+    earnedSoFarCommissionUsd: earned.totalCommissionUsd,
+    earnedSoFarNetUsd: earned.totalNetEarnedUsd,
+    remainingGrossUsd: remaining.totalGrossEarnedUsd,
+    remainingCommissionUsd: remaining.totalCommissionUsd,
+    remainingNetUsd: remaining.totalNetEarnedUsd,
+    fullLockGrossUsd: fullLock.totalGrossEarnedUsd,
+    fullLockCommissionUsd: fullLock.totalCommissionUsd,
+    fullLockNetUsd: fullLock.totalNetEarnedUsd,
+  };
+}
+
 function vipInterestProjection(principalUsd, daysAccrued, lockDays, dailyRate, commissionRate = 0) {
   const principal = Math.round(Number(principalUsd || 0) * 100) / 100;
   const rate = Number(dailyRate) || 0;
@@ -103,5 +144,6 @@ module.exports = {
   countWeekdaysInclusive,
   weekdaysElapsedSinceStart,
   vipEarningsForWeekdays,
+  buildVipLockProjection,
   vipInterestProjection,
 };

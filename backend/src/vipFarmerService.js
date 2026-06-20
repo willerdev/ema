@@ -29,8 +29,7 @@ const {
   isVipAccrualDayYmd,
   utcYmdFromIso,
   nextUtcYmd,
-  weekdaysElapsedSinceStart,
-  vipEarningsForWeekdays,
+  buildVipLockProjection,
 } = require('./vipFarmerSchedule');
 
 function newId() {
@@ -54,30 +53,36 @@ async function enrichVipInvestmentApi(inv) {
     ? Boolean(await getVipAccrualForInvestmentDay(inv.id, today))
     : false;
   const paid = await sumVipAccrualsForInvestment(inv.id);
-  const weekdaysElapsed = weekdaysElapsedSinceStart(inv.started_at, today, VIP_LOCK_DAYS);
-  const earned = vipEarningsForWeekdays(
-    inv.principal_usd,
-    weekdaysElapsed,
-    VIP_DAILY_RATE,
-    VIP_COMMISSION_RATE
-  );
-  const remainingAccrualDays = Math.max(0, VIP_LOCK_DAYS - weekdaysElapsed);
-  const remainingInterestUsd = Math.round(earned.dailyInterestUsd * remainingAccrualDays * 100) / 100;
+  const projection = buildVipLockProjection({
+    startedAt: inv.started_at,
+    maturesAt: inv.matures_at,
+    principalUsd: inv.principal_usd,
+    lockDays: VIP_LOCK_DAYS,
+    dailyRate: VIP_DAILY_RATE,
+    commissionRate: VIP_COMMISSION_RATE,
+    asOfYmd: today,
+  });
   return {
     ...api,
-    ...earned,
-    weekdayCount: weekdaysElapsed,
-    daysAccrued: weekdaysElapsed,
-    daysLeft: remainingAccrualDays,
-    remainingAccrualDays,
-    remainingInterestUsd,
-    totalAccruedUsd: earned.totalNetEarnedUsd,
+    weekdayCount: projection.weekdaysElapsed,
+    daysAccrued: projection.weekdaysElapsed,
+    daysLeft: projection.weekdaysRemaining,
+    remainingAccrualDays: projection.weekdaysRemaining,
+    dailyGrossUsd: projection.dailyGrossUsd,
+    dailyPlatformFeeUsd: projection.dailyCommissionUsd,
+    dailyInterestUsd: projection.dailyNetUsd,
+    totalGrossEarnedUsd: projection.earnedSoFarGrossUsd,
+    totalCommissionUsd: projection.earnedSoFarCommissionUsd,
+    totalNetEarnedUsd: projection.earnedSoFarNetUsd,
+    remainingInterestUsd: projection.remainingNetUsd,
+    totalAccruedUsd: projection.earnedSoFarNetUsd,
     paidToCashUsd: paid.totalNetEarnedUsd,
     paidWeekdayCount: paid.weekdayCount,
-    startedAtYmd: utcYmdFromIso(inv.started_at),
+    startedAtYmd: projection.startedAtYmd,
+    projection,
     todayIsAccrualDay,
     todayAccrued,
-    todayInterestUsd: todayIsAccrualDay && !todayAccrued ? earned.dailyInterestUsd : 0,
+    todayInterestUsd: todayIsAccrualDay && !todayAccrued ? projection.dailyNetUsd : 0,
   };
 }
 
@@ -106,14 +111,26 @@ async function listVipAccrualHistory(userId, limit = 60) {
       ? await sumVipAccrualsForInvestment(inv.id)
       : sumVipAccrualTotals(rows);
   const today = utcTodayYmd();
-  const earned =
+  const projection =
     inv != null
-      ? vipEarningsForWeekdays(
-          inv.principal_usd,
-          weekdaysElapsedSinceStart(inv.started_at, today, VIP_LOCK_DAYS),
-          VIP_DAILY_RATE,
-          VIP_COMMISSION_RATE
-        )
+      ? buildVipLockProjection({
+          startedAt: inv.started_at,
+          maturesAt: inv.matures_at,
+          principalUsd: inv.principal_usd,
+          lockDays: VIP_LOCK_DAYS,
+          dailyRate: VIP_DAILY_RATE,
+          commissionRate: VIP_COMMISSION_RATE,
+          asOfYmd: today,
+        })
+      : null;
+  const earned =
+    projection != null
+      ? {
+          weekdayCount: projection.weekdaysElapsed,
+          totalGrossEarnedUsd: projection.earnedSoFarGrossUsd,
+          totalCommissionUsd: projection.earnedSoFarCommissionUsd,
+          totalNetEarnedUsd: projection.earnedSoFarNetUsd,
+        }
       : {
           weekdayCount: paid.weekdayCount,
           totalGrossEarnedUsd: paid.totalGrossEarnedUsd,
@@ -123,12 +140,15 @@ async function listVipAccrualHistory(userId, limit = 60) {
   return {
     commissionRate: VIP_COMMISSION_RATE,
     accruals,
+    projection,
     totals: {
       weekdayCount: earned.weekdayCount,
       grossUsd: earned.totalGrossEarnedUsd,
       commissionUsd: earned.totalCommissionUsd,
       netUsd: earned.totalNetEarnedUsd,
       paidToCashUsd: paid.totalNetEarnedUsd,
+      remainingNetUsd: projection?.remainingNetUsd ?? 0,
+      fullLockNetUsd: projection?.fullLockNetUsd ?? 0,
     },
   };
 }

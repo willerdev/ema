@@ -1,5 +1,29 @@
 import { api } from './api';
 
+export type VipLockProjection = {
+  startedAt: string;
+  startedAtYmd: string;
+  maturesAt: string;
+  maturesAtYmd: string;
+  asOfDate: string;
+  lockWeekdays: number;
+  weekdaysElapsed: number;
+  weekdaysRemaining: number;
+  progressPercent: number;
+  dailyGrossUsd: number;
+  dailyCommissionUsd: number;
+  dailyNetUsd: number;
+  earnedSoFarGrossUsd: number;
+  earnedSoFarCommissionUsd: number;
+  earnedSoFarNetUsd: number;
+  remainingGrossUsd: number;
+  remainingCommissionUsd: number;
+  remainingNetUsd: number;
+  fullLockGrossUsd: number;
+  fullLockCommissionUsd: number;
+  fullLockNetUsd: number;
+};
+
 export type VipInvestment = {
   id: string;
   principalUsd: number;
@@ -30,6 +54,7 @@ export type VipInvestment = {
   paidToCashUsd?: number;
   paidWeekdayCount?: number;
   startedAtYmd?: string;
+  projection?: VipLockProjection;
 };
 
 export type VipEarningsTotals = {
@@ -38,6 +63,8 @@ export type VipEarningsTotals = {
   commissionUsd: number;
   netUsd: number;
   paidToCashUsd?: number;
+  remainingNetUsd?: number;
+  fullLockNetUsd?: number;
 };
 
 export type VipAccrual = {
@@ -66,7 +93,7 @@ export type VipSummary = {
 export const vipFarmerService = {
   getSummary: () => api.get<VipSummary>('/vip-farmers/summary'),
   getAccruals: (limit = 60) =>
-    api.get<{ commissionRate: number; accruals: VipAccrual[]; totals: VipEarningsTotals }>(
+    api.get<{ commissionRate: number; accruals: VipAccrual[]; projection: VipLockProjection | null; totals: VipEarningsTotals }>(
       `/vip-farmers/accruals?limit=${limit}`
     ),
   invest: (amount: number) =>
