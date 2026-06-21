@@ -2913,7 +2913,7 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
-const VIP_COMMISSION_RATE = 0.03;
+const VIP_COMMISSION_RATE = 0.3;
 const VIP_ACCRUAL_WEEKDAYS = 5;
 const VIP_LOCK_DAYS = 30;
 const VIP_MIN_INVEST_USD = 100;

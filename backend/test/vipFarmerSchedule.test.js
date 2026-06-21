@@ -35,11 +35,11 @@ test('weekdaysElapsedSinceStart caps at lock days', () => {
 });
 
 test('vipEarningsForWeekdays totals from weekday count', () => {
-  const e = vipEarningsForWeekdays(1000, 3, 0.09, 0.03);
+  const e = vipEarningsForWeekdays(1000, 3, 0.09, 0.3);
   assert.equal(e.weekdayCount, 3);
   assert.equal(e.totalGrossEarnedUsd, 270);
-  assert.equal(e.totalCommissionUsd, 8.1);
-  assert.equal(e.totalNetEarnedUsd, 261.9);
+  assert.equal(e.totalCommissionUsd, 81);
+  assert.equal(e.totalNetEarnedUsd, 189);
 });
 test('countWeekdaysInclusive excludes Sat and Sun in a full calendar week', () => {
   assert.equal(countWeekdaysInclusive('2026-06-01', '2026-06-07'), 5);
@@ -52,7 +52,7 @@ test('buildVipLockProjection earns nothing across a weekend-only range', () => {
     principalUsd: 1000,
     lockDays: 30,
     dailyRate: 0.09,
-    commissionRate: 0.03,
+    commissionRate: 0.3,
     asOfYmd: '2026-06-07',
   });
   assert.equal(p.weekdaysElapsed, 0);
@@ -66,21 +66,21 @@ test('buildVipLockProjection uses started_at for earned and full lock totals', (
     principalUsd: 1000,
     lockDays: 30,
     dailyRate: 0.09,
-    commissionRate: 0.03,
+    commissionRate: 0.3,
     asOfYmd: '2026-06-04',
   });
   assert.equal(p.startedAtYmd, '2026-06-02');
   assert.equal(p.weekdaysElapsed, 3);
   assert.equal(p.weekdaysRemaining, 27);
-  assert.equal(p.earnedSoFarNetUsd, 261.9);
-  assert.equal(p.fullLockNetUsd, 2619);
+  assert.equal(p.earnedSoFarNetUsd, 189);
+  assert.equal(p.fullLockNetUsd, 1890);
 });
 
-test('vipInterestProjection applies 3% platform fee to remaining net interest', () => {
-  const p = vipInterestProjection(1000, 5, 30, 0.09, 0.03);
+test('vipInterestProjection applies 30% platform fee to remaining net interest', () => {
+  const p = vipInterestProjection(1000, 5, 30, 0.09, 0.3);
   assert.equal(p.dailyGrossUsd, 90);
-  assert.equal(p.dailyPlatformFeeUsd, 2.7);
-  assert.equal(p.dailyInterestUsd, 87.3);
+  assert.equal(p.dailyPlatformFeeUsd, 27);
+  assert.equal(p.dailyInterestUsd, 63);
   assert.equal(p.remainingAccrualDays, 25);
-  assert.equal(p.remainingInterestUsd, 2182.5);
+  assert.equal(p.remainingInterestUsd, 1575);
 });
