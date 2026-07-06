@@ -91,7 +91,8 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
       let { cashWallet, airfarmingBalance } = await balancesForUser(req.userId);
       const autoFundEnabled = Boolean(state.auto_fund_enabled);
       const withdrawalTrustScore = await getWithdrawalTrustScoreForUser(req.userId);
-      const { nextDrop, upcomingDrops, eligibilityNotice, lastSettledDrop, pollIntervalSec } =
+      const pauseStatus = require('./airfarmingPause').pauseStatusFromState(state);
+      const { nextDrop, upcomingDrops, eligibilityNotice, dropsPausedNotice, lastSettledDrop, pollIntervalSec } =
         await buildDropStatus(req.userId, state.week_start, airfarmingBalance, { autoFundEnabled });
       ({ cashWallet, airfarmingBalance } = await balancesForUser(req.userId));
       const settled = await listAirfarmingDropsForWeek(req.userId, state.week_start, 50);
@@ -111,7 +112,9 @@ function registerAirfarmingRoutes(app, { authMiddleware }) {
         scheduleHours: [],
         lastEventAt: settled[0]?.paid_at || settled[0]?.due_at || null,
         autoFundEnabled,
-        dropsPaused: require('./airfarmingPause').pauseStatusFromState(state).dropsPausedNow,
+        dropsPaused: pauseStatus.dropsPausedNow,
+        dropsPauseUntil: pauseStatus.dropsPauseUntil,
+        dropsPausedNotice: dropsPausedNotice || null,
         platformHighlight: AIRFARMING_PLATFORM_HIGHLIGHT,
         nextDrop,
         upcomingDrops,

@@ -23,11 +23,17 @@ function formatDueLabel(dueAt: string): string {
 
 type UpcomingDropsListProps = {
   drops: AirfarmingUpcomingDrop[];
+  paused?: boolean;
+  pausedNotice?: string | null;
 };
 
-export function UpcomingDropsList({ drops }: UpcomingDropsListProps) {
-  if (!drops.length) {
-    return <Text style={styles.empty}>No upcoming drops scheduled for this week yet.</Text>;
+export function UpcomingDropsList({ drops, paused = false, pausedNotice }: UpcomingDropsListProps) {
+  if (paused || !drops.length) {
+    return (
+      <Text style={styles.empty}>
+        {pausedNotice || (paused ? 'No drop scheduled while your drops are paused.' : 'No upcoming drops scheduled for this week yet.')}
+      </Text>
+    );
   }
 
   const visible = drops.slice(0, 2);

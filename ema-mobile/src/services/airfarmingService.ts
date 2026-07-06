@@ -91,6 +91,9 @@ export type AirfarmingStatus = {
   dropsPaid?: number;
   dropsMissed?: number;
   autoFundEnabled: boolean;
+  dropsPaused?: boolean;
+  dropsPauseUntil?: string | null;
+  dropsPausedNotice?: string | null;
   scheduleHours: number[];
   lastEventAt: string | null;
   platformHighlight: AirfarmingPlatformHighlight | null;
@@ -249,6 +252,9 @@ function normalizeStatus(raw: unknown): AirfarmingStatus {
     dropsPaid: r.dropsPaid != null ? num(r.dropsPaid) : undefined,
     dropsMissed: r.dropsMissed != null ? num(r.dropsMissed) : undefined,
     autoFundEnabled: Boolean(r.autoFundEnabled),
+    dropsPaused: r.dropsPaused != null ? Boolean(r.dropsPaused) : undefined,
+    dropsPauseUntil: r.dropsPauseUntil != null ? String(r.dropsPauseUntil) : null,
+    dropsPausedNotice: r.dropsPausedNotice != null ? String(r.dropsPausedNotice) : null,
     scheduleHours: Array.isArray(sched) ? sched.map((x) => num(x)) : [],
     lastEventAt: r.lastEventAt == null ? null : String(r.lastEventAt),
     platformHighlight,

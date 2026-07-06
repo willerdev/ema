@@ -59,8 +59,9 @@ export function TradesHubScreen() {
     try {
       const status = await airfarmingService.getStatus();
       const eligible =
-        status.nextDrop?.eligibleNow === true ||
-        Boolean(status.upcomingDrops?.some((drop) => drop.eligibleNow === true));
+        !status.dropsPaused &&
+        (status.nextDrop?.eligibleNow === true ||
+          Boolean(status.upcomingDrops?.some((drop) => drop.eligibleNow === true)));
       setAirfarmingEligible(eligible);
     } catch {
       setAirfarmingEligible(false);

@@ -210,9 +210,14 @@ export function AirfarmingTradeScreen() {
     }
   };
 
-  const upcomingDrops =
-    status?.upcomingDrops?.length ? status.upcomingDrops : status?.nextDrop ? [status.nextDrop] : [];
-  const nextDrop = upcomingDrops[0] ?? status?.nextDrop ?? null;
+  const upcomingDrops = status?.dropsPaused
+    ? []
+    : status?.upcomingDrops?.length
+      ? status.upcomingDrops
+      : status?.nextDrop
+        ? [status.nextDrop]
+        : [];
+  const nextDrop = status?.dropsPaused ? null : (upcomingDrops[0] ?? status?.nextDrop ?? null);
   const trust = status?.withdrawalTrustScore;
   const nearDrop = countdownSec > 0 && countdownSec <= 120;
   const displayDropPhase: AirfarmingDropPhase =
@@ -295,6 +300,12 @@ export function AirfarmingTradeScreen() {
                 ) : (
                   <>
                     <Text style={styles.emptyDropTitle}>No drop scheduled</Text>
+                    <Text style={styles.emptyDropBody}>
+                      {status.dropsPausedNotice ||
+                        (status.dropsPaused
+                          ? 'Your drops are paused. Nothing is scheduled until drops resume.'
+                          : 'Check back soon or pull to refresh.')}
+                    </Text>
                     <PrimaryButton label='Refresh' onPress={() => void load()} style={{ marginTop: 12 }} />
                   </>
                 )}
@@ -303,7 +314,11 @@ export function AirfarmingTradeScreen() {
 
             <Card>
               <Text style={styles.section}>Upcoming drops</Text>
-              <UpcomingDropsList drops={upcomingDrops} />
+              <UpcomingDropsList
+                drops={upcomingDrops}
+                paused={Boolean(status.dropsPaused)}
+                pausedNotice={status.dropsPausedNotice}
+              />
             </Card>
 
             <Pressable
@@ -707,6 +722,7 @@ const styles = StyleSheet.create({
   eligibleNo: { backgroundColor: 'rgba(245,158,11,0.15)' },
   eligibilityText: { color: palette.textPrimary, fontSize: 12, fontWeight: '600', textAlign: 'center' },
   emptyDropTitle: { color: palette.textPrimary, fontSize: 18, fontWeight: '800', marginBottom: 8, textAlign: 'center' },
+  emptyDropBody: { color: palette.textSecondary, fontSize: 13, lineHeight: 19, textAlign: 'center' },
   section: { color: palette.textSecondary, marginBottom: 8, fontWeight: '700' },
   meta: { color: palette.textSecondary, marginBottom: 4 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 12 },

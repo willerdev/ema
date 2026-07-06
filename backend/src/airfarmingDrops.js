@@ -21,7 +21,7 @@ const {
   incrementAiDailyBudgetSpent,
   utcTodayYmd,
 } = require('./db');
-const { isDropPausedForUser } = require('./airfarmingPause');
+const { isDropPausedForUser, pauseStatusFromState } = require('./airfarmingPause');
 const { debitUsdtFamily, totalUsdtFamilyAvailable } = require('./usdtBalances');
 const { getWithdrawalTrustScoreForUser } = require('./services/withdrawalTrustScore');
 
@@ -37,6 +37,8 @@ const INTERVAL_HOURS = [2, 3, 5];
 const MAX_UPCOMING_PROJECTED = 24;
 const ELIGIBILITY_NOTICE =
   'Required balance ranges are fixed in advance. Your eligibility is based on your airfarming balance recorded 24 hours before each drop — not on funds added right before the drop window. This prevents gaming the schedule by depositing only when a range is shown.';
+const DROPS_PAUSED_NOTICE =
+  'Your drops are paused. No drop is scheduled right now — overdue drops are held until drops resume.';
 const MAX_PROFIT_PER_DROP = 5000;
 /** Default maximum airfarming drop interest % (overridden by platform settings). */
 const MAX_AIRFARMING_PERCENT = 57.9;
@@ -311,6 +313,60 @@ async function toPublicNextDrop(row, airfarmingBalance, userId, nowMs = Date.now
   return toPublicUpcomingDrop(row, { userId, airfarmingBalance, nowMs, isProjected: false });
 }
 
+function dropBandIndex(row) {
+  return row.band_index != null
+    ? Number(row.band_index)
+    : inferBandIndex(row.min_balance, row.max_balance);
+}
+
+async function buildDropsPausedNotice(userId, pauseCheck) {
+  if (!pauseCheck?.paused) return null;
+  if (pauseCheck.reason === 'global') {
+    return 'Drops are temporarily paused platform-wide. No drop is scheduled for you right now.';
+  }
+  const state = await getAirfarmingStateByUserId(userId);
+  const status = pauseStatusFromState(state);
+  if (status.pauseMode === 'scheduled' && status.dropsPauseUntil) {
+    const until = new Date(status.dropsPauseUntil).toLocaleString('en-US', {
+      timeZone: 'UTC',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    });
+    return `Your drops are paused until ${until}. No drop is scheduled right now.`;
+  }
+  return DROPS_PAUSED_NOTICE;
+}
+
+async function filterScheduledDropsForPause(userId, scheduledRows) {
+  const visible = [];
+  for (const row of scheduledRows || []) {
+    const pauseCheck = await isDropPausedForUser(userId, dropBandIndex(row));
+    if (!pauseCheck.paused) visible.push(row);
+  }
+  return visible;
+}
+
+async function deferOverdueDropWhilePaused(userId, drop, weekStart) {
+  if (!drop?.id) return null;
+  const now = Date.now();
+  const weekEnd = weekEndMs(weekStart);
+  const dropIndex = Number(drop.drop_index);
+  const intervalH = pickIntervalHours(userId, weekStart, dropIndex);
+  let dueMs = now + intervalH * 3600 * 1000;
+  if (dueMs >= weekEnd) dueMs = weekEnd - 60_000;
+  if (dueMs <= now) return null;
+
+  return updateAirfarmingDrop(drop.id, {
+    due_at: new Date(dueMs).toISOString(),
+    auto_fund_prepared_at: null,
+    auto_funded_cash: 0,
+    auto_funded_crypto: 0,
+  });
+}
+
 async function projectUpcomingDropsForWeek(userId, weekStart, scheduledRows) {
   const weekEnd = weekEndMs(weekStart);
   const projected = [];
@@ -356,7 +412,17 @@ async function projectUpcomingDropsForWeek(userId, weekStart, scheduledRows) {
 async function buildUpcomingDropsQueue(userId, weekStart, airfarmingBalance, options = {}) {
   const nowMs = Date.now();
   let scheduled = await listScheduledAirfarmingDropsForUser(userId, weekStart);
+  scheduled = await filterScheduledDropsForPause(userId, scheduled);
+
   if (!scheduled.length) {
+    const pauseCheck = await isDropPausedForUser(userId, null);
+    if (pauseCheck.paused) {
+      return {
+        upcomingDrops: [],
+        eligibilityNotice: ELIGIBILITY_NOTICE,
+        dropsPausedNotice: await buildDropsPausedNotice(userId, pauseCheck),
+      };
+    }
     const one = await ensureNextScheduledDrop(userId, weekStart);
     if (one) scheduled = [one];
   }
@@ -380,12 +446,25 @@ async function buildUpcomingDropsQueue(userId, weekStart, airfarmingBalance, opt
   const ctx = { userId, airfarmingBalance, nowMs };
   const upcomingDrops = [];
   for (const row of allRows) {
+    const pauseCheck = await isDropPausedForUser(userId, dropBandIndex(row));
+    if (pauseCheck.paused) continue;
     const isProjected = !row.id;
     const pub = await toPublicUpcomingDrop(row, { ...ctx, isProjected });
     if (pub) upcomingDrops.push(pub);
   }
 
-  return { upcomingDrops, eligibilityNotice: ELIGIBILITY_NOTICE };
+  if (!upcomingDrops.length) {
+    const pauseCheck = await isDropPausedForUser(userId, null);
+    if (pauseCheck.paused) {
+      return {
+        upcomingDrops: [],
+        eligibilityNotice: ELIGIBILITY_NOTICE,
+        dropsPausedNotice: await buildDropsPausedNotice(userId, pauseCheck),
+      };
+    }
+  }
+
+  return { upcomingDrops, eligibilityNotice: ELIGIBILITY_NOTICE, dropsPausedNotice: null };
 }
 
 function dropToHistoryRow(row) {
@@ -710,7 +789,12 @@ async function processDueDrops(userId, weekStart, options = {}) {
         ? Number(scheduled.band_index)
         : inferBandIndex(scheduled.min_balance, scheduled.max_balance);
     const pauseCheck = await isDropPausedForUser(userId, bandIndex);
-    if (pauseCheck.paused) break;
+    if (pauseCheck.paused) {
+      if (Date.now() >= dueMs) {
+        await deferOverdueDropWhilePaused(userId, scheduled, weekStart);
+      }
+      break;
+    }
 
     lastSettled = await settleDrop(userId, scheduled, options);
     processed += 1;
@@ -725,7 +809,7 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
   const { lastSettled } = await processDueDrops(userId, weekStart, options);
   const af = await getAirfarmingWalletByUserId(userId);
   const latestBalance = Number.parseFloat(String(af?.balance ?? airfarmingBalance ?? 0)) || 0;
-  const { upcomingDrops, eligibilityNotice } = await buildUpcomingDropsQueue(
+  const { upcomingDrops, eligibilityNotice, dropsPausedNotice } = await buildUpcomingDropsQueue(
     userId,
     weekStart,
     latestBalance,
@@ -742,7 +826,7 @@ async function buildDropStatus(userId, weekStart, airfarmingBalance, options = {
   const phase = nextDrop?.dropPhase;
   const pollIntervalSec =
     phase === 'preparing' || phase === 'processing' || lastSettledDrop ? 5 : 45;
-  return { nextDrop, upcomingDrops, eligibilityNotice, lastSettledDrop, pollIntervalSec };
+  return { nextDrop, upcomingDrops, eligibilityNotice, dropsPausedNotice, lastSettledDrop, pollIntervalSec };
 }
 
 module.exports = {
