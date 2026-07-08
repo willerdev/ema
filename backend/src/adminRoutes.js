@@ -38,6 +38,7 @@ const { adminAuthMiddleware, isSuperAdminUsername, ADMIN_PURPOSE } =
 const { createDirectDropForUser } = require('./directDropService');
 const { updateUserScheduledDropsBalanceWindow } = require('./userDropBalanceService');
 const { registerAdminLiveTradingRoutes } = require('./adminLiveTradingRoutes');
+const { registerAdminVipFarmerRoutes } = require('./adminVipFarmerRoutes');
 const {
   clampAirfarmingPercent,
   MAX_AIRFARMING_PERCENT,
@@ -48,7 +49,7 @@ const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 const { registerAdminAiRoutes } = require('./adminAiRoutes');
 const { getJournalMonth, getJournalDay } = require('./journalService');
 const { adminCreateTradeForUser, listTradeHistory } = require('./userTradeService');
-const { listVipAccrualHistory } = require('./vipFarmerService');
+const { listVipAccrualHistory, adminInitiateVipInvestment } = require('./vipFarmerService');
 const {
   getUserDropScheduleView,
   saveUserDropScheduleDraft,
@@ -160,6 +161,7 @@ async function validateDropPatch(body) {
 function registerAdminRoutes(app) {
   registerAdminAiRoutes(app);
   registerAdminLiveTradingRoutes(app, { adminAuthMiddleware });
+  registerAdminVipFarmerRoutes(app, { adminAuthMiddleware });
   app.post('/admin/api/login', (req, res) => {
     const { username, password } = req.body || {};
     const creds = adminCredentials();
@@ -296,6 +298,27 @@ function registerAdminRoutes(app) {
         return res.status(503).json({ message: 'VIP schema not ready. Run 20260605_vip_farmers.sql and 20260610_vip_accrual_commission.sql.' });
       }
       return res.status(500).json({ message: e.message || 'Failed to load VIP accruals' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/vip-farmers/initiate', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const result = await adminInitiateVipInvestment(req.params.id, {
+        principalUsd: req.body?.principalUsd ?? req.body?.amount,
+        fundFrom: req.body?.fundFrom,
+        reason: req.body?.reason,
+        adminUser: req.adminUser,
+      });
+      return res.status(201).json({ ok: true, ...result });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'VIP schema not ready. Run 20260605_vip_farmers.sql and 20260610_vip_accrual_commission.sql.' });
+      }
+      console.error('[admin/users/:id/vip-farmers/initiate]', e);
+      return res.status(500).json({ message: e.message || 'Failed to start VIP investment' });
     }
   });
 

@@ -45,7 +45,16 @@ function countWeekdaysInclusive(startYmd, endYmd) {
   return count;
 }
 
-function weekdaysElapsedSinceStart(startedAt, asOfYmd, lockDays = 30) {
+function calendarDaysSinceStart(startedAt, asOfYmd) {
+  const startYmd = utcYmdFromIso(startedAt);
+  const endYmd = String(asOfYmd || '').slice(0, 10);
+  if (!startYmd || !endYmd || endYmd < startYmd) return 0;
+  const startMs = Date.parse(`${startYmd}T00:00:00.000Z`);
+  const endMs = Date.parse(`${endYmd}T00:00:00.000Z`);
+  return Math.floor((endMs - startMs) / 86400000) + 1;
+}
+
+function weekdaysElapsedSinceStart(startedAt, asOfYmd, lockDays = 22) {
   const startYmd = utcYmdFromIso(startedAt);
   const endYmd = String(asOfYmd || '').slice(0, 10);
   if (!startYmd || !endYmd || endYmd < startYmd) return 0;
@@ -78,7 +87,7 @@ function buildVipLockProjection({
   startedAt,
   maturesAt,
   principalUsd,
-  lockDays = 30,
+  lockDays = 22,
   dailyRate = 0.09,
   commissionRate = 0,
   asOfYmd,
@@ -142,6 +151,7 @@ module.exports = {
   utcYmdFromIso,
   nextUtcYmd,
   countWeekdaysInclusive,
+  calendarDaysSinceStart,
   weekdaysElapsedSinceStart,
   vipEarningsForWeekdays,
   buildVipLockProjection,

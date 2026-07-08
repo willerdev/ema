@@ -11,12 +11,6 @@ const {
   listActiveVipInvestments,
   getVipAccrualForInvestmentDay,
   insertVipAccrual,
-  VIP_DAILY_RATE,
-  VIP_COMMISSION_RATE,
-  VIP_ACCRUAL_WEEKDAYS,
-  VIP_LOCK_DAYS,
-  VIP_MIN_INVEST_USD,
-  VIP_EARLY_PENALTY_RATE,
   vipInvestmentToApi,
   vipAccrualToApi,
   listVipAccrualsForUserRecent,
@@ -25,23 +19,37 @@ const {
   utcTodayYmd,
 } = require('./db');
 const {
-  addUtcWeekdays,
+  VIP_DAILY_RATE,
+  PLATFORM_FEE_VIP_RATE,
+  VIP_ACCRUAL_MAX_WORKING_DAYS,
+  VIP_ACCRUAL_WEEKDAYS,
+  VIP_LOCK_DAYS_CALENDAR,
+  VIP_MIN_INVEST_USD,
+  VIP_EXIT_COMMISSION_RATE,
+  roundUsd,
+  maturityAtFromStart,
+  availableRevenue,
+  isPenaltyFreeExit,
+  computeReinvestQuote,
+  dailyAccrualAmounts,
+} = require('./vipFarmerConstants');
+const {
   isVipAccrualDayYmd,
   utcYmdFromIso,
   nextUtcYmd,
   buildVipLockProjection,
+  calendarDaysSinceStart,
 } = require('./vipFarmerSchedule');
+const {
+  newId: repoNewId,
+  getPendingVipExitForUser,
+  insertVipReinvestEvent,
+  insertPlatformRevenueEvent,
+} = require('./vipFarmerRepository');
+const { getVipLoanStatus } = require('./vipLoanService');
 
 function newId() {
   return crypto.randomUUID();
-}
-
-function roundUsd(n) {
-  return Math.round(Number(n || 0) * 100) / 100;
-}
-
-function maturityAtFromStart(startedAt) {
-  return addUtcWeekdays(startedAt, VIP_LOCK_DAYS);
 }
 
 async function enrichVipInvestmentApi(inv) {
@@ -57,16 +65,20 @@ async function enrichVipInvestmentApi(inv) {
     startedAt: inv.started_at,
     maturesAt: inv.matures_at,
     principalUsd: inv.principal_usd,
-    lockDays: VIP_LOCK_DAYS,
+    lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
     dailyRate: VIP_DAILY_RATE,
-    commissionRate: VIP_COMMISSION_RATE,
+    commissionRate: PLATFORM_FEE_VIP_RATE,
     asOfYmd: today,
   });
+  const calendarDays = calendarDaysSinceStart(inv.started_at, today);
+  const avail = availableRevenue(inv);
   return {
     ...api,
     weekdayCount: projection.weekdaysElapsed,
     daysAccrued: projection.weekdaysElapsed,
     daysLeft: projection.weekdaysRemaining,
+    calendarDaysElapsed: calendarDays,
+    calendarDaysLeft: Math.max(0, VIP_LOCK_DAYS_CALENDAR - calendarDays),
     remainingAccrualDays: projection.weekdaysRemaining,
     dailyGrossUsd: projection.dailyGrossUsd,
     dailyPlatformFeeUsd: projection.dailyCommissionUsd,
@@ -75,10 +87,13 @@ async function enrichVipInvestmentApi(inv) {
     totalCommissionUsd: projection.earnedSoFarCommissionUsd,
     totalNetEarnedUsd: projection.earnedSoFarNetUsd,
     remainingInterestUsd: projection.remainingNetUsd,
-    totalAccruedUsd: projection.earnedSoFarNetUsd,
+    totalAccruedUsd: Number(inv.total_accrued_usd),
+    availableRevenueUsd: avail,
+    revenueWithdrawnUsd: Number(inv.revenue_withdrawn_usd || 0),
     paidToCashUsd: paid.totalNetEarnedUsd,
     paidWeekdayCount: paid.weekdayCount,
     startedAtYmd: projection.startedAtYmd,
+    penaltyFree: isPenaltyFreeExit(inv, today),
     projection,
     todayIsAccrualDay,
     todayAccrued,
@@ -90,16 +105,26 @@ async function getVipSummary(userId) {
   const wallet = await ensureWalletForUser(userId);
   const cash = roundUsd(wallet?.balance);
   const inv = await getActiveVipInvestmentForUser(userId);
+  const pendingExit = await getPendingVipExitForUser(userId);
+  const loanStatus = await getVipLoanStatus(userId);
   return {
     cashWalletUsd: cash,
     minInvestUsd: VIP_MIN_INVEST_USD,
     dailyRate: VIP_DAILY_RATE,
-    commissionRate: VIP_COMMISSION_RATE,
+    platformFeeRate: PLATFORM_FEE_VIP_RATE,
+    netDailyRate: roundUsd(VIP_DAILY_RATE * (1 - PLATFORM_FEE_VIP_RATE)),
+    commissionRate: PLATFORM_FEE_VIP_RATE,
     accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
     weekendsExcluded: true,
-    lockDays: VIP_LOCK_DAYS,
-    earlyPenaltyRate: VIP_EARLY_PENALTY_RATE,
+    lockCalendarDays: VIP_LOCK_DAYS_CALENDAR,
+    lockWorkingDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
+    lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
+    exitCommissionRate: VIP_EXIT_COMMISSION_RATE,
     investment: await enrichVipInvestmentApi(inv),
+    pendingExitRequest: pendingExit
+      ? { id: pendingExit.id, status: pendingExit.status, mode: pendingExit.mode }
+      : null,
+    loan: loanStatus,
   };
 }
 
@@ -118,9 +143,9 @@ async function listVipAccrualHistory(userId, limit = 60) {
           startedAt: inv.started_at,
           maturesAt: inv.matures_at,
           principalUsd: inv.principal_usd,
-          lockDays: VIP_LOCK_DAYS,
+          lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
           dailyRate: VIP_DAILY_RATE,
-          commissionRate: VIP_COMMISSION_RATE,
+          commissionRate: PLATFORM_FEE_VIP_RATE,
           asOfYmd: today,
         })
       : null;
@@ -139,7 +164,7 @@ async function listVipAccrualHistory(userId, limit = 60) {
           totalNetEarnedUsd: paid.totalNetEarnedUsd,
         };
   return {
-    commissionRate: VIP_COMMISSION_RATE,
+    commissionRate: PLATFORM_FEE_VIP_RATE,
     accruals,
     projection,
     totals: {
@@ -190,6 +215,72 @@ async function investVip(userId, amount) {
   return { investment: await enrichVipInvestmentApi(row), cashWalletUsd: roundUsd(cash - amt) };
 }
 
+async function adminInitiateVipInvestment(userId, { principalUsd, fundFrom = 'cash', reason, adminUser }) {
+  const amt = roundUsd(principalUsd);
+  if (!Number.isFinite(amt) || amt < VIP_MIN_INVEST_USD) {
+    const err = new Error(`Minimum investment is $${VIP_MIN_INVEST_USD}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const reasonText = String(reason || '').trim();
+  if (!reasonText) {
+    const err = new Error('Reason is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const existing = await getActiveVipInvestmentForUser(userId);
+  if (existing) {
+    const err = new Error('User already has an active VIP Farmers investment');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const mode = fundFrom === 'admin_credit' ? 'admin_credit' : 'cash';
+  const wallet = await ensureWalletForUser(userId);
+  const cash = roundUsd(wallet?.balance);
+
+  if (mode === 'cash' && cash < amt) {
+    const err = new Error('Insufficient cash wallet balance');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const now = new Date().toISOString();
+  const maturesAt = maturityAtFromStart(now);
+  if (mode === 'cash') {
+    await setWalletBalance(userId, roundUsd(cash - amt));
+  }
+
+  const row = await createVipInvestment({
+    userId,
+    principalUsd: amt,
+    startedAt: now,
+    maturesAt,
+  });
+
+  console.info('[admin/vip-farmers/initiate]', {
+    adminUser,
+    userId,
+    investmentId: row.id,
+    principalUsd: amt,
+    fundFrom: mode,
+    reason: reasonText,
+    startedAt: now,
+    maturesAt,
+    lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
+  });
+
+  return {
+    investment: await enrichVipInvestmentApi(row),
+    cashWalletUsd: mode === 'cash' ? roundUsd(cash - amt) : cash,
+    fundFrom: mode,
+    lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
+    reason: reasonText,
+  };
+}
+
 async function addCapitalVip(userId, amount) {
   const amt = roundUsd(amount);
   if (!Number.isFinite(amt) || amt < VIP_MIN_INVEST_USD) {
@@ -222,7 +313,6 @@ async function addCapitalVip(userId, amount) {
     startedAt: now,
     maturesAt,
     daysAccrued: 0,
-    totalAccruedUsd: 0,
     status: 'active',
   });
 
@@ -234,79 +324,84 @@ async function addCapitalVip(userId, amount) {
   };
 }
 
-async function withdrawVipAtMaturity(userId) {
+async function reinvestVip(userId, amount) {
+  const pending = await getPendingVipExitForUser(userId);
+  if (pending) {
+    const err = new Error('Cannot reinvest while an exit request is pending');
+    err.statusCode = 400;
+    throw err;
+  }
+
   const inv = await getActiveVipInvestmentForUser(userId);
   if (!inv) {
     const err = new Error('No active VIP investment');
     err.statusCode = 400;
     throw err;
   }
-  const accrualsComplete = Number(inv.days_accrued) >= VIP_LOCK_DAYS;
-  const calendarMature = Date.now() >= new Date(inv.matures_at).getTime();
-  if (!accrualsComplete && !calendarMature) {
-    const err = new Error('Investment is still locked until all weekday accruals complete');
+
+  const avail = availableRevenue(inv);
+  const quote = computeReinvestQuote(amount, avail);
+  if (quote.grossRevenue <= 0 || quote.grossRevenue > avail) {
+    const err = new Error('Invalid reinvest amount');
     err.statusCode = 400;
     throw err;
   }
 
-  const principal = roundUsd(inv.principal_usd);
-  const wallet = await ensureWalletForUser(userId);
-  const cash = roundUsd(wallet?.balance);
-  const nextCash = roundUsd(cash + principal);
-  await setWalletBalance(userId, nextCash);
-  await createTransaction({
-    userId,
-    type: 'deposit',
-    amount: principal,
-    status: 'completed',
+  const now = new Date().toISOString();
+  const maturesAt = maturityAtFromStart(now);
+  const previousPrincipal = roundUsd(inv.principal_usd);
+  const newPrincipal = roundUsd(previousPrincipal + quote.reinvestedUsd);
+  const newRevenueWithdrawn = roundUsd(Number(inv.revenue_withdrawn_usd || 0) + quote.grossRevenue);
+
+  const row = await updateVipInvestment(inv.id, {
+    principalUsd: newPrincipal,
+    startedAt: now,
+    maturesAt,
+    daysAccrued: 0,
+    revenueWithdrawnUsd: newRevenueWithdrawn,
+    status: 'active',
   });
-  await updateVipInvestment(inv.id, { status: 'closed' });
+
+  await insertVipReinvestEvent({
+    id: repoNewId(),
+    user_id: userId,
+    investment_id: inv.id,
+    amount_usd: quote.reinvestedUsd,
+    previous_principal_usd: previousPrincipal,
+    new_principal_usd: newPrincipal,
+    lock_reset: true,
+    created_at: now,
+  });
+
+  if (quote.commissionUsd > 0) {
+    await insertPlatformRevenueEvent({
+      userId,
+      investmentId: inv.id,
+      eventType: 'vip_reinvest_commission',
+      amountUsd: quote.commissionUsd,
+      meta: { grossRevenue: quote.grossRevenue },
+    });
+  }
 
   return {
-    principalReturned: principal,
-    cashWalletUsd: nextCash,
-    investment: vipInvestmentToApi({ ...inv, status: 'closed' }),
+    investment: await enrichVipInvestmentApi(row),
+    reinvestedUsd: quote.reinvestedUsd,
+    commissionUsd: quote.commissionUsd,
+    grossRevenueUsd: quote.grossRevenue,
+    lockReset: true,
   };
 }
 
+async function withdrawVipAtMaturity(userId) {
+  const err = new Error('Use POST /vip-farmers/exit/request for withdrawals');
+  err.statusCode = 400;
+  throw err;
+}
+
 async function earlyWithdrawVip(userId) {
-  const inv = await getActiveVipInvestmentForUser(userId);
-  if (!inv) {
-    const err = new Error('No active VIP investment');
-    err.statusCode = 400;
-    throw err;
-  }
-  if (Date.now() >= new Date(inv.matures_at).getTime()) {
-    const err = new Error('Use normal withdraw after maturity');
-    err.statusCode = 400;
-    throw err;
-  }
-
-  const available = roundUsd(inv.principal_usd);
-  const penalty = roundUsd(available * VIP_EARLY_PENALTY_RATE);
-  const payout = roundUsd(available - penalty);
-
-  const wallet = await ensureWalletForUser(userId);
-  const cash = roundUsd(wallet?.balance);
-  const nextCash = roundUsd(cash + payout);
-  await setWalletBalance(userId, nextCash);
-  if (payout > 0) {
-    await createTransaction({
-      userId,
-      type: 'deposit',
-      amount: payout,
-      status: 'completed',
-    });
-  }
-  await updateVipInvestment(inv.id, { status: 'early_withdrawn' });
-
-  return {
-    available,
-    penalty,
-    payout,
-    cashWalletUsd: nextCash,
-    investment: vipInvestmentToApi({ ...inv, status: 'early_withdrawn' }),
-  };
+  const err = new Error('Use POST /vip-farmers/exit/request for early exit');
+  err.statusCode = 400;
+  throw err;
 }
 
 async function tryAccrueVipDay(inv, planDate) {
@@ -317,7 +412,7 @@ async function tryAccrueVipDay(inv, planDate) {
   if (!isVipAccrualDayYmd(planDate)) {
     return { applied: false, skipped: true, inv };
   }
-  if (Number(inv.days_accrued) >= VIP_LOCK_DAYS) {
+  if (Number(inv.days_accrued) >= VIP_ACCRUAL_MAX_WORKING_DAYS) {
     return { applied: false, skipped: true, inv };
   }
   const existing = await getVipAccrualForInvestmentDay(inv.id, planDate);
@@ -325,10 +420,7 @@ async function tryAccrueVipDay(inv, planDate) {
     return { applied: false, skipped: true, inv };
   }
 
-  const principal = roundUsd(inv.principal_usd);
-  const gross = roundUsd(principal * VIP_DAILY_RATE);
-  const commission = roundUsd(gross * VIP_COMMISSION_RATE);
-  const net = roundUsd(gross - commission);
+  const { gross, platformFee, net } = dailyAccrualAmounts(inv.principal_usd);
   if (net <= 0) {
     return { applied: false, skipped: true, inv };
   }
@@ -351,10 +443,20 @@ async function tryAccrueVipDay(inv, planDate) {
     rate: VIP_DAILY_RATE,
     amount: net,
     gross_amount: gross,
-    commission_rate: VIP_COMMISSION_RATE,
-    commission_amount: commission,
+    commission_rate: PLATFORM_FEE_VIP_RATE,
+    commission_amount: platformFee,
     created_at: new Date().toISOString(),
   });
+
+  if (platformFee > 0) {
+    await insertPlatformRevenueEvent({
+      userId: inv.user_id,
+      investmentId: inv.id,
+      eventType: 'vip_accrual',
+      amountUsd: platformFee,
+      meta: { accrualDate: planDate, gross },
+    });
+  }
 
   const updated = await updateVipInvestment(inv.id, {
     totalAccruedUsd: roundUsd(Number(inv.total_accrued_usd) + net),
@@ -373,7 +475,7 @@ async function runVipDailyAccrual(planDate = utcTodayYmd()) {
     const startYmd = utcYmdFromIso(inv.started_at);
     let cursor = startYmd;
     let current = inv;
-    while (cursor <= planDate && Number(current.days_accrued) < VIP_LOCK_DAYS) {
+    while (cursor <= planDate && Number(current.days_accrued) < VIP_ACCRUAL_MAX_WORKING_DAYS) {
       const result = await tryAccrueVipDay(current, cursor);
       if (result.applied) {
         applied += 1;
@@ -399,8 +501,11 @@ module.exports = {
   getVipSummary,
   listVipAccrualHistory,
   investVip,
+  adminInitiateVipInvestment,
   addCapitalVip,
+  reinvestVip,
   withdrawVipAtMaturity,
   earlyWithdrawVip,
   runVipDailyAccrual,
+  enrichVipInvestmentApi,
 };

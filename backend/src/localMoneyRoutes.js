@@ -13,7 +13,7 @@ const {
 } = require('./db');
 const { COMPLETED_STATUSES, fulfillLocalMoneyOrder } = require('./localMoneyFulfillment');
 const { verifyUserTotp } = require('./totpVerify');
-const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
+const { userHasVipLoanWithdrawalBlock } = require('./vipLoanService');
 const {
   getRegion,
   fiatFromUsdt,
@@ -246,6 +246,13 @@ function registerLocalMoneyRoutes(app, { authMiddleware }) {
           return res.status(totp.status || 400).json({
             message: totp.message,
             code: totp.code,
+          });
+        }
+
+        if (await userHasVipLoanWithdrawalBlock(req.userId)) {
+          return res.status(400).json({
+            message: 'Withdrawals are blocked while you have a pending or active VIP loan.',
+            code: 'VIP_LOAN_WITHDRAWAL_BLOCK',
           });
         }
 

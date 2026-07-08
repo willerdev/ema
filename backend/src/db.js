@@ -2913,11 +2913,17 @@ async function listAirfarmingStatesByUserIds(userIds) {
 }
 
 const VIP_DAILY_RATE = 0.09;
-const VIP_COMMISSION_RATE = 0.3;
-const VIP_ACCRUAL_WEEKDAYS = 5;
-const VIP_LOCK_DAYS = 30;
-const VIP_MIN_INVEST_USD = 100;
-const VIP_EARLY_PENALTY_RATE = 0.3;
+const {
+  PLATFORM_FEE_VIP_RATE,
+  VIP_ACCRUAL_MAX_WORKING_DAYS,
+  VIP_ACCRUAL_WEEKDAYS,
+  VIP_LOCK_DAYS_CALENDAR,
+  VIP_MIN_INVEST_USD,
+  VIP_EXIT_PENALTY_RATE,
+} = require('./vipFarmerConstants');
+const VIP_COMMISSION_RATE = PLATFORM_FEE_VIP_RATE;
+const VIP_LOCK_DAYS = VIP_ACCRUAL_MAX_WORKING_DAYS;
+const VIP_EARLY_PENALTY_RATE = VIP_EXIT_PENALTY_RATE;
 
 function roundWalletUsd(value) {
   return Math.round(Number(value || 0) * 100) / 100;
@@ -2925,7 +2931,8 @@ function roundWalletUsd(value) {
 
 function vipInvestmentToApi(row) {
   if (!row) return null;
-  const { buildVipLockProjection } = require('./vipFarmerSchedule');
+  const { buildVipLockProjection, calendarDaysSinceStart } = require('./vipFarmerSchedule');
+  const { availableRevenue } = require('./vipFarmerConstants');
   const now = Date.now();
   const maturesMs = new Date(row.matures_at).getTime();
   const paidWeekdays = Number(row.days_accrued);
@@ -2936,15 +2943,16 @@ function vipInvestmentToApi(row) {
         startedAt: row.started_at,
         maturesAt: row.matures_at,
         principalUsd: row.principal_usd,
-        lockDays: VIP_LOCK_DAYS,
+        lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
         dailyRate: VIP_DAILY_RATE,
-        commissionRate: VIP_COMMISSION_RATE,
+        commissionRate: PLATFORM_FEE_VIP_RATE,
         asOfYmd: today,
       })
     : null;
   const weekdaysElapsed = projection ? projection.weekdaysElapsed : paidWeekdays;
-  const weekdaysRemaining = projection ? projection.weekdaysRemaining : Math.max(0, VIP_LOCK_DAYS - paidWeekdays);
-  const accrualsComplete = paidWeekdays >= VIP_LOCK_DAYS || weekdaysElapsed >= VIP_LOCK_DAYS;
+  const weekdaysRemaining = projection ? projection.weekdaysRemaining : Math.max(0, VIP_ACCRUAL_MAX_WORKING_DAYS - paidWeekdays);
+  const accrualsComplete = paidWeekdays >= VIP_ACCRUAL_MAX_WORKING_DAYS || weekdaysElapsed >= VIP_ACCRUAL_MAX_WORKING_DAYS;
+  const calendarDaysElapsed = calendarDaysSinceStart(row.started_at, today);
   const calendarDaysLeft = Math.max(0, Math.ceil((maturesMs - now) / (24 * 3600 * 1000)));
   return {
     id: row.id,
@@ -2953,17 +2961,23 @@ function vipInvestmentToApi(row) {
     startedAt: row.started_at,
     maturesAt: row.matures_at,
     status: row.status,
-    totalAccruedUsd: projection ? projection.earnedSoFarNetUsd : Number(row.total_accrued_usd),
+    totalAccruedUsd: Number(row.total_accrued_usd),
+    availableRevenueUsd: availableRevenue(row),
+    revenueWithdrawnUsd: Number(row.revenue_withdrawn_usd || 0),
     daysAccrued: weekdaysElapsed,
     paidWeekdaysAccrued: paidWeekdays,
     daysLeft: weekdaysRemaining,
-    calendarDaysLeft,
+    calendarDaysElapsed,
+    calendarDaysLeft: Math.max(0, VIP_LOCK_DAYS_CALENDAR - calendarDaysElapsed),
     matured: accrualsComplete || now >= maturesMs,
     dailyRate: VIP_DAILY_RATE,
-    lockDays: VIP_LOCK_DAYS,
+    lockCalendarDays: VIP_LOCK_DAYS_CALENDAR,
+    lockWorkingDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
+    lockDays: VIP_ACCRUAL_MAX_WORKING_DAYS,
     accrualWeekdays: VIP_ACCRUAL_WEEKDAYS,
     weekendsExcluded: true,
-    commissionRate: VIP_COMMISSION_RATE,
+    platformFeeRate: PLATFORM_FEE_VIP_RATE,
+    commissionRate: PLATFORM_FEE_VIP_RATE,
     dailyGrossUsd: projection?.dailyGrossUsd ?? 0,
     dailyPlatformFeeUsd: projection?.dailyCommissionUsd ?? 0,
     dailyInterestUsd: projection?.dailyNetUsd ?? 0,
@@ -3003,6 +3017,7 @@ async function createVipInvestment({ userId, principalUsd, startedAt, maturesAt 
     matures_at: maturesAt,
     status: 'active',
     total_accrued_usd: 0,
+    revenue_withdrawn_usd: 0,
     days_accrued: 0,
     created_at: now,
     updated_at: now,
@@ -3020,6 +3035,7 @@ async function updateVipInvestment(investmentId, patch) {
   if (patch.maturesAt !== undefined) row.matures_at = patch.maturesAt;
   if (patch.totalAccruedUsd !== undefined) row.total_accrued_usd = roundWalletUsd(patch.totalAccruedUsd);
   if (patch.daysAccrued !== undefined) row.days_accrued = Number(patch.daysAccrued);
+  if (patch.revenueWithdrawnUsd !== undefined) row.revenue_withdrawn_usd = roundWalletUsd(patch.revenueWithdrawnUsd);
   const { data, error } = await supabase
     .from('vip_investments')
     .update(row)
@@ -3035,7 +3051,7 @@ async function listActiveVipInvestments() {
     .from('vip_investments')
     .select('*')
     .eq('status', 'active')
-    .lt('days_accrued', VIP_LOCK_DAYS);
+    .lt('days_accrued', VIP_ACCRUAL_MAX_WORKING_DAYS);
   if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];

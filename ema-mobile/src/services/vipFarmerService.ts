@@ -31,15 +31,23 @@ export type VipInvestment = {
   maturesAt: string;
   status: string;
   totalAccruedUsd: number;
+  availableRevenueUsd?: number;
+  revenueWithdrawnUsd?: number;
   daysAccrued: number;
   daysLeft: number;
+  calendarDaysElapsed?: number;
   calendarDaysLeft?: number;
+  penaltyFree?: boolean;
   matured: boolean;
   dailyRate: number;
   lockDays: number;
+  lockCalendarDays?: number;
+  lockWorkingDays?: number;
   accrualWeekdays?: number;
   weekendsExcluded?: boolean;
   commissionRate?: number;
+  platformFeeRate?: number;
+  exitCommissionRate?: number;
   dailyGrossUsd?: number;
   dailyPlatformFeeUsd?: number;
   dailyInterestUsd?: number;
@@ -56,6 +64,57 @@ export type VipInvestment = {
   paidWeekdayCount?: number;
   startedAtYmd?: string;
   projection?: VipLockProjection;
+};
+
+export type VipExitQuote = {
+  mode: 'full_stop' | 'partial_continue';
+  revenuePercent: number;
+  destination: 'platform' | 'direct_wallet';
+  penaltyFree: boolean;
+  principalUsd: number;
+  revenueBaseUsd: number;
+  revenueSelectedUsd: number;
+  penaltyUsd: number;
+  gasFeesUsd: number;
+  commissionUsd: number;
+  gasRewardUsd: number;
+  netRevenueUsd: number;
+  principalReturnUsd: number;
+  investmentExtraCreditUsd: number;
+  netTotalUsd: number;
+  workingDays: number;
+  calendarDays: number;
+  revenuePercents: number[];
+};
+
+export type VipExitRequest = {
+  id: string;
+  mode: string;
+  revenuePercent: number;
+  destination: string;
+  status: string;
+  netTotalUsd: number;
+  penaltyUsd: number;
+  gasFeesUsd: number;
+  commissionUsd: number;
+  createdAt: string;
+};
+
+export type VipLoanStatus = {
+  eligible: boolean;
+  lifetimeAccrualDays: number;
+  lastMonthEarningsUsd: number;
+  maxLoanUsd: number;
+  minLoanUsd: number;
+  commissionRate: number;
+  blocksWithdrawals: boolean;
+  loan: {
+    id: string;
+    amountUsd: number;
+    outstandingUsd: number;
+    repaidUsd: number;
+    status: string;
+  } | null;
 };
 
 export type VipEarningsTotals = {
@@ -84,12 +143,18 @@ export type VipSummary = {
   cashWalletUsd: number;
   minInvestUsd: number;
   dailyRate: number;
+  platformFeeRate?: number;
+  netDailyRate?: number;
   commissionRate?: number;
+  exitCommissionRate?: number;
   accrualWeekdays?: number;
   lockDays: number;
+  lockCalendarDays?: number;
+  lockWorkingDays?: number;
   weekendsExcluded?: boolean;
-  earlyPenaltyRate: number;
   investment: VipInvestment | null;
+  pendingExitRequest?: { id: string; status: string; mode: string } | null;
+  loan?: VipLoanStatus;
 };
 
 export const vipFarmerService = {
@@ -105,14 +170,25 @@ export const vipFarmerService = {
       '/vip-farmers/add-capital',
       { amount }
     ),
-  withdraw: () =>
-    api.post<{ principalReturned: number; cashWalletUsd: number; investment: VipInvestment }>(
-      '/vip-farmers/withdraw',
-      {}
+  reinvest: (amount?: number) =>
+    api.post<{ investment: VipInvestment; reinvestedUsd: number; commissionUsd: number; grossRevenueUsd: number }>(
+      '/vip-farmers/reinvest',
+      amount != null ? { amount } : {}
     ),
-  earlyWithdraw: () =>
-    api.post<{ available: number; penalty: number; payout: number; cashWalletUsd: number }>(
-      '/vip-farmers/early-withdraw',
-      {}
-    ),
+  previewExit: (body: {
+    mode: 'full_stop' | 'partial_continue';
+    revenuePercent: number;
+    destination?: 'platform' | 'direct_wallet';
+  }) => api.post<VipExitQuote>('/vip-farmers/exit/preview', body),
+  requestExit: (body: {
+    mode: 'full_stop' | 'partial_continue';
+    revenuePercent: number;
+    destination: 'platform' | 'direct_wallet';
+    walletAddress?: string;
+  }) => api.post<{ request: VipExitRequest }>('/vip-farmers/exit/request', body),
+  getExitRequests: () => api.get<{ requests: VipExitRequest[] }>('/vip-farmers/exit/requests'),
+  getLoanStatus: () => api.get<VipLoanStatus>('/vip-farmers/loans/status'),
+  requestLoan: (amount: number) => api.post<{ loan: VipLoanStatus['loan'] }>('/vip-farmers/loans/request', { amount }),
+  repayLoan: (amount: number) =>
+    api.post<{ loan: VipLoanStatus['loan']; cashWalletUsd: number }>('/vip-farmers/loans/repay', { amount }),
 };

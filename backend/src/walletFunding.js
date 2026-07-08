@@ -7,6 +7,7 @@ const {
   insertCryptoLedgerEntry,
   getCryptoLedgerEntryBySource,
 } = require('./db');
+const { getNonExemptVipLoanTaintUsd } = require('./vipLoanTaint');
 const { normalizeCurrency } = require('./currencyNormalize');
 const { isUsdtFamilyAsset, totalUsdtFamilyAvailable } = require('./usdtBalances');
 
@@ -52,11 +53,13 @@ async function getCombinedWithdrawable(userId, asset) {
   if (isCashFundableAsset(normalized)) {
     cashWalletUsd = await getCashWalletUsd(userId);
   }
-  const combinedAvailable = cryptoAvailable + cashWalletUsd;
+  const taintUsd = await getNonExemptVipLoanTaintUsd(userId);
+  const combinedAvailable = Math.max(0, cryptoAvailable + cashWalletUsd - taintUsd);
   return {
     asset: normalized,
     cryptoAvailable,
     cashWalletUsd,
+    vipLoanTaintUsd: taintUsd,
     combinedAvailable,
     maxWithdrawable: maxWithdrawableAmount(combinedAvailable),
     cashFundingEnabled: isCashFundableAsset(normalized),

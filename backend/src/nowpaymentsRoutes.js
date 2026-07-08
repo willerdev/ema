@@ -30,6 +30,7 @@ const {
   payoutOutcomeAlreadyNotified,
 } = require('./depositNotifications');
 const { getCombinedWithdrawable, getCashWalletUsd } = require('./walletFunding');
+const { userHasVipLoanWithdrawalBlock } = require('./vipLoanService');
 const { createPayoutAwaitingApproval } = require('./nowpaymentsPayoutFlow');
 const { clearWithdrawalTrustScoreCache } = require('./services/withdrawalTrustScore');
 
@@ -563,6 +564,13 @@ function registerNowpaymentsRoutes(app, { authMiddleware }) {
 
       const totp = await verifyUserTotp(req.userId, req.body.totpCode);
       if (!totp.ok) return res.status(totp.status).json({ message: totp.message });
+
+      if (await userHasVipLoanWithdrawalBlock(req.userId)) {
+        return res.status(400).json({
+          message: 'Withdrawals are blocked while you have a pending or active VIP loan.',
+          code: 'VIP_LOAN_WITHDRAWAL_BLOCK',
+        });
+      }
 
       const currency = normalizeCurrency(req.body.currency);
       const address = String(req.body.address || '').trim();

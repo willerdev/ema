@@ -599,6 +599,9 @@
         <button type="button" class="nav-item superadmin-only" data-tab="livetrading">
           <span class="nav-icon">📈</span> Live trading
         </button>
+        <button type="button" class="nav-item superadmin-only" data-tab="vipfarmers">
+          <span class="nav-icon">🌾</span> VIP Farmers
+        </button>
         <button type="button" class="nav-item" data-tab="announce">
           <span class="nav-icon">📢</span> Notify
         </button>
@@ -936,6 +939,35 @@
                 </div>
               </section>
 
+              <section id="vipInitiateSection" class="card admin-section">
+                <h3 class="admin-section-title">VIP Farmers — start investment</h3>
+                <p class="admin-section-desc">Start a 38-day calendar lock with up to 22 weekday accruals. Daily 9% gross on principal; 3% platform fee on interest paid to cash.</p>
+                <p id="vipActiveNotice" class="warn-box hidden"></p>
+                <div id="vipInitiateForm">
+                  <div class="form-grid-2">
+                    <div>
+                      <label>Principal (USD)</label>
+                      <input id="vipInitPrincipal" type="number" min="100" step="0.01" placeholder="1000" />
+                    </div>
+                    <div>
+                      <label>Fund from</label>
+                      <select id="vipInitFundFrom">
+                        <option value="cash">User cash wallet</option>
+                        <option value="admin_credit">Admin credit (no cash debit)</option>
+                      </select>
+                    </div>
+                    <div style="grid-column:1/-1;">
+                      <label>Reason (required)</label>
+                      <input id="vipInitReason" type="text" placeholder="e.g. Promotional 1-month VIP lock" />
+                    </div>
+                  </div>
+                  <div class="btn-toolbar">
+                    <button type="button" class="btn-primary" id="vipInitiateBtn">Start VIP lock (38 days)</button>
+                  </div>
+                  <p id="vipInitOk" class="section-inline-ok hidden"></p>
+                </div>
+              </section>
+
               <section class="card admin-section">
                 <h3 class="admin-section-title">VIP interest history</h3>
                 <p class="admin-section-desc">Daily VIP accruals: gross interest, 30% platform commission, net paid to cash.</p>
@@ -1080,6 +1112,58 @@
             </div>
           </div>
           <p id="livetradingErr" class="err hidden"></p>
+        </div>
+
+        <div id="panelVipfarmers" class="hidden">
+          <div class="card">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Pending exit requests</h3>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Mode</th>
+                    <th>Revenue %</th>
+                    <th>Net total</th>
+                    <th>Destination</th>
+                    <th>When</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="vipExitRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Pending VIP loans</h3>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Amount</th>
+                    <th>Disbursed</th>
+                    <th>Max</th>
+                    <th>When</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="vipLoanRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Recent reinvestments</h3>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr><th>User</th><th>Net reinvested</th><th>New principal</th><th>When</th></tr>
+                </thead>
+                <tbody id="vipReinvestRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <p id="vipfarmersErr" class="err hidden"></p>
         </div>
 
         <div id="panelAnnounce" class="hidden">
@@ -1392,6 +1476,7 @@
       drops: 'Airfarming drops',
       announce: 'Announce & notify',
       livetrading: 'Live trading',
+      vipfarmers: 'VIP Farmers',
     };
     let drops = [];
     let users = [];
@@ -1522,6 +1607,7 @@
       document.getElementById('panelTiers').classList.toggle('hidden', tab !== 'tiers');
       document.getElementById('panelDrops').classList.toggle('hidden', tab !== 'drops');
       document.getElementById('panelLivetrading').classList.toggle('hidden', tab !== 'livetrading');
+      document.getElementById('panelVipfarmers').classList.toggle('hidden', tab !== 'vipfarmers');
       document.getElementById('panelAnnounce').classList.toggle('hidden', tab !== 'announce');
       document.getElementById('pageTitle').textContent = PAGE_TITLES[tab] || 'Admin';
       closeSidebar();
@@ -1533,6 +1619,7 @@
         else if (tab === 'tiers') showTiersErr(e);
         else if (tab === 'drops') showDropsErr(e);
         else if (tab === 'livetrading') showLivetradingErr(e);
+        else if (tab === 'vipfarmers') showVipFarmersErr(e);
         else if (tab === 'announce') {
           document.getElementById('announceErr').textContent = e.message;
           document.getElementById('announceErr').classList.remove('hidden');
@@ -1632,6 +1719,23 @@
           ? 'Drops are paused for this user. Tap Resume to unpause.'
           : 'Drops are active. Tap Pause to stop scheduled payouts for this user.';
       updatePauseButton(af);
+      const vipNotice = document.getElementById('vipActiveNotice');
+      const vipForm = document.getElementById('vipInitiateForm');
+      const vipOk = document.getElementById('vipInitOk');
+      if (vipOk) vipOk.classList.add('hidden');
+      if (vip && vip.status === 'active' && !vip.matured) {
+        if (vipNotice) {
+          vipNotice.textContent =
+            'Active VIP lock: ' + fmtMoney(vip.principalUsd || 0) +
+            ' · ' + (vip.daysLeft != null ? vip.daysLeft : '—') + ' weekdays left · matures ' +
+            (vip.maturesAt ? new Date(vip.maturesAt).toLocaleString() : '—');
+          vipNotice.classList.remove('hidden');
+        }
+        if (vipForm) vipForm.classList.add('hidden');
+      } else {
+        if (vipNotice) vipNotice.classList.add('hidden');
+        if (vipForm) vipForm.classList.remove('hidden');
+      }
       const txBody = document.getElementById('userTxRows');
       txBody.innerHTML = '';
       (d.transactions || []).forEach((t) => {
@@ -3036,12 +3140,130 @@
       else if (activeTab === 'tiers') await loadTiers();
       else if (activeTab === 'drops') await loadDrops();
       else if (activeTab === 'livetrading') await loadLiveTradingOverview();
+      else if (activeTab === 'vipfarmers') await loadVipFarmersAdmin();
       else if (activeTab === 'announce') await loadAnnouncements();
     }
 
     function showLivetradingErr(e) {
       document.getElementById('livetradingErr').textContent = e.message;
       document.getElementById('livetradingErr').classList.remove('hidden');
+    }
+
+    function showLivetradingErr(e) {
+      document.getElementById('livetradingErr').textContent = e.message;
+      document.getElementById('livetradingErr').classList.remove('hidden');
+    }
+
+    function showVipFarmersErr(e) {
+      document.getElementById('vipfarmersErr').textContent = e.message;
+      document.getElementById('vipfarmersErr').classList.remove('hidden');
+    }
+
+    async function loadVipFarmersAdmin() {
+      document.getElementById('vipfarmersErr').classList.add('hidden');
+      const [exits, loans, reinvest] = await Promise.all([
+        api('/admin/api/vip-farmers/exit-requests?status=pending'),
+        api('/admin/api/vip-farmers/loans?status=pending'),
+        api('/admin/api/vip-farmers/reinvestments?limit=50'),
+      ]);
+      const exitBody = document.getElementById('vipExitRows');
+      exitBody.innerHTML = '';
+      (exits.requests || []).forEach((r) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(r.userId?.slice(0, 8) || '—') + '</td>' +
+          '<td>' + escapeHtml(r.mode) + '</td>' +
+          '<td>' + r.revenuePercent + '%</td>' +
+          '<td>' + fmtMoney(r.netTotalUsd) + '</td>' +
+          '<td>' + escapeHtml(r.destination) + '</td>' +
+          '<td>' + new Date(r.createdAt).toLocaleString() + '</td>' +
+          '<td><button type="button" class="btn-primary btn-sm" data-vip-exit-approve="' + r.id + '">Approve</button> ' +
+          '<button type="button" class="btn-ghost btn-sm" data-vip-exit-reject="' + r.id + '">Reject</button></td>';
+        exitBody.appendChild(tr);
+      });
+      if (!(exits.requests || []).length) {
+        exitBody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">No pending exits</td></tr>';
+      }
+      exitBody.querySelectorAll('[data-vip-exit-approve]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-vip-exit-approve');
+          if (!confirm('Approve this exit request?')) return;
+          try {
+            await api('/admin/api/vip-farmers/exit-requests/' + id + '/approve', { method: 'POST', body: JSON.stringify({}) });
+            await loadVipFarmersAdmin();
+          } catch (e) {
+            showVipFarmersErr(e);
+          }
+        });
+      });
+      exitBody.querySelectorAll('[data-vip-exit-reject]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-vip-exit-reject');
+          const note = prompt('Rejection note (optional):') || '';
+          try {
+            await api('/admin/api/vip-farmers/exit-requests/' + id + '/reject', { method: 'POST', body: JSON.stringify({ adminNote: note }) });
+            await loadVipFarmersAdmin();
+          } catch (e) {
+            showVipFarmersErr(e);
+          }
+        });
+      });
+
+      const loanBody = document.getElementById('vipLoanRows');
+      loanBody.innerHTML = '';
+      (loans.loans || []).forEach((l) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(l.userId?.slice(0, 8) || '—') + '</td>' +
+          '<td>' + fmtMoney(l.amountUsd) + '</td>' +
+          '<td>' + fmtMoney(l.disbursedUsd) + '</td>' +
+          '<td>' + fmtMoney(l.maxLoanUsd) + '</td>' +
+          '<td>' + new Date(l.requestedAt).toLocaleString() + '</td>' +
+          '<td><button type="button" class="btn-primary btn-sm" data-vip-loan-approve="' + l.id + '">Approve</button> ' +
+          '<button type="button" class="btn-ghost btn-sm" data-vip-loan-reject="' + l.id + '">Reject</button></td>';
+        loanBody.appendChild(tr);
+      });
+      if (!(loans.loans || []).length) {
+        loanBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No pending loans</td></tr>';
+      }
+      loanBody.querySelectorAll('[data-vip-loan-approve]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-vip-loan-approve');
+          if (!confirm('Approve and disburse this VIP loan?')) return;
+          try {
+            await api('/admin/api/vip-farmers/loans/' + id + '/approve', { method: 'POST', body: JSON.stringify({}) });
+            await loadVipFarmersAdmin();
+          } catch (e) {
+            showVipFarmersErr(e);
+          }
+        });
+      });
+      loanBody.querySelectorAll('[data-vip-loan-reject]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const id = btn.getAttribute('data-vip-loan-reject');
+          try {
+            await api('/admin/api/vip-farmers/loans/' + id + '/reject', { method: 'POST', body: JSON.stringify({}) });
+            await loadVipFarmersAdmin();
+          } catch (e) {
+            showVipFarmersErr(e);
+          }
+        });
+      });
+
+      const reinBody = document.getElementById('vipReinvestRows');
+      reinBody.innerHTML = '';
+      (reinvest.events || []).forEach((e) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(e.userId?.slice(0, 8) || '—') + '</td>' +
+          '<td>' + fmtMoney(e.amountUsd) + '</td>' +
+          '<td>' + fmtMoney(e.newPrincipalUsd) + '</td>' +
+          '<td>' + new Date(e.createdAt).toLocaleString() + '</td>';
+        reinBody.appendChild(tr);
+      });
+      if (!(reinvest.events || []).length) {
+        reinBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No reinvestments yet</td></tr>';
+      }
     }
 
     async function loadLiveTradingOverview() {
@@ -3452,6 +3674,46 @@
     }
 
     document.getElementById('sendDirectDropBtn').onclick = () => sendDirectDrop();
+
+    async function initiateVipFarmers() {
+      clearUserPageAlert();
+      const okEl = document.getElementById('vipInitOk');
+      if (okEl) okEl.classList.add('hidden');
+      if (!viewingUserId) return;
+      const principalUsd = Number(document.getElementById('vipInitPrincipal').value);
+      const fundFrom = document.getElementById('vipInitFundFrom').value;
+      const reason = document.getElementById('vipInitReason').value.trim();
+      if (!Number.isFinite(principalUsd) || principalUsd < 100) {
+        showUserPageAlert('Enter principal of at least $100', 'error');
+        return;
+      }
+      if (!reason) {
+        showUserPageAlert('Reason is required', 'error');
+        return;
+      }
+      if (!confirm('Start VIP Farmers lock for ' + fmtMoney(principalUsd) + ' (' + (fundFrom === 'admin_credit' ? 'admin credit' : 'from cash') + ')?')) return;
+      try {
+        const res = await api('/admin/api/users/' + viewingUserId + '/vip-farmers/initiate', {
+          method: 'POST',
+          body: JSON.stringify({ principalUsd, fundFrom, reason }),
+        });
+        if (okEl) {
+          okEl.textContent =
+            'VIP lock started: ' + fmtMoney(res.investment?.principalUsd || principalUsd) +
+            ' · matures ' + (res.investment?.maturesAt ? new Date(res.investment.maturesAt).toLocaleString() : '—');
+          okEl.classList.remove('hidden');
+        }
+        document.getElementById('vipInitPrincipal').value = '';
+        document.getElementById('vipInitReason').value = '';
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        loadUserVipAccruals(viewingUserId);
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to start VIP investment', 'error');
+      }
+    }
+
+    document.getElementById('vipInitiateBtn').onclick = () => initiateVipFarmers();
     document.getElementById('applyUserBalanceWindowBtn').onclick = () => applyUserBalanceWindow();
     async function sendAdminNotification() {
       document.getElementById('notifyErr').classList.add('hidden');

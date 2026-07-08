@@ -71,6 +71,8 @@ const { registerNotificationRoutes } = require('./notificationRoutes');
 const { registerNotificationPreferencesRoutes } = require('./notificationPreferencesRoutes');
 const { registerSupportRoutes } = require('./supportRoutes');
 const { notifyPeerTransfer } = require('./peerTransferNotifications');
+const { recordVipLoanFundTransferIfNeeded } = require('./vipLoanTaint');
+const { userHasVipLoanWithdrawalBlock } = require('./vipLoanService');
 const { registerLocalMoneyRoutes, handleFlutterwaveWebhook } = require('./localMoneyRoutes');
 const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { isComplianceProfileComplete } = require('./complianceProfile');
@@ -768,6 +770,12 @@ app.post('/wallet/transfer', authMiddleware, requireComplianceProfile, async (re
         amount: roundedAmount,
         recipientCode: toTransferCode,
       });
+      void recordVipLoanFundTransferIfNeeded({
+        fromUserId: req.userId,
+        toUserId: recipientUserId,
+        transferId: result?.transfer_id ? String(result.transfer_id) : null,
+        amountUsd: roundedAmount,
+      }).catch((e) => console.warn('[vip-loan-taint]', e.message));
     }
 
     return res.json({
@@ -814,6 +822,13 @@ app.post('/wallet/withdraw', authMiddleware, requireComplianceProfile, async (re
       req.body.destinationAddress != null ? String(req.body.destinationAddress).trim() : '';
     const network = req.body.network != null ? String(req.body.network).trim() : '';
     if (!amount || amount <= 0) return res.status(400).json({ message: 'Invalid amount' });
+
+    if (await userHasVipLoanWithdrawalBlock(req.userId)) {
+      return res.status(400).json({
+        message: 'Withdrawals are blocked while you have a pending or active VIP loan.',
+        code: 'VIP_LOAN_WITHDRAWAL_BLOCK',
+      });
+    }
 
     const user = await getUserById(req.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
