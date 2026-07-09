@@ -2,21 +2,18 @@ const crypto = require('crypto');
 const {
   ensureWalletForUser,
   setWalletBalance,
-  getWalletByUserId,
   createTransaction,
   getActiveVipInvestmentForUser,
   updateVipInvestment,
   utcTodayYmd,
+  isMissingTableError,
 } = require('./db');
 const {
   VIP_EXIT_REVENUE_PERCENTS,
-  VIP_EXIT_COMMISSION_RATE,
   computeExitQuote,
   roundUsd,
-  isPenaltyFreeExit,
 } = require('./vipFarmerConstants');
 const {
-  newId,
   getPendingVipExitForUser,
   listVipExitRequestsForUser,
   insertVipExitRequest,
@@ -24,8 +21,7 @@ const {
   getVipExitRequestById,
   listVipExitRequestsAdmin,
   exitRequestToApi,
-  insertPlatformRevenueEvent,
-} = require('./vipFarmerRepository');
+} = require('./vipExitStorage');
 
 function badRequest(msg) {
   const err = new Error(msg);
@@ -98,30 +94,13 @@ async function requestVipExit(userId, body) {
   }
 
   const row = await insertVipExitRequest({
-    id: newId(),
-    user_id: userId,
-    investment_id: inv.id,
+    userId,
+    inv,
     mode,
-    revenue_percent: revenuePercent,
+    revenuePercent,
     destination,
-    wallet_address: destination === 'direct_wallet' ? walletAddress : null,
-    principal_usd: quote.principalUsd,
-    revenue_base_usd: quote.revenueBaseUsd,
-    revenue_selected_usd: quote.revenueSelectedUsd,
-    penalty_usd: quote.penaltyUsd,
-    gas_fees_usd: quote.gasFeesUsd,
-    commission_usd: quote.commissionUsd,
-    gas_reward_usd: quote.gasRewardUsd,
-    net_revenue_usd: quote.netRevenueUsd,
-    principal_return_usd: quote.principalReturnUsd,
-    net_total_usd: quote.netTotalUsd,
-    investment_extra_credit_usd: quote.investmentExtraCreditUsd,
-    working_days: quote.workingDays,
-    calendar_days: quote.calendarDays,
-    penalty_free: quote.penaltyFree,
-    status: 'pending',
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    walletAddress,
+    quote,
   });
 
   return { request: exitRequestToApi(row) };
@@ -157,48 +136,57 @@ function applyExitOverrides(quote, overrides = {}) {
   };
 }
 
+function quoteFromTicket(row) {
+  const p = row.payload || {};
+  return {
+    revenueSelectedUsd: Number(p.revenueSelectedUsd),
+    penaltyUsd: Number(p.penaltyUsd),
+    gasFeesUsd: Number(p.gasFeesUsd),
+    commissionUsd: Number(p.commissionUsd),
+    gasRewardUsd: Number(p.gasRewardUsd),
+    investmentExtraCreditUsd: Number(p.investmentExtraCreditUsd),
+    principalReturnUsd: Number(p.principalReturnUsd),
+  };
+}
+
 async function previewApproveVipExit(exitId, overrides = {}) {
   const row = await getVipExitRequestById(exitId);
   if (!row) badRequest('Exit request not found');
-  if (row.status !== 'pending') badRequest('Exit request is not pending');
-  const applied = applyExitOverrides(
-    {
-      revenueSelectedUsd: Number(row.revenue_selected_usd),
-      penaltyUsd: Number(row.penalty_usd),
-      gasFeesUsd: Number(row.gas_fees_usd),
-      commissionUsd: Number(row.commission_usd),
-      gasRewardUsd: Number(row.gas_reward_usd),
-      investmentExtraCreditUsd: Number(row.investment_extra_credit_usd),
-      principalReturnUsd: Number(row.principal_return_usd),
-    },
-    overrides
-  );
+  if (!mapPending(row.status)) badRequest('Exit request is not pending');
+  const applied = applyExitOverrides(quoteFromTicket(row), overrides);
   return { request: exitRequestToApi(row), applied };
+}
+
+function mapPending(status) {
+  return status === 'under_review' || status === 'in_progress';
+}
+
+async function safeUpdateVipInvestment(investmentId, patch) {
+  try {
+    return await updateVipInvestment(investmentId, patch);
+  } catch (e) {
+    if (patch.revenueWithdrawnUsd !== undefined && isMissingTableError(e)) {
+      const { revenueWithdrawnUsd, ...rest } = patch;
+      if (Object.keys(rest).length === 0) return null;
+      return updateVipInvestment(investmentId, rest);
+    }
+    throw e;
+  }
 }
 
 async function approveVipExit(exitId, { adminNote, overrides } = {}) {
   const row = await getVipExitRequestById(exitId);
   if (!row) badRequest('Exit request not found');
-  if (row.status !== 'pending') badRequest('Exit request is not pending');
+  if (!mapPending(row.status)) badRequest('Exit request is not pending');
 
+  const p = row.payload || {};
   const inv = await getActiveVipInvestmentForUser(row.user_id);
-  if (!inv || inv.id !== row.investment_id) badRequest('Investment no longer active');
+  if (!inv || inv.id !== p.investmentId) badRequest('Investment no longer active');
 
-  const applied = applyExitOverrides(
-    {
-      revenueSelectedUsd: Number(row.revenue_selected_usd),
-      penaltyUsd: Number(row.penalty_usd),
-      gasFeesUsd: Number(row.gas_fees_usd),
-      commissionUsd: Number(row.commission_usd),
-      gasRewardUsd: Number(row.gas_reward_usd),
-      investmentExtraCreditUsd: Number(row.investment_extra_credit_usd),
-      principalReturnUsd: Number(row.principal_return_usd),
-    },
-    overrides || {}
-  );
-
+  const applied = applyExitOverrides(quoteFromTicket(row), overrides || {});
   const now = new Date().toISOString();
-  if (row.destination === 'platform' && applied.netTotalUsd > 0) {
+
+  if (p.destination === 'platform' && applied.netTotalUsd > 0) {
     const wallet = await ensureWalletForUser(row.user_id);
     const cash = roundUsd(wallet?.balance);
     await setWalletBalance(row.user_id, roundUsd(cash + applied.netTotalUsd));
@@ -210,36 +198,20 @@ async function approveVipExit(exitId, { adminNote, overrides } = {}) {
     });
   }
 
-  const revenueWithdrawn = roundUsd(Number(inv.revenue_withdrawn_usd) + Number(row.revenue_selected_usd));
+  const revenueWithdrawn = roundUsd(
+    Number(inv.revenue_withdrawn_usd || 0) + Number(p.revenueSelectedUsd || 0)
+  );
   const invPatch = { revenueWithdrawnUsd: revenueWithdrawn };
-
-  if (row.mode === 'full_stop') {
-    invPatch.status = row.penalty_free ? 'closed' : 'early_withdrawn';
+  if (p.mode === 'full_stop') {
+    invPatch.status = p.penaltyFree ? 'closed' : 'early_withdrawn';
   }
-
-  await updateVipInvestment(inv.id, invPatch);
-
-  if (applied.commissionUsd > 0) {
-    await insertPlatformRevenueEvent({
-      userId: row.user_id,
-      investmentId: inv.id,
-      eventType: 'vip_exit_commission',
-      amountUsd: applied.commissionUsd,
-      meta: { exitRequestId: row.id },
-    });
-  }
+  await safeUpdateVipInvestment(inv.id, invPatch);
 
   const updated = await updateVipExitRequest(row.id, {
     status: 'completed',
     admin_note: adminNote || null,
     reviewed_at: now,
-    applied_penalty_usd: applied.penaltyUsd,
-    applied_gas_fees_usd: applied.gasFeesUsd,
-    applied_commission_usd: applied.commissionUsd,
-    applied_gas_reward_usd: applied.gasRewardUsd,
-    applied_investment_extra_credit_usd: applied.investmentExtraCreditUsd,
-    applied_net_revenue_usd: applied.netRevenueUsd,
-    applied_net_total_usd: applied.netTotalUsd,
+    applied,
   });
 
   return { request: exitRequestToApi(updated) };
@@ -248,7 +220,7 @@ async function approveVipExit(exitId, { adminNote, overrides } = {}) {
 async function rejectVipExit(exitId, adminNote) {
   const row = await getVipExitRequestById(exitId);
   if (!row) badRequest('Exit request not found');
-  if (row.status !== 'pending') badRequest('Exit request is not pending');
+  if (!mapPending(row.status)) badRequest('Exit request is not pending');
   const updated = await updateVipExitRequest(row.id, {
     status: 'rejected',
     admin_note: adminNote || null,

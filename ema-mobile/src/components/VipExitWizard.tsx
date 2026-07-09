@@ -10,6 +10,8 @@ import {
   View,
 } from 'react-native';
 import { PrimaryButton } from './PrimaryButton';
+import { computeVipExitQuote } from '../utils/vipExitFormulas';
+import { supportService } from '../services/supportService';
 import { vipFarmerService, type VipExitQuote, type VipInvestment } from '../services/vipFarmerService';
 import { palette } from '../theme/colors';
 
@@ -52,9 +54,24 @@ export function VipExitWizard({ visible, investment, availableRevenue, exitCommi
   }, [visible, reset]);
 
   const loadQuote = async () => {
+    if (destination === 'direct_wallet' && !walletAddress.trim()) {
+      Alert.alert('Exit preview', 'TRC20 wallet address is required for direct wallet destination');
+      return;
+    }
     setLoading(true);
     try {
-      const q = await vipFarmerService.previewExit({ mode, revenuePercent, destination });
+      let q: VipExitQuote;
+      try {
+        q = await vipFarmerService.previewExit({ mode, revenuePercent, destination });
+      } catch {
+        q = computeVipExitQuote({
+          investment,
+          availableRevenue,
+          mode,
+          revenuePercent,
+          destination,
+        });
+      }
       setQuote(q);
       setStep(4);
     } catch (e: any) {
@@ -96,14 +113,53 @@ export function VipExitWizard({ visible, investment, availableRevenue, exitCommi
   };
 
   const onConfirmExit = async () => {
+    if (!quote) return;
+    if (destination === 'direct_wallet' && !walletAddress.trim()) {
+      Alert.alert('Exit request', 'TRC20 wallet address is required');
+      return;
+    }
     setLoading(true);
     try {
-      await vipFarmerService.requestExit({
-        mode,
-        revenuePercent,
-        destination,
-        walletAddress: destination === 'direct_wallet' ? walletAddress.trim() : undefined,
-      });
+      try {
+        await vipFarmerService.requestExit({
+          mode,
+          revenuePercent,
+          destination,
+          walletAddress: destination === 'direct_wallet' ? walletAddress.trim() : undefined,
+        });
+      } catch (e: any) {
+        if (e?.status !== 404 && e?.status !== 503) throw e;
+        await supportService.createTicket({
+          category: 'general',
+          relatedActivityId: investment.id,
+          payload: {
+            subject: 'VIP Farmers exit request',
+            message: `${mode} · ${revenuePercent}% revenue · ${destination}`,
+            vipExit: true,
+            investmentId: investment.id,
+            mode,
+            revenuePercent,
+            destination,
+            walletAddress: destination === 'direct_wallet' ? walletAddress.trim() : null,
+            principalUsd: quote.principalUsd,
+            revenueBaseUsd: quote.revenueBaseUsd,
+            revenueSelectedUsd: quote.revenueSelectedUsd,
+            penaltyUsd: quote.penaltyUsd,
+            gasFeesUsd: quote.gasFeesUsd,
+            commissionUsd: quote.commissionUsd,
+            gasRewardUsd: quote.gasRewardUsd,
+            netRevenueUsd: quote.netRevenueUsd,
+            principalReturnUsd: quote.principalReturnUsd,
+            netTotalUsd: quote.netTotalUsd,
+            investmentExtraCreditUsd: quote.investmentExtraCreditUsd,
+            workingDays: quote.workingDays,
+            calendarDays: quote.calendarDays,
+            penaltyFree: quote.penaltyFree,
+            address: destination === 'direct_wallet' ? walletAddress.trim() : 'Platform cash wallet',
+            amount: quote.netTotalUsd,
+          },
+        });
+      }
       onComplete();
       onClose();
       Alert.alert(

@@ -42,10 +42,10 @@ const {
 } = require('./vipFarmerSchedule');
 const {
   newId: repoNewId,
-  getPendingVipExitForUser,
   insertVipReinvestEvent,
   insertPlatformRevenueEvent,
 } = require('./vipFarmerRepository');
+const { getPendingVipExitForUser } = require('./vipExitStorage');
 const { getVipLoanStatus } = require('./vipLoanService');
 
 function newId() {
@@ -122,7 +122,11 @@ async function getVipSummary(userId) {
     exitCommissionRate: VIP_EXIT_COMMISSION_RATE,
     investment: await enrichVipInvestmentApi(inv),
     pendingExitRequest: pendingExit
-      ? { id: pendingExit.id, status: pendingExit.status, mode: pendingExit.mode }
+      ? {
+          id: pendingExit.id,
+          status: 'pending',
+          mode: pendingExit.payload?.mode || 'full_stop',
+        }
       : null,
     loan: loanStatus,
   };
@@ -371,7 +375,7 @@ async function reinvestVip(userId, amount) {
     new_principal_usd: newPrincipal,
     lock_reset: true,
     created_at: now,
-  });
+  }).catch(() => null);
 
   if (quote.commissionUsd > 0) {
     await insertPlatformRevenueEvent({
@@ -380,7 +384,7 @@ async function reinvestVip(userId, amount) {
       eventType: 'vip_reinvest_commission',
       amountUsd: quote.commissionUsd,
       meta: { grossRevenue: quote.grossRevenue },
-    });
+    }).catch(() => null);
   }
 
   return {

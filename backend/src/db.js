@@ -3009,7 +3009,7 @@ async function getVipInvestmentById(id) {
 
 async function createVipInvestment({ userId, principalUsd, startedAt, maturesAt }) {
   const now = new Date().toISOString();
-  const row = {
+  const base = {
     id: id(),
     user_id: userId,
     principal_usd: roundWalletUsd(principalUsd),
@@ -3017,12 +3017,18 @@ async function createVipInvestment({ userId, principalUsd, startedAt, maturesAt 
     matures_at: maturesAt,
     status: 'active',
     total_accrued_usd: 0,
-    revenue_withdrawn_usd: 0,
     days_accrued: 0,
     created_at: now,
     updated_at: now,
   };
-  const { data, error } = await supabase.from('vip_investments').insert(row).select('*').single();
+  let { data, error } = await supabase
+    .from('vip_investments')
+    .insert({ ...base, revenue_withdrawn_usd: 0 })
+    .select('*')
+    .single();
+  if (error && isSchemaError(error)) {
+    ({ data, error } = await supabase.from('vip_investments').insert(base).select('*').single());
+  }
   if (error) throw error;
   return data;
 }
@@ -3036,12 +3042,12 @@ async function updateVipInvestment(investmentId, patch) {
   if (patch.totalAccruedUsd !== undefined) row.total_accrued_usd = roundWalletUsd(patch.totalAccruedUsd);
   if (patch.daysAccrued !== undefined) row.days_accrued = Number(patch.daysAccrued);
   if (patch.revenueWithdrawnUsd !== undefined) row.revenue_withdrawn_usd = roundWalletUsd(patch.revenueWithdrawnUsd);
-  const { data, error } = await supabase
-    .from('vip_investments')
-    .update(row)
-    .eq('id', investmentId)
-    .select('*')
-    .single();
+
+  let { data, error } = await supabase.from('vip_investments').update(row).eq('id', investmentId).select('*').single();
+  if (error && patch.revenueWithdrawnUsd !== undefined && isSchemaError(error)) {
+    delete row.revenue_withdrawn_usd;
+    ({ data, error } = await supabase.from('vip_investments').update(row).eq('id', investmentId).select('*').single());
+  }
   if (error) throw error;
   return data;
 }
