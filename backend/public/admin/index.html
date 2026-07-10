@@ -599,7 +599,7 @@
         <button type="button" class="nav-item superadmin-only" data-tab="livetrading">
           <span class="nav-icon">📈</span> Live trading
         </button>
-        <button type="button" class="nav-item superadmin-only" data-tab="vipfarmers">
+        <button type="button" class="nav-item" data-tab="vipfarmers">
           <span class="nav-icon">🌾</span> VIP Farmers
         </button>
         <button type="button" class="nav-item" data-tab="announce">
@@ -1055,6 +1055,31 @@
         </div>
 
         <div id="panelWithdrawals" class="hidden">
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="margin:0 0 8px;font-size:1rem;">VIP Farmers exit / withdraw requests</h3>
+            <p class="hint" style="margin-bottom:12px;">
+              Users exiting VIP Farmers. <strong>Platform</strong> payouts credit cash wallet on approve.
+              <strong>Direct TRC20</strong> — send USDT manually, then approve to close the request.
+            </p>
+            <div id="vipWithdrawalsLoading" class="loading hidden">Loading VIP exits…</div>
+            <div style="overflow-x:auto;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Mode</th>
+                    <th>Revenue %</th>
+                    <th>Net total</th>
+                    <th>Destination</th>
+                    <th>Requested</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="vipExitWithdrawRows"></tbody>
+              </table>
+            </div>
+            <p id="vipWithdrawalsErr" class="err hidden"></p>
+          </div>
           <div class="card">
             <h3 style="margin:0 0 8px;font-size:1rem;">Pending withdrawals</h3>
             <p class="hint" style="margin-bottom:12px;">
@@ -1407,6 +1432,33 @@
     </div>
   </div>
 
+  <div id="vipExitModal" class="modal-backdrop hidden" data-modal>
+    <div class="card modal modal-wide">
+      <div class="modal-header">
+        <h2>VIP exit request</h2>
+        <button type="button" class="modal-close" data-close-modal="vipExitModal" aria-label="Close">×</button>
+      </div>
+      <p id="vipExitModalMeta" class="hint"></p>
+      <div id="vipExitDirectWarn" class="warn-box hidden" style="margin-bottom:12px;">
+        Send <strong id="vipExitDirectAmount"></strong> USDT (TRC20) to the address below before approving.
+      </div>
+      <p id="vipExitWalletLine" class="hidden" style="font-size:0.85rem;word-break:break-all;margin:8px 0;">
+        <strong>TRC20:</strong> <span id="vipExitWalletAddr"></span>
+      </p>
+      <table style="width:100%;font-size:0.85rem;margin:12px 0;">
+        <tbody id="vipExitBreakdown"></tbody>
+      </table>
+      <label>Admin note (optional)</label>
+      <input id="vipExitAdminNote" type="text" placeholder="Internal note or payout reference" />
+      <p id="vipExitModalErr" class="err hidden"></p>
+      <div class="row" style="margin-top:16px;">
+        <button type="button" class="btn-primary" id="vipExitApproveBtn" style="width:auto;">Approve</button>
+        <button type="button" class="btn-danger" id="vipExitRejectBtn" style="width:auto;">Reject</button>
+        <button type="button" class="btn-ghost" data-close-modal="vipExitModal" style="width:auto;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div id="ticketModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal modal-wide">
       <div class="modal-header">
@@ -1497,6 +1549,8 @@
     let userDropPlanView = null;
     let viewingTicketId = null;
     let pendingWithdrawals = [];
+    let pendingVipExits = [];
+    let vipExitReviewId = null;
     let aiPlan = null;
     let aiAllocations = [];
     let aiPlanSummary = null;
@@ -3099,6 +3153,194 @@
       document.getElementById('withdrawalsErr').classList.remove('hidden');
     }
 
+    function showVipWithdrawalsErr(e) {
+      const el = document.getElementById('vipWithdrawalsErr');
+      if (!el) return;
+      el.textContent = e.message;
+      el.classList.remove('hidden');
+    }
+
+    function fmtVipMode(mode) {
+      return mode === 'partial_continue' ? 'Partial (continue)' : 'Full stop';
+    }
+
+    function fmtVipDestination(r) {
+      if (r.destination === 'direct_wallet') return 'Direct TRC20';
+      return 'Platform wallet';
+    }
+
+    function updateWithdrawStats() {
+      const el = document.getElementById('withdrawStats');
+      if (!el) return;
+      const parts = [];
+      if (pendingWithdrawals.length) {
+        parts.push(pendingWithdrawals.length + ' withdrawal(s)');
+      }
+      if (pendingVipExits.length) {
+        parts.push(pendingVipExits.length + ' VIP exit request(s)');
+      }
+      el.textContent = parts.length
+        ? parts.join(' and ') + ' awaiting your approval'
+        : 'No pending withdrawals or VIP exits';
+    }
+
+    function wireVipExitRowActions(tbody) {
+      if (!tbody) return;
+      tbody.querySelectorAll('[data-vip-exit-review]').forEach((btn) => {
+        btn.onclick = () => openVipExitReview(btn.getAttribute('data-vip-exit-review'));
+      });
+      tbody.querySelectorAll('[data-vip-exit-approve]').forEach((btn) => {
+        btn.onclick = () => actOnVipExit(btn.getAttribute('data-vip-exit-approve'), 'approve', btn);
+      });
+      tbody.querySelectorAll('[data-vip-exit-reject]').forEach((btn) => {
+        btn.onclick = () => actOnVipExit(btn.getAttribute('data-vip-exit-reject'), 'reject', btn);
+      });
+    }
+
+    function renderVipExitTable(tbodyId) {
+      const tbody = document.getElementById(tbodyId);
+      if (!tbody) return;
+      tbody.innerHTML = '';
+      if (!pendingVipExits.length) {
+        tbody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">No pending VIP exit requests</td></tr>';
+        return;
+      }
+      pendingVipExits.forEach((r) => {
+        const tr = document.createElement('tr');
+        const userLabel = escapeHtml(r.userEmail || r.userId?.slice(0, 8) || '—');
+        tr.innerHTML =
+          '<td>' + userLabel + '</td>' +
+          '<td>' + escapeHtml(fmtVipMode(r.mode)) + '</td>' +
+          '<td>' + r.revenuePercent + '%</td>' +
+          '<td><strong>' + fmtMoney(r.netTotalUsd) + '</strong></td>' +
+          '<td>' + escapeHtml(fmtVipDestination(r)) +
+          (r.walletAddress ? '<br><span style="font-size:0.72rem;color:var(--muted);word-break:break-all;">' +
+            escapeHtml(String(r.walletAddress).slice(0, 28)) + (r.walletAddress.length > 28 ? '…' : '') + '</span>' : '') +
+          '</td>' +
+          '<td>' + new Date(r.createdAt).toLocaleString() + '</td>' +
+          '<td style="white-space:nowrap;">' +
+          '<button type="button" class="btn-ghost btn-sm" data-vip-exit-review="' + r.id + '">Review</button> ' +
+          '<button type="button" class="btn-primary btn-sm" data-vip-exit-approve="' + r.id + '">Approve</button> ' +
+          '<button type="button" class="btn-danger btn-sm" data-vip-exit-reject="' + r.id + '">Reject</button></td>';
+        tbody.appendChild(tr);
+      });
+      wireVipExitRowActions(tbody);
+    }
+
+    function vipExitBreakdownRows(r) {
+      return [
+        ['Principal', fmtMoney(r.principalUsd)],
+        ['Revenue selected', fmtMoney(r.revenueSelectedUsd)],
+        ['Penalty', fmtMoney(r.penaltyUsd)],
+        ['Gas fees', fmtMoney(r.gasFeesUsd)],
+        ['Commission', fmtMoney(r.commissionUsd)],
+        ['Gas reward', fmtMoney(r.gasRewardUsd)],
+        ['Principal return', fmtMoney(r.principalReturnUsd)],
+        ['Extra credit', fmtMoney(r.investmentExtraCreditUsd)],
+        ['Net revenue', fmtMoney(r.netRevenueUsd)],
+        ['Net total payout', fmtMoney(r.netTotalUsd)],
+      ];
+    }
+
+    function openVipExitReview(id) {
+      const r = pendingVipExits.find((x) => x.id === id);
+      if (!r) return;
+      vipExitReviewId = id;
+      document.getElementById('vipExitModalErr').classList.add('hidden');
+      document.getElementById('vipExitAdminNote').value = '';
+      document.getElementById('vipExitModalMeta').textContent =
+        (r.userEmail || r.userId) + ' · ' + fmtVipMode(r.mode) + ' · ' + r.revenuePercent + '% revenue · ' +
+        fmtVipDestination(r) + ' · requested ' + new Date(r.createdAt).toLocaleString();
+      const directWarn = document.getElementById('vipExitDirectWarn');
+      const walletLine = document.getElementById('vipExitWalletLine');
+      if (r.destination === 'direct_wallet' && r.walletAddress) {
+        directWarn.classList.remove('hidden');
+        document.getElementById('vipExitDirectAmount').textContent = fmtMoney(r.netTotalUsd);
+        walletLine.classList.remove('hidden');
+        document.getElementById('vipExitWalletAddr').textContent = r.walletAddress;
+      } else {
+        directWarn.classList.add('hidden');
+        walletLine.classList.add('hidden');
+      }
+      const breakdown = document.getElementById('vipExitBreakdown');
+      breakdown.innerHTML = '';
+      vipExitBreakdownRows(r).forEach(([label, val]) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td style="color:var(--muted);padding:4px 8px 4px 0;">' + escapeHtml(label) +
+          '</td><td style="padding:4px 0;text-align:right;"><strong>' + val + '</strong></td>';
+        breakdown.appendChild(tr);
+      });
+      document.getElementById('vipExitModal').classList.remove('hidden');
+    }
+
+    async function actOnVipExit(id, action, btnEl) {
+      if (action === 'reject') {
+        const note = window.prompt('Rejection note (optional):', '');
+        if (note === null) return;
+        document.getElementById('vipWithdrawalsErr')?.classList.add('hidden');
+        document.getElementById('vipfarmersErr')?.classList.add('hidden');
+        try {
+          if (btnEl) btnEl.disabled = true;
+          await api('/admin/api/vip-farmers/exit-requests/' + id + '/reject', {
+            method: 'POST',
+            body: JSON.stringify({ adminNote: note }),
+          });
+          closeModal('vipExitModal');
+          await loadVipExitRequests();
+          if (activeTab === 'vipfarmers') await loadVipFarmersAdmin();
+        } catch (e) {
+          if (activeTab === 'vipfarmers') showVipFarmersErr(e);
+          else showVipWithdrawalsErr(e);
+        } finally {
+          if (btnEl) btnEl.disabled = false;
+        }
+        return;
+      }
+      const r = pendingVipExits.find((x) => x.id === id);
+      const confirmMsg = r?.destination === 'direct_wallet'
+        ? 'Approve this VIP exit? Confirm you sent ' + fmtMoney(r.netTotalUsd) + ' USDT (TRC20) to the user wallet.'
+        : 'Approve this VIP exit and credit ' + fmtMoney(r?.netTotalUsd || 0) + ' to the user cash wallet?';
+      if (!window.confirm(confirmMsg)) return;
+      const adminNote = document.getElementById('vipExitAdminNote')?.value?.trim() || undefined;
+      document.getElementById('vipWithdrawalsErr')?.classList.add('hidden');
+      document.getElementById('vipfarmersErr')?.classList.add('hidden');
+      try {
+        if (btnEl) btnEl.disabled = true;
+        await api('/admin/api/vip-farmers/exit-requests/' + id + '/approve', {
+          method: 'POST',
+          body: JSON.stringify({ adminNote }),
+        });
+        closeModal('vipExitModal');
+        await loadVipExitRequests();
+        if (activeTab === 'vipfarmers') await loadVipFarmersAdmin();
+      } catch (e) {
+        if (activeTab === 'vipfarmers') showVipFarmersErr(e);
+        else showVipWithdrawalsErr(e);
+      } finally {
+        if (btnEl) btnEl.disabled = false;
+      }
+    }
+
+    async function loadVipExitRequests() {
+      document.getElementById('vipWithdrawalsErr')?.classList.add('hidden');
+      document.getElementById('vipWithdrawalsLoading')?.classList.remove('hidden');
+      try {
+        const data = await api('/admin/api/vip-farmers/exit-requests?status=pending');
+        pendingVipExits = data.requests || [];
+        renderVipExitTable('vipExitWithdrawRows');
+        renderVipExitTable('vipExitRows');
+        updateWithdrawStats();
+      } catch (e) {
+        showVipWithdrawalsErr(e);
+        pendingVipExits = [];
+        renderVipExitTable('vipExitWithdrawRows');
+        renderVipExitTable('vipExitRows');
+        updateWithdrawStats();
+      } finally {
+        document.getElementById('vipWithdrawalsLoading')?.classList.add('hidden');
+      }
+    }
+
     function formatWithdrawAmount(w) {
       const n = Number(w.amount);
       if (w.source === 'cash_wallet') return fmtMoney(n);
@@ -3137,17 +3379,21 @@
       tbody.querySelectorAll('button[data-reject-withdraw]').forEach((btn) => {
         btn.onclick = () => actOnWithdraw(btn.getAttribute('data-reject-withdraw'), 'reject', btn);
       });
-      document.getElementById('withdrawStats').textContent =
-        pendingWithdrawals.length + ' withdrawal(s) awaiting your approval';
+      updateWithdrawStats();
     }
 
     async function loadPendingWithdrawals() {
       document.getElementById('withdrawalsErr').classList.add('hidden');
       document.getElementById('withdrawalsLoading').classList.remove('hidden');
       try {
-        const data = await api('/admin/api/withdrawals/pending');
-        pendingWithdrawals = data.withdrawals || [];
+        const [withdrawData] = await Promise.all([
+          api('/admin/api/withdrawals/pending'),
+          loadVipExitRequests(),
+        ]);
+        pendingWithdrawals = withdrawData.withdrawals || [];
         renderWithdrawalsTable();
+      } catch (e) {
+        showWithdrawalsErr(e);
       } finally {
         document.getElementById('withdrawalsLoading').classList.add('hidden');
       }
@@ -3200,11 +3446,6 @@
       document.getElementById('livetradingErr').classList.remove('hidden');
     }
 
-    function showLivetradingErr(e) {
-      document.getElementById('livetradingErr').textContent = e.message;
-      document.getElementById('livetradingErr').classList.remove('hidden');
-    }
-
     function showVipFarmersErr(e) {
       document.getElementById('vipfarmersErr').textContent = e.message;
       document.getElementById('vipfarmersErr').classList.remove('hidden');
@@ -3212,108 +3453,70 @@
 
     async function loadVipFarmersAdmin() {
       document.getElementById('vipfarmersErr').classList.add('hidden');
-      const [exits, loans, reinvest] = await Promise.all([
-        api('/admin/api/vip-farmers/exit-requests?status=pending'),
-        api('/admin/api/vip-farmers/loans?status=pending'),
-        api('/admin/api/vip-farmers/reinvestments?limit=50'),
-      ]);
-      const exitBody = document.getElementById('vipExitRows');
-      exitBody.innerHTML = '';
-      (exits.requests || []).forEach((r) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + escapeHtml(r.userId?.slice(0, 8) || '—') + '</td>' +
-          '<td>' + escapeHtml(r.mode) + '</td>' +
-          '<td>' + r.revenuePercent + '%</td>' +
-          '<td>' + fmtMoney(r.netTotalUsd) + '</td>' +
-          '<td>' + escapeHtml(r.destination) + '</td>' +
-          '<td>' + new Date(r.createdAt).toLocaleString() + '</td>' +
-          '<td><button type="button" class="btn-primary btn-sm" data-vip-exit-approve="' + r.id + '">Approve</button> ' +
-          '<button type="button" class="btn-ghost btn-sm" data-vip-exit-reject="' + r.id + '">Reject</button></td>';
-        exitBody.appendChild(tr);
-      });
-      if (!(exits.requests || []).length) {
-        exitBody.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">No pending exits</td></tr>';
-      }
-      exitBody.querySelectorAll('[data-vip-exit-approve]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-vip-exit-approve');
-          if (!confirm('Approve this exit request?')) return;
-          try {
-            await api('/admin/api/vip-farmers/exit-requests/' + id + '/approve', { method: 'POST', body: JSON.stringify({}) });
-            await loadVipFarmersAdmin();
-          } catch (e) {
-            showVipFarmersErr(e);
-          }
-        });
-      });
-      exitBody.querySelectorAll('[data-vip-exit-reject]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-vip-exit-reject');
-          const note = prompt('Rejection note (optional):') || '';
-          try {
-            await api('/admin/api/vip-farmers/exit-requests/' + id + '/reject', { method: 'POST', body: JSON.stringify({ adminNote: note }) });
-            await loadVipFarmersAdmin();
-          } catch (e) {
-            showVipFarmersErr(e);
-          }
-        });
-      });
+      try {
+        const [loans, reinvest] = await Promise.all([
+          api('/admin/api/vip-farmers/loans?status=pending'),
+          api('/admin/api/vip-farmers/reinvestments?limit=50'),
+          loadVipExitRequests(),
+        ]);
 
-      const loanBody = document.getElementById('vipLoanRows');
-      loanBody.innerHTML = '';
-      (loans.loans || []).forEach((l) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + escapeHtml(l.userId?.slice(0, 8) || '—') + '</td>' +
-          '<td>' + fmtMoney(l.amountUsd) + '</td>' +
-          '<td>' + fmtMoney(l.disbursedUsd) + '</td>' +
-          '<td>' + fmtMoney(l.maxLoanUsd) + '</td>' +
-          '<td>' + new Date(l.requestedAt).toLocaleString() + '</td>' +
-          '<td><button type="button" class="btn-primary btn-sm" data-vip-loan-approve="' + l.id + '">Approve</button> ' +
-          '<button type="button" class="btn-ghost btn-sm" data-vip-loan-reject="' + l.id + '">Reject</button></td>';
-        loanBody.appendChild(tr);
-      });
-      if (!(loans.loans || []).length) {
-        loanBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No pending loans</td></tr>';
-      }
-      loanBody.querySelectorAll('[data-vip-loan-approve]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-vip-loan-approve');
-          if (!confirm('Approve and disburse this VIP loan?')) return;
-          try {
-            await api('/admin/api/vip-farmers/loans/' + id + '/approve', { method: 'POST', body: JSON.stringify({}) });
-            await loadVipFarmersAdmin();
-          } catch (e) {
-            showVipFarmersErr(e);
-          }
+        const loanBody = document.getElementById('vipLoanRows');
+        loanBody.innerHTML = '';
+        (loans.loans || []).forEach((l) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + escapeHtml(l.userId?.slice(0, 8) || '—') + '</td>' +
+            '<td>' + fmtMoney(l.amountUsd) + '</td>' +
+            '<td>' + fmtMoney(l.disbursedUsd) + '</td>' +
+            '<td>' + fmtMoney(l.maxLoanUsd) + '</td>' +
+            '<td>' + new Date(l.requestedAt).toLocaleString() + '</td>' +
+            '<td><button type="button" class="btn-primary btn-sm" data-vip-loan-approve="' + l.id + '">Approve</button> ' +
+            '<button type="button" class="btn-ghost btn-sm" data-vip-loan-reject="' + l.id + '">Reject</button></td>';
+          loanBody.appendChild(tr);
         });
-      });
-      loanBody.querySelectorAll('[data-vip-loan-reject]').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          const id = btn.getAttribute('data-vip-loan-reject');
-          try {
-            await api('/admin/api/vip-farmers/loans/' + id + '/reject', { method: 'POST', body: JSON.stringify({}) });
-            await loadVipFarmersAdmin();
-          } catch (e) {
-            showVipFarmersErr(e);
-          }
+        if (!(loans.loans || []).length) {
+          loanBody.innerHTML = '<tr><td colspan="6" style="color:var(--muted);">No pending loans</td></tr>';
+        }
+        loanBody.querySelectorAll('[data-vip-loan-approve]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-vip-loan-approve');
+            if (!confirm('Approve and disburse this VIP loan?')) return;
+            try {
+              await api('/admin/api/vip-farmers/loans/' + id + '/approve', { method: 'POST', body: JSON.stringify({}) });
+              await loadVipFarmersAdmin();
+            } catch (e) {
+              showVipFarmersErr(e);
+            }
+          });
         });
-      });
+        loanBody.querySelectorAll('[data-vip-loan-reject]').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const id = btn.getAttribute('data-vip-loan-reject');
+            try {
+              await api('/admin/api/vip-farmers/loans/' + id + '/reject', { method: 'POST', body: JSON.stringify({}) });
+              await loadVipFarmersAdmin();
+            } catch (e) {
+              showVipFarmersErr(e);
+            }
+          });
+        });
 
-      const reinBody = document.getElementById('vipReinvestRows');
-      reinBody.innerHTML = '';
-      (reinvest.events || []).forEach((e) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td>' + escapeHtml(e.userId?.slice(0, 8) || '—') + '</td>' +
-          '<td>' + fmtMoney(e.amountUsd) + '</td>' +
-          '<td>' + fmtMoney(e.newPrincipalUsd) + '</td>' +
-          '<td>' + new Date(e.createdAt).toLocaleString() + '</td>';
-        reinBody.appendChild(tr);
-      });
-      if (!(reinvest.events || []).length) {
-        reinBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No reinvestments yet</td></tr>';
+        const reinBody = document.getElementById('vipReinvestRows');
+        reinBody.innerHTML = '';
+        (reinvest.events || []).forEach((e) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML =
+            '<td>' + escapeHtml(e.userId?.slice(0, 8) || '—') + '</td>' +
+            '<td>' + fmtMoney(e.amountUsd) + '</td>' +
+            '<td>' + fmtMoney(e.newPrincipalUsd) + '</td>' +
+            '<td>' + new Date(e.createdAt).toLocaleString() + '</td>';
+          reinBody.appendChild(tr);
+        });
+        if (!(reinvest.events || []).length) {
+          reinBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No reinvestments yet</td></tr>';
+        }
+      } catch (e) {
+        showVipFarmersErr(e);
       }
     }
 
@@ -3685,6 +3888,12 @@
     document.getElementById('moveToAfBtn').onclick = () => moveToAirfarming();
     document.getElementById('saveTicketBtn').onclick = () => saveTicketStatus();
     document.getElementById('closeTicketBtn').onclick = () => closeModal('ticketModal');
+    document.getElementById('vipExitApproveBtn').onclick = () => {
+      if (vipExitReviewId) actOnVipExit(vipExitReviewId, 'approve', document.getElementById('vipExitApproveBtn'));
+    };
+    document.getElementById('vipExitRejectBtn').onclick = () => {
+      if (vipExitReviewId) actOnVipExit(vipExitReviewId, 'reject', document.getElementById('vipExitRejectBtn'));
+    };
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
     document.getElementById('userTradeAddBtn').onclick = () => addUserTrade();
 

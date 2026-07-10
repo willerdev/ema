@@ -2222,6 +2222,19 @@ async function listSupportTicketsAdmin({ limit = 200, status, category, search }
   return data || [];
 }
 
+async function listVipExitSupportTicketsAdmin({ limit = 200 } = {}) {
+  const cap = Math.min(500, Math.max(1, Number(limit) || 200));
+  const { data, error } = await supabase
+    .from('support_tickets')
+    .select('*')
+    .filter('payload->>vipExit', 'eq', 'true')
+    .order('created_at', { ascending: false })
+    .limit(cap);
+  if (error && isSchemaError(error)) return [];
+  if (error) throw error;
+  return data || [];
+}
+
 async function updateSupportTicketStatus(ticketId, status) {
   const { data, error } = await supabase
     .from('support_tickets')
@@ -3700,6 +3713,7 @@ module.exports = {
   getSupportTicketForUser,
   getSupportTicketById,
   listSupportTicketsAdmin,
+  listVipExitSupportTicketsAdmin,
   updateSupportTicketStatus,
   adminMoveCashToAirfarming,
   adminAdjustUserWallet,

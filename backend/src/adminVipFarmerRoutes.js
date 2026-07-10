@@ -28,7 +28,7 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
     }
   });
 
-  app.get('/admin/api/vip-farmers/exit-requests', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.get('/admin/api/vip-farmers/exit-requests', adminAuthMiddleware, async (req, res) => {
     try {
       const status = req.query.status ? String(req.query.status) : 'pending';
       return res.json(await listAdminVipExitRequests(status));
@@ -41,7 +41,6 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
   app.post(
     '/admin/api/vip-farmers/exit-requests/:id/preview-approve',
     adminAuthMiddleware,
-    requireSuperAdmin,
     async (req, res) => {
       try {
         return res.json(await previewApproveVipExit(req.params.id, req.body?.overrides || {}));
@@ -56,7 +55,6 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
   app.post(
     '/admin/api/vip-farmers/exit-requests/:id/approve',
     adminAuthMiddleware,
-    requireSuperAdmin,
     async (req, res) => {
       try {
         return res.json(
@@ -76,7 +74,6 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
   app.post(
     '/admin/api/vip-farmers/exit-requests/:id/reject',
     adminAuthMiddleware,
-    requireSuperAdmin,
     async (req, res) => {
       try {
         return res.json(await rejectVipExit(req.params.id, req.body?.adminNote));
@@ -88,7 +85,7 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
     }
   );
 
-  app.get('/admin/api/vip-farmers/loans', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.get('/admin/api/vip-farmers/loans', adminAuthMiddleware, async (req, res) => {
     try {
       const status = req.query.status ? String(req.query.status) : 'pending';
       return res.json(await listAdminVipLoans(status));
@@ -98,7 +95,7 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
     }
   });
 
-  app.post('/admin/api/vip-farmers/loans/:id/approve', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.post('/admin/api/vip-farmers/loans/:id/approve', adminAuthMiddleware, async (req, res) => {
     try {
       return res.json(await approveVipLoan(req.params.id, req.body?.adminNote));
     } catch (e) {
@@ -108,7 +105,7 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
     }
   });
 
-  app.post('/admin/api/vip-farmers/loans/:id/reject', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.post('/admin/api/vip-farmers/loans/:id/reject', adminAuthMiddleware, async (req, res) => {
     try {
       return res.json(await rejectVipLoan(req.params.id, req.body?.adminNote));
     } catch (e) {
@@ -118,7 +115,7 @@ function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
     }
   });
 
-  app.get('/admin/api/vip-farmers/reinvestments', adminAuthMiddleware, requireSuperAdmin, async (req, res) => {
+  app.get('/admin/api/vip-farmers/reinvestments', adminAuthMiddleware, async (req, res) => {
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
       const rows = await listVipReinvestEvents(limit);

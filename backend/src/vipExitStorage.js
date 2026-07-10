@@ -3,7 +3,7 @@ const {
   insertSupportTicket,
   listSupportTicketsByUserId,
   getSupportTicketById,
-  listSupportTicketsAdmin,
+  listVipExitSupportTicketsAdmin,
   updateSupportTicketStatus,
 } = require('./db');
 
@@ -95,14 +95,12 @@ async function listVipExitRequestsForUser(userId, limit = 20) {
 
 async function listVipExitRequestsAdmin({ status = 'pending', limit = 100 } = {}) {
   const cap = Math.min(500, Math.max(1, Number(limit) || 100));
-  const rows = await listSupportTicketsAdmin({ limit: cap * 3 });
-  const mapped = rows
-    .filter((row) => row.payload?.vipExit)
+  const rows = await listVipExitSupportTicketsAdmin({ limit: cap * 2 });
+  return rows
     .map((row) => ({ row, apiStatus: mapTicketStatus(row.status) }))
     .filter((item) => !status || item.apiStatus === status)
     .slice(0, cap)
     .map((item) => item.row);
-  return mapped;
 }
 
 async function getVipExitRequestById(id) {

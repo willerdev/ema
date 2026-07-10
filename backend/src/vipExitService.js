@@ -4,6 +4,7 @@ const {
   setWalletBalance,
   createTransaction,
   getActiveVipInvestmentForUser,
+  getUsersByIds,
   updateVipInvestment,
   utcTodayYmd,
   isMissingTableError,
@@ -231,7 +232,17 @@ async function rejectVipExit(exitId, adminNote) {
 
 async function listAdminVipExitRequests(status = 'pending') {
   const rows = await listVipExitRequestsAdmin({ status, limit: 200 });
-  return { requests: rows.map(exitRequestToApi).filter(Boolean) };
+  const users = await getUsersByIds(rows.map((row) => row.user_id));
+  const emailById = Object.fromEntries(users.map((u) => [u.id, u.email]));
+  const requests = rows
+    .map((row) => {
+      const api = exitRequestToApi(row);
+      if (!api) return null;
+      api.userEmail = emailById[row.user_id] || null;
+      return api;
+    })
+    .filter(Boolean);
+  return { requests };
 }
 
 module.exports = {
