@@ -2123,8 +2123,10 @@
           method: 'POST',
           body: JSON.stringify({ amount, reason: String(reason).trim() }),
         });
-        await loadUserDetail(viewingUserId);
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
         await loadUserJournal(viewingUserId);
+        void loadUserCharts(viewingUserId);
         alert('Deduction applied');
       } catch (e) {
         alert(e.message || 'Deduction failed');
