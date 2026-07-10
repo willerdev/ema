@@ -867,7 +867,7 @@
                 <p id="userJournalDayTitle" class="hint" style="margin:12px 0 8px;font-weight:700;"></p>
                 <div class="table-scroll tall">
                   <table>
-                    <thead><tr><th>Source</th><th>Detail</th><th>Amount</th></tr></thead>
+                    <thead><tr><th>Source</th><th>Detail</th><th>Amount</th><th></th></tr></thead>
                     <tbody id="userJournalDayRows"></tbody>
                   </table>
                 </div>
@@ -2067,18 +2067,67 @@
         }
         if (rowsEl) {
           if (!day.items || day.items.length === 0) {
-            rowsEl.innerHTML = '<tr><td colspan="3" class="hint">No line items</td></tr>';
+            rowsEl.innerHTML = '<tr><td colspan="4" class="hint">No line items</td></tr>';
           } else {
-            rowsEl.innerHTML = day.items.map((item) =>
-              '<tr><td>' + escapeHtml(journalSourceLabel(item.source)) + '</td>' +
-              '<td>' + escapeHtml(item.label || '—') + '</td>' +
-              '<td>' + fmtMoney(item.amountUsd) + '</td></tr>'
-            ).join('');
+            rowsEl.innerHTML = day.items.map((item) => {
+              const clawbackNote =
+                item.clawbackUsd > 0
+                  ? ' <span class="hint">(−' + fmtMoney(item.clawbackUsd) + ' deducted)</span>'
+                  : '';
+              const canDeduct =
+                item.source === 'airfarming' &&
+                item.id &&
+                (item.clawbackRemainingUsd == null ? item.amountUsd : item.clawbackRemainingUsd) > 0;
+              const actionCell = canDeduct
+                ? '<button type="button" class="btn-ghost btn-sm" data-journal-deduct="' +
+                  escapeHtml(item.id) + '" data-journal-deduct-max="' +
+                  String(item.clawbackRemainingUsd != null ? item.clawbackRemainingUsd : item.amountUsd) +
+                  '">Deduct</button>'
+                : '';
+              return '<tr><td>' + escapeHtml(journalSourceLabel(item.source)) + '</td>' +
+                '<td>' + escapeHtml(item.label || '—') + clawbackNote + '</td>' +
+                '<td>' + fmtMoney(item.amountUsd) + '</td>' +
+                '<td>' + actionCell + '</td></tr>';
+            }).join('');
+            rowsEl.querySelectorAll('[data-journal-deduct]').forEach((btn) => {
+              btn.onclick = () => void deductJournalDropEarning(btn);
+            });
           }
         }
       } catch (e) {
         if (titleEl) titleEl.textContent = userJournalSelectedDate + ' (UTC) — unavailable';
-        if (rowsEl) rowsEl.innerHTML = '<tr><td colspan="3" class="hint">' + escapeHtml(e.message) + '</td></tr>';
+        if (rowsEl) rowsEl.innerHTML = '<tr><td colspan="4" class="hint">' + escapeHtml(e.message) + '</td></tr>';
+      }
+    }
+
+    async function deductJournalDropEarning(btn) {
+      if (!viewingUserId) return;
+      const dropId = btn.getAttribute('data-journal-deduct');
+      const maxAmt = Number(btn.getAttribute('data-journal-deduct-max') || 0);
+      if (!dropId || maxAmt <= 0) return;
+      const amountStr = prompt('Deduct amount (USD). Max ' + fmtMoney(maxAmt) + ':', String(maxAmt));
+      if (amountStr == null) return;
+      const amount = Number(amountStr);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        alert('Enter a valid amount');
+        return;
+      }
+      const reason = prompt('Reason for deduction (required):');
+      if (reason == null) return;
+      if (!String(reason).trim()) {
+        alert('Reason is required');
+        return;
+      }
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/drops/' + dropId + '/clawback', {
+          method: 'POST',
+          body: JSON.stringify({ amount, reason: String(reason).trim() }),
+        });
+        await loadUserDetail(viewingUserId);
+        await loadUserJournal(viewingUserId);
+        alert('Deduction applied');
+      } catch (e) {
+        alert(e.message || 'Deduction failed');
       }
     }
 

@@ -10,6 +10,12 @@ function roundUsd(n) {
   return Math.round(Number(n || 0) * 100) / 100;
 }
 
+function dropNetProfit(d) {
+  const gross = roundUsd(d?.profit_amount);
+  const clawback = roundUsd(d?.profit_clawback_usd);
+  return roundUsd(Math.max(0, gross - clawback));
+}
+
 function dayKey(iso) {
   if (!iso) return null;
   const d = new Date(iso);
@@ -66,7 +72,7 @@ async function getJournalMonth(userId, year, month) {
   ]);
 
   for (const d of drops) {
-    addToDay(days, dayKey(d.paid_at), 'airfarming', d.profit_amount);
+    addToDay(days, dayKey(d.paid_at), 'airfarming', dropNetProfit(d));
   }
   for (const c of contracts) {
     addToDay(days, String(c.accrual_date).slice(0, 10), 'contracts', c.amount);
@@ -107,13 +113,18 @@ async function getJournalDay(userId, dateYmd) {
 
   const items = [];
   for (const d of drops) {
-    const amt = roundUsd(d.profit_amount);
-    if (amt <= 0) continue;
+    const gross = roundUsd(d.profit_amount);
+    const clawback = roundUsd(d.profit_clawback_usd);
+    const net = dropNetProfit(d);
+    if (gross <= 0 && net <= 0) continue;
     items.push({
       id: d.id,
       source: 'airfarming',
       label: `Airfarming drop (${Number(d.percent)}%)`,
-      amountUsd: amt,
+      amountUsd: net,
+      grossAmountUsd: gross,
+      clawbackUsd: clawback,
+      clawbackRemainingUsd: roundUsd(Math.max(0, gross - clawback)),
       at: d.paid_at,
     });
   }

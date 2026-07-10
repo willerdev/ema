@@ -912,7 +912,7 @@ async function getAdminUserChartSeries(userId, days = 90) {
   const depositMap = new Map();
   const profitMap = new Map();
 
-  const [txRes, npRes, dropsRes] = await Promise.all([
+  const [txRes, npRes, dropsResInitial] = await Promise.all([
     supabase
       .from('transactions')
       .select('type, amount, status, created_at')
@@ -928,13 +928,28 @@ async function getAdminUserChartSeries(userId, days = 90) {
       .order('created_at', { ascending: true }),
     supabase
       .from('airfarming_drops')
-      .select('profit_amount, paid_at, status')
+      .select('profit_amount, profit_clawback_usd, paid_at, status')
       .eq('user_id', userId)
       .eq('status', 'paid')
       .not('paid_at', 'is', null)
       .gte('paid_at', sinceIso)
       .order('paid_at', { ascending: true }),
   ]);
+
+  let dropsRes = dropsResInitial;
+  if (dropsRes.error && isSchemaError(dropsRes.error)) {
+    dropsRes = await supabase
+      .from('airfarming_drops')
+      .select('profit_amount, paid_at, status')
+      .eq('user_id', userId)
+      .eq('status', 'paid')
+      .not('paid_at', 'is', null)
+      .gte('paid_at', sinceIso)
+      .order('paid_at', { ascending: true });
+    if (dropsRes.data) {
+      dropsRes.data = dropsRes.data.map((row) => ({ ...row, profit_clawback_usd: 0 }));
+    }
+  }
 
   if (txRes.error && !isSchemaError(txRes.error)) throw txRes.error;
   if (npRes.error && !isSchemaError(npRes.error)) throw npRes.error;
@@ -954,7 +969,10 @@ async function getAdminUserChartSeries(userId, days = 90) {
   }
 
   for (const d of dropsRes.data || []) {
-    addDailyBucket(profitMap, d.paid_at, d.profit_amount);
+    const gross = Number(d.profit_amount) || 0;
+    const clawback = Number(d.profit_clawback_usd) || 0;
+    const net = Math.max(0, gross - clawback);
+    addDailyBucket(profitMap, d.paid_at, net);
   }
 
   return {
@@ -3504,15 +3522,23 @@ async function listRecentLiveTradingTransfersAdmin(limit = 80) {
 }
 
 async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
-  const { data, error } = await supabase
-    .from('airfarming_drops')
-    .select('id, profit_amount, paid_at, percent, status')
-    .eq('user_id', userId)
-    .eq('status', 'paid')
-    .not('paid_at', 'is', null)
-    .gte('paid_at', startIso)
-    .lte('paid_at', endIso)
-    .order('paid_at', { ascending: true });
+  const query = () =>
+    supabase
+      .from('airfarming_drops')
+      .eq('user_id', userId)
+      .eq('status', 'paid')
+      .not('paid_at', 'is', null)
+      .gte('paid_at', startIso)
+      .lte('paid_at', endIso)
+      .order('paid_at', { ascending: true });
+
+  let { data, error } = await query().select(
+    'id, profit_amount, profit_clawback_usd, paid_at, percent, status'
+  );
+  if (error && isSchemaError(error)) {
+    ({ data, error } = await query().select('id, profit_amount, paid_at, percent, status'));
+    data = (data || []).map((row) => ({ ...row, profit_clawback_usd: 0 }));
+  }
   if (error && isSchemaError(error)) return [];
   if (error) throw error;
   return data || [];

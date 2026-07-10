@@ -48,6 +48,7 @@ const {
 const { parsePauseRange, pauseStatusFromState } = require('./airfarmingPause');
 const { registerAdminAiRoutes } = require('./adminAiRoutes');
 const { getJournalMonth, getJournalDay } = require('./journalService');
+const { adminClawbackDropProfit } = require('./dropClawbackService');
 const { adminCreateTradeForUser, listTradeHistory } = require('./userTradeService');
 const { listVipAccrualHistory, adminInitiateVipInvestment } = require('./vipFarmerService');
 const {
@@ -256,6 +257,27 @@ function registerAdminRoutes(app) {
         return res.status(503).json({ message: 'Journal schema not ready.' });
       }
       return res.status(500).json({ message: e.message || 'Failed to load journal day' });
+    }
+  });
+
+  app.post('/admin/api/users/:id/drops/:dropId/clawback', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const result = await adminClawbackDropProfit(req.params.id, req.params.dropId, {
+        amount: req.body?.amount,
+        reason: req.body?.reason,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({
+          message: 'Run backend/sql/migrations/20260710_airfarming_drop_clawback.sql in Supabase.',
+        });
+      }
+      console.error('[admin/users/:id/drops/:dropId/clawback]', e);
+      return res.status(500).json({ message: e.message || 'Failed to deduct drop earnings' });
     }
   });
 
