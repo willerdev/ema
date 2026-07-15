@@ -28,6 +28,7 @@ const {
   getAirfarmingPlatformSettings,
   updateAirfarmingPlatformSettings,
   listPendingWithdrawalsAdmin,
+  listUserWithdrawalsAdmin,
   createAppNotification,
   getUserByEmail,
 } = require('./db');
@@ -320,6 +321,22 @@ function registerAdminRoutes(app) {
         return res.status(503).json({ message: 'VIP schema not ready. Run 20260605_vip_farmers.sql and 20260610_vip_accrual_commission.sql.' });
       }
       return res.status(500).json({ message: e.message || 'Failed to load VIP accruals' });
+    }
+  });
+
+  app.get('/admin/api/users/:id/withdrawals', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const withdrawals = await listUserWithdrawalsAdmin(req.params.id, limit);
+      return res.json({ withdrawals, count: withdrawals.length });
+    } catch (e) {
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'Database schema not ready. Run Supabase migrations.' });
+      }
+      console.error('[admin/users/:id/withdrawals]', e);
+      return res.status(500).json({ message: e.message || 'Failed to load withdrawal history' });
     }
   });
 

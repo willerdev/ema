@@ -986,7 +986,7 @@ async function getAdminUserDetail(userId) {
   const user = await getUserById(userId);
   if (!user) return null;
 
-  const [wallet, afWallet, state, transactions, scheduledDrops, cryptoBalances, vipInvestment] = await Promise.all([
+  const [wallet, afWallet, state, transactions, scheduledDrops, cryptoBalances, vipInvestment, whitelistedRows] = await Promise.all([
     getWalletByUserId(userId),
     getAirfarmingWalletByUserId(userId),
     getAirfarmingStateByUserId(userId),
@@ -1000,6 +1000,7 @@ async function getAdminUserDetail(userId) {
       .limit(10),
     getCryptoBalancesByUserId(userId).catch(() => []),
     getActiveVipInvestmentForUser(userId).catch(() => null),
+    listWhitelistedWalletsByUserId(userId).catch(() => []),
   ]);
 
   if (scheduledDrops.error && !isSchemaError(scheduledDrops.error)) throw scheduledDrops.error;
@@ -1011,6 +1012,20 @@ async function getAdminUserDetail(userId) {
 
   const { pauseStatusFromState } = require('./airfarmingPause');
   const pause = pauseStatusFromState(state);
+  const primaryCurrencySeen = new Set();
+  const whitelistedWallets = (whitelistedRows || []).map((w) => {
+    const currency = String(w.currency || '').toLowerCase();
+    const isPrimary = !primaryCurrencySeen.has(currency);
+    if (isPrimary) primaryCurrencySeen.add(currency);
+    return {
+      id: w.id,
+      label: w.label || '',
+      currency: w.currency,
+      address: w.address,
+      createdAt: w.created_at,
+      isPrimary,
+    };
+  });
 
   return {
     user: {
@@ -1058,6 +1073,7 @@ async function getAdminUserDetail(userId) {
       bandIndex: d.band_index,
       status: d.status,
     })),
+    whitelistedWallets,
   };
 }
 
@@ -2141,6 +2157,83 @@ async function listPendingWithdrawalsAdmin({ limit = 200 } = {}) {
   return items.slice(0, cap).map((row) => ({
     ...row,
     userEmail: emailByUserId.get(row.userId) || '—',
+    sourceLabel:
+      row.source === 'cash_wallet'
+        ? 'Cash wallet'
+        : row.source === 'nowpayments'
+          ? 'Crypto (NOWPayments)'
+          : 'Mobile money',
+  }));
+}
+
+/** Withdrawal history for a single user (all sources). */
+async function listUserWithdrawalsAdmin(userId, limit = 50) {
+  const cap = Math.min(200, Math.max(1, Number(limit) || 50));
+  const items = [];
+
+  const [txRes, npRows, localRes] = await Promise.all([
+    supabase
+      .from('transactions')
+      .select('id, amount, status, created_at')
+      .eq('user_id', userId)
+      .eq('type', 'withdraw')
+      .order('created_at', { ascending: false })
+      .limit(cap),
+    listNowpaymentsPayoutsByUserId(userId, cap),
+    supabase
+      .from('local_money_orders')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('type', 'withdraw')
+      .order('created_at', { ascending: false })
+      .limit(cap),
+  ]);
+
+  if (txRes.error && !isSchemaError(txRes.error)) throw txRes.error;
+  if (localRes.error && !isSchemaError(localRes.error)) throw localRes.error;
+
+  for (const t of txRes.data || []) {
+    const status = String(t.status || '');
+    items.push({
+      source: 'cash_wallet',
+      id: t.id,
+      amount: Number(t.amount),
+      asset: 'USD',
+      status,
+      destination: status.replace(/^pending:/, '').replace(/^completed:/, '') || 'bank_transfer',
+      createdAt: t.created_at,
+    });
+  }
+  for (const p of npRows || []) {
+    items.push({
+      source: 'nowpayments',
+      id: p.id,
+      amount: Number(p.amount),
+      asset: String(p.currency || '').toUpperCase(),
+      status: p.status,
+      destination: p.address,
+      createdAt: p.created_at,
+    });
+  }
+  for (const o of localRes.data || []) {
+    items.push({
+      source: 'local_money',
+      id: o.id,
+      amount: Number(o.crypto_amount),
+      asset: String(o.crypto_asset || 'usdt').toUpperCase(),
+      status: o.status,
+      destination: o.phone,
+      fiatAmount: Number(o.fiat_amount),
+      fiatCurrency: o.fiat_currency,
+      countryCode: o.country_code,
+      createdAt: o.created_at,
+    });
+  }
+
+  items.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+  return items.slice(0, cap).map((row) => ({
+    ...row,
     sourceLabel:
       row.source === 'cash_wallet'
         ? 'Cash wallet'
@@ -3724,6 +3817,7 @@ module.exports = {
   getLocalMoneyOrderById,
   getLocalMoneyOrderForUser,
   listPendingWithdrawalsAdmin,
+  listUserWithdrawalsAdmin,
   getUserWithdrawalDepositStats,
   planRowToApi,
   allocationRowToApi,

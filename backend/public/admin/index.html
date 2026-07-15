@@ -822,6 +822,45 @@
               </section>
 
               <section class="card admin-section">
+                <h3 class="admin-section-title">Whitelisted withdrawal wallets</h3>
+                <p class="admin-section-desc">
+                  Addresses the user registered in Settings for crypto withdrawals. The <strong>Default</strong> wallet per network is the first one they added (used automatically in the app).
+                </p>
+                <div class="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Label</th>
+                        <th>Network</th>
+                        <th>Address</th>
+                        <th>Added</th>
+                      </tr>
+                    </thead>
+                    <tbody id="userWhitelistRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
+                <h3 class="admin-section-title">Withdrawal history</h3>
+                <p class="admin-section-desc">Cash, crypto (NOWPayments), and mobile-money withdrawals for this user.</p>
+                <div class="table-scroll tall">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Type</th>
+                        <th>Amount</th>
+                        <th>Destination</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                      </tr>
+                    </thead>
+                    <tbody id="userWithdrawRows"></tbody>
+                  </table>
+                </div>
+              </section>
+
+              <section class="card admin-section">
                 <h3 class="admin-section-title">Reset password</h3>
                 <p class="admin-section-desc">Set a new password for this user (minimum 6 characters).</p>
                 <div class="form-grid-2">
@@ -1802,6 +1841,7 @@
       if (!(d.transactions || []).length) {
         txBody.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No transactions</td></tr>';
       }
+      renderUserWhitelistedWallets(d.whitelistedWallets || []);
       const dropBody = document.getElementById('userDropRows');
       dropBody.innerHTML = '';
       const scheduled = d.scheduledDrops || [];
@@ -2403,6 +2443,70 @@
       void loadUserDropPlan(id);
       void loadUserTrades(id);
       void loadUserVipAccruals(id);
+      void loadUserWithdrawals(id);
+    }
+
+    function renderUserWhitelistedWallets(wallets) {
+      const body = document.getElementById('userWhitelistRows');
+      if (!body) return;
+      body.innerHTML = '';
+      (wallets || []).forEach((w) => {
+        const tr = document.createElement('tr');
+        const label = (w.label ? escapeHtml(w.label) : '—') +
+          (w.isPrimary ? ' <span class="pill" style="font-size:0.68rem;">Default</span>' : '');
+        tr.innerHTML =
+          '<td>' + label + '</td>' +
+          '<td>' + escapeHtml(String(w.currency || '').toUpperCase()) + '</td>' +
+          '<td style="font-size:0.78rem;word-break:break-all;max-width:280px;">' + escapeHtml(w.address || '—') + '</td>' +
+          '<td>' + (w.createdAt ? new Date(w.createdAt).toLocaleString() : '—') + '</td>';
+        body.appendChild(tr);
+      });
+      if (!(wallets || []).length) {
+        body.innerHTML = '<tr><td colspan="4" style="color:var(--muted);">No whitelisted wallets</td></tr>';
+      }
+    }
+
+    function formatUserWithdrawAmount(w) {
+      const n = Number(w.amount);
+      if (w.source === 'cash_wallet') return fmtMoney(n);
+      if (w.fiatAmount && w.fiatCurrency) {
+        return n.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + w.asset +
+          ' (~' + w.fiatAmount + ' ' + w.fiatCurrency + ')';
+      }
+      return n.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' ' + (w.asset || '');
+    }
+
+    function renderUserWithdrawals(withdrawals) {
+      const body = document.getElementById('userWithdrawRows');
+      if (!body) return;
+      body.innerHTML = '';
+      (withdrawals || []).forEach((w) => {
+        const tr = document.createElement('tr');
+        const dest = w.source === 'local_money'
+          ? escapeHtml(String(w.destination || '')) + (w.countryCode ? ' · ' + w.countryCode : '')
+          : escapeHtml(String(w.destination || '—'));
+        tr.innerHTML =
+          '<td><span class="pill">' + escapeHtml(w.sourceLabel) + '</span></td>' +
+          '<td><strong>' + formatUserWithdrawAmount(w) + '</strong></td>' +
+          '<td style="font-size:0.78rem;word-break:break-all;max-width:240px;">' + dest + '</td>' +
+          '<td>' + escapeHtml(String(w.status || '—')) + '</td>' +
+          '<td>' + new Date(w.createdAt).toLocaleString() + '</td>';
+        body.appendChild(tr);
+      });
+      if (!(withdrawals || []).length) {
+        body.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">No withdrawals yet</td></tr>';
+      }
+    }
+
+    async function loadUserWithdrawals(userId) {
+      const body = document.getElementById('userWithdrawRows');
+      if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--muted);">Loading…</td></tr>';
+      try {
+        const data = await api('/admin/api/users/' + userId + '/withdrawals?limit=100');
+        renderUserWithdrawals(data.withdrawals || []);
+      } catch (e) {
+        if (body) body.innerHTML = '<tr><td colspan="5" style="color:var(--err);">' + escapeHtml(e.message) + '</td></tr>';
+      }
     }
 
     function renderUserTrades(trades) {
