@@ -13,6 +13,7 @@ const {
 } = require('./db');
 const { COMPLETED_STATUSES, fulfillLocalMoneyOrder } = require('./localMoneyFulfillment');
 const { verifyUserTotp } = require('./totpVerify');
+const { requireComplianceProfile } = require('./middleware/requireComplianceProfile');
 const { userHasVipLoanWithdrawalBlock } = require('./vipLoanService');
 const {
   getRegion,
