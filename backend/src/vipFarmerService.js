@@ -6,6 +6,7 @@ const {
   createTransaction,
   getActiveVipInvestmentForUser,
   getVipInvestmentById,
+  getUsersByIds,
   createVipInvestment,
   updateVipInvestment,
   listActiveVipInvestments,
@@ -44,6 +45,7 @@ const {
   newId: repoNewId,
   insertVipReinvestEvent,
   insertPlatformRevenueEvent,
+  listActiveVipInvestmentsAdmin,
 } = require('./vipFarmerRepository');
 const { getPendingVipExitForUser } = require('./vipExitStorage');
 const { getVipLoanStatus } = require('./vipLoanService');
@@ -285,6 +287,97 @@ async function adminInitiateVipInvestment(userId, { principalUsd, fundFrom = 'ca
   };
 }
 
+function adminPatchError(msg) {
+  const err = new Error(msg);
+  err.statusCode = 400;
+  return err;
+}
+
+async function adminUpdateVipInvestment(investmentId, body = {}, adminUser) {
+  const reasonText = String(body.reason || '').trim();
+  if (!reasonText) throw adminPatchError('Reason is required');
+
+  const inv = await getVipInvestmentById(investmentId);
+  if (!inv) throw adminPatchError('Investment not found');
+
+  const patch = {};
+  if (body.principalUsd !== undefined) {
+    const p = roundUsd(body.principalUsd);
+    if (!Number.isFinite(p) || p <= 0) throw adminPatchError('principalUsd must be greater than 0');
+    patch.principalUsd = p;
+  }
+  if (body.startedAt !== undefined) {
+    const d = new Date(body.startedAt);
+    if (Number.isNaN(d.getTime())) throw adminPatchError('Invalid startedAt');
+    patch.startedAt = d.toISOString();
+  }
+  if (body.maturesAt !== undefined) {
+    const d = new Date(body.maturesAt);
+    if (Number.isNaN(d.getTime())) throw adminPatchError('Invalid maturesAt');
+    patch.maturesAt = d.toISOString();
+  }
+  if (body.status !== undefined) {
+    const status = String(body.status);
+    if (!['active', 'matured', 'early_withdrawn', 'closed'].includes(status)) {
+      throw adminPatchError('status must be active, matured, early_withdrawn, or closed');
+    }
+    patch.status = status;
+  }
+  if (body.totalAccruedUsd !== undefined) {
+    const t = roundUsd(body.totalAccruedUsd);
+    if (!Number.isFinite(t) || t < 0) throw adminPatchError('totalAccruedUsd must be >= 0');
+    patch.totalAccruedUsd = t;
+  }
+  if (body.daysAccrued !== undefined) {
+    const d = Number(body.daysAccrued);
+    if (!Number.isInteger(d) || d < 0 || d > VIP_ACCRUAL_MAX_WORKING_DAYS) {
+      throw adminPatchError(`daysAccrued must be an integer from 0 to ${VIP_ACCRUAL_MAX_WORKING_DAYS}`);
+    }
+    patch.daysAccrued = d;
+  }
+  if (body.revenueWithdrawnUsd !== undefined) {
+    const r = roundUsd(body.revenueWithdrawnUsd);
+    if (!Number.isFinite(r) || r < 0) throw adminPatchError('revenueWithdrawnUsd must be >= 0');
+    patch.revenueWithdrawnUsd = r;
+  }
+
+  if (!Object.keys(patch).length) throw adminPatchError('No fields to update');
+
+  const nextTotal = patch.totalAccruedUsd ?? Number(inv.total_accrued_usd);
+  const nextRevenue = patch.revenueWithdrawnUsd ?? Number(inv.revenue_withdrawn_usd || 0);
+  if (nextRevenue > nextTotal) {
+    throw adminPatchError('revenueWithdrawnUsd cannot exceed totalAccruedUsd');
+  }
+
+  const row = await updateVipInvestment(investmentId, patch);
+  console.info('[admin/vip-farmers/update]', {
+    adminUser,
+    investmentId,
+    userId: inv.user_id,
+    patch,
+    reason: reasonText,
+  });
+  return { investment: await enrichVipInvestmentApi(row), reason: reasonText };
+}
+
+async function adminUpdateVipInvestmentForUser(userId, body, adminUser) {
+  const inv = await getActiveVipInvestmentForUser(userId);
+  if (!inv) throw adminPatchError('No active VIP investment for this user');
+  return adminUpdateVipInvestment(inv.id, body, adminUser);
+}
+
+async function listAdminVipInvestments() {
+  const rows = await listActiveVipInvestmentsAdmin();
+  const users = await getUsersByIds(rows.map((r) => r.user_id));
+  const emailById = Object.fromEntries(users.map((u) => [u.id, u.email]));
+  const investments = [];
+  for (const row of rows) {
+    const api = await enrichVipInvestmentApi(row);
+    investments.push({ ...api, userEmail: emailById[row.user_id] || null });
+  }
+  return { investments, count: investments.length };
+}
+
 async function addCapitalVip(userId, amount) {
   const amt = roundUsd(amount);
   if (!Number.isFinite(amt) || amt < VIP_MIN_INVEST_USD) {
@@ -506,6 +599,9 @@ module.exports = {
   listVipAccrualHistory,
   investVip,
   adminInitiateVipInvestment,
+  adminUpdateVipInvestment,
+  adminUpdateVipInvestmentForUser,
+  listAdminVipInvestments,
   addCapitalVip,
   reinvestVip,
   withdrawVipAtMaturity,

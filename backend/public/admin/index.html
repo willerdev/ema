@@ -982,6 +982,52 @@
                 <h3 class="admin-section-title">VIP Farmers — start investment</h3>
                 <p class="admin-section-desc">Start a 38-day calendar lock with up to 22 weekday accruals. Daily 9% gross on principal; 3% platform fee on interest paid to cash.</p>
                 <p id="vipActiveNotice" class="warn-box hidden"></p>
+                <div id="vipEditForm" class="hidden">
+                  <h4 style="font-size:0.9rem;margin:0 0 12px;color:var(--muted);">Edit active investment</h4>
+                  <div class="form-grid-2">
+                    <div>
+                      <label>Principal (USD)</label>
+                      <input id="vipEditPrincipal" type="number" min="0.01" step="0.01" />
+                    </div>
+                    <div>
+                      <label>Status</label>
+                      <select id="vipEditStatus">
+                        <option value="active">Active</option>
+                        <option value="matured">Matured</option>
+                        <option value="early_withdrawn">Early withdrawn</option>
+                        <option value="closed">Closed</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>Started at</label>
+                      <input id="vipEditStartedAt" type="datetime-local" />
+                    </div>
+                    <div>
+                      <label>Matures at</label>
+                      <input id="vipEditMaturesAt" type="datetime-local" />
+                    </div>
+                    <div>
+                      <label>Total accrued (USD)</label>
+                      <input id="vipEditTotalAccrued" type="number" min="0" step="0.01" />
+                    </div>
+                    <div>
+                      <label>Working days accrued (0–22)</label>
+                      <input id="vipEditDaysAccrued" type="number" min="0" max="22" step="1" />
+                    </div>
+                    <div>
+                      <label>Revenue withdrawn (USD)</label>
+                      <input id="vipEditRevenueWithdrawn" type="number" min="0" step="0.01" />
+                    </div>
+                    <div style="grid-column:1/-1;">
+                      <label>Reason (required)</label>
+                      <input id="vipEditReason" type="text" placeholder="e.g. Correcting accrual count per support ticket" />
+                    </div>
+                  </div>
+                  <div class="btn-toolbar">
+                    <button type="button" class="btn-warn" id="vipSaveInvestmentBtn">Save investment changes</button>
+                  </div>
+                  <p id="vipEditOk" class="section-inline-ok hidden"></p>
+                </div>
                 <div id="vipInitiateForm">
                   <div class="form-grid-2">
                     <div>
@@ -1180,6 +1226,26 @@
 
         <div id="panelVipfarmers" class="hidden">
           <div class="card">
+            <h3 style="margin:0 0 12px;font-size:1rem;">Active VIP investments</h3>
+            <p class="hint" style="margin-bottom:12px;">Edit principal, lock dates, accrual totals, or status. Changes write to the existing investment row (no new tables).</p>
+            <div class="table-scroll tall">
+              <table>
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Principal</th>
+                    <th>Days</th>
+                    <th>Accrued</th>
+                    <th>Status</th>
+                    <th>Started</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="vipInvestmentRows"></tbody>
+              </table>
+            </div>
+          </div>
+          <div class="card" style="margin-top:16px;">
             <h3 style="margin:0 0 12px;font-size:1rem;">Pending exit requests</h3>
             <div class="table-scroll tall">
               <table>
@@ -1471,6 +1537,60 @@
     </div>
   </div>
 
+  <div id="vipInvestmentModal" class="modal-backdrop hidden" data-modal>
+    <div class="card modal modal-wide">
+      <div class="modal-header">
+        <h2>Edit VIP investment</h2>
+        <button type="button" class="modal-close" data-close-modal="vipInvestmentModal" aria-label="Close">×</button>
+      </div>
+      <p id="vipInvestmentModalMeta" class="hint"></p>
+      <div class="form-grid-2">
+        <div>
+          <label>Principal (USD)</label>
+          <input id="vipModalPrincipal" type="number" min="0.01" step="0.01" />
+        </div>
+        <div>
+          <label>Status</label>
+          <select id="vipModalStatus">
+            <option value="active">Active</option>
+            <option value="matured">Matured</option>
+            <option value="early_withdrawn">Early withdrawn</option>
+            <option value="closed">Closed</option>
+          </select>
+        </div>
+        <div>
+          <label>Started at</label>
+          <input id="vipModalStartedAt" type="datetime-local" />
+        </div>
+        <div>
+          <label>Matures at</label>
+          <input id="vipModalMaturesAt" type="datetime-local" />
+        </div>
+        <div>
+          <label>Total accrued (USD)</label>
+          <input id="vipModalTotalAccrued" type="number" min="0" step="0.01" />
+        </div>
+        <div>
+          <label>Working days accrued (0–22)</label>
+          <input id="vipModalDaysAccrued" type="number" min="0" max="22" step="1" />
+        </div>
+        <div>
+          <label>Revenue withdrawn (USD)</label>
+          <input id="vipModalRevenueWithdrawn" type="number" min="0" step="0.01" />
+        </div>
+        <div style="grid-column:1/-1;">
+          <label>Reason (required)</label>
+          <input id="vipModalReason" type="text" placeholder="Why this change is being made" />
+        </div>
+      </div>
+      <p id="vipInvestmentModalErr" class="err hidden"></p>
+      <div class="row" style="margin-top:16px;">
+        <button type="button" class="btn-primary" id="vipModalSaveBtn" style="width:auto;">Save changes</button>
+        <button type="button" class="btn-ghost" data-close-modal="vipInvestmentModal" style="width:auto;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <div id="vipExitModal" class="modal-backdrop hidden" data-modal>
     <div class="card modal modal-wide">
       <div class="modal-header">
@@ -1590,6 +1710,8 @@
     let pendingWithdrawals = [];
     let pendingVipExits = [];
     let vipExitReviewId = null;
+    let vipInvestmentsAdmin = [];
+    let vipInvestmentEditId = null;
     let aiPlan = null;
     let aiAllocations = [];
     let aiPlanSummary = null;
@@ -1814,8 +1936,11 @@
       updatePauseButton(af);
       const vipNotice = document.getElementById('vipActiveNotice');
       const vipForm = document.getElementById('vipInitiateForm');
+      const vipEdit = document.getElementById('vipEditForm');
       const vipOk = document.getElementById('vipInitOk');
+      const vipEditOk = document.getElementById('vipEditOk');
       if (vipOk) vipOk.classList.add('hidden');
+      if (vipEditOk) vipEditOk.classList.add('hidden');
       if (vip && vip.status === 'active' && !vip.matured) {
         if (vipNotice) {
           vipNotice.textContent =
@@ -1825,9 +1950,14 @@
           vipNotice.classList.remove('hidden');
         }
         if (vipForm) vipForm.classList.add('hidden');
+        if (vipEdit) {
+          vipEdit.classList.remove('hidden');
+          fillVipInvestmentForm('vipEdit', vip);
+        }
       } else {
         if (vipNotice) vipNotice.classList.add('hidden');
         if (vipForm) vipForm.classList.remove('hidden');
+        if (vipEdit) vipEdit.classList.add('hidden');
       }
       const txBody = document.getElementById('userTxRows');
       txBody.innerHTML = '';
@@ -3555,14 +3685,126 @@
       document.getElementById('vipfarmersErr').classList.remove('hidden');
     }
 
+    function fillVipInvestmentForm(prefix, inv) {
+      const set = (id, val) => {
+        const el = document.getElementById(prefix + id);
+        if (el) el.value = val;
+      };
+      set('Principal', inv.principalUsd ?? '');
+      set('Status', inv.status || 'active');
+      set('TotalAccrued', inv.totalAccruedUsd ?? '');
+      set('DaysAccrued', inv.paidWeekdaysAccrued ?? inv.daysAccrued ?? '');
+      set('RevenueWithdrawn', inv.revenueWithdrawnUsd ?? '');
+      if (inv.startedAt) set('StartedAt', toLocalInput(inv.startedAt));
+      if (inv.maturesAt) set('MaturesAt', toLocalInput(inv.maturesAt));
+      if (prefix === 'vipEdit') set('Reason', '');
+      if (prefix === 'vipModal') set('Reason', '');
+    }
+
+    function readVipInvestmentPatch(prefix) {
+      const val = (id) => document.getElementById(prefix + id)?.value;
+      const body = {
+        principalUsd: Number(val('Principal')),
+        status: val('Status'),
+        totalAccruedUsd: Number(val('TotalAccrued')),
+        daysAccrued: Number(val('DaysAccrued')),
+        revenueWithdrawnUsd: Number(val('RevenueWithdrawn')),
+        reason: String(val('Reason') || '').trim(),
+      };
+      const started = val('StartedAt');
+      const matures = val('MaturesAt');
+      if (started) body.startedAt = new Date(started).toISOString();
+      if (matures) body.maturesAt = new Date(matures).toISOString();
+      return body;
+    }
+
+    async function saveUserVipInvestment() {
+      clearUserPageAlert();
+      const okEl = document.getElementById('vipEditOk');
+      if (okEl) okEl.classList.add('hidden');
+      if (!viewingUserId) return;
+      if (!window.confirm('Save changes to this user VIP investment?')) return;
+      try {
+        await api('/admin/api/users/' + viewingUserId + '/vip-farmers/investment', {
+          method: 'PATCH',
+          body: JSON.stringify(readVipInvestmentPatch('vipEdit')),
+        });
+        if (okEl) {
+          okEl.textContent = 'VIP investment updated.';
+          okEl.classList.remove('hidden');
+        }
+        const d = await api('/admin/api/users/' + viewingUserId);
+        renderUserDetail(d);
+        loadUserVipAccruals(viewingUserId);
+      } catch (e) {
+        showUserPageAlert(e.message || 'Failed to update VIP investment', 'error');
+      }
+    }
+
+    function renderVipInvestmentsTable() {
+      const body = document.getElementById('vipInvestmentRows');
+      if (!body) return;
+      body.innerHTML = '';
+      vipInvestmentsAdmin.forEach((inv) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + escapeHtml(inv.userEmail || inv.userId?.slice(0, 8) || '—') + '</td>' +
+          '<td><strong>' + fmtMoney(inv.principalUsd) + '</strong></td>' +
+          '<td>' + (inv.paidWeekdaysAccrued ?? inv.daysAccrued ?? 0) + ' / 22</td>' +
+          '<td>' + fmtMoney(inv.totalAccruedUsd) + '</td>' +
+          '<td>' + escapeHtml(inv.status) + '</td>' +
+          '<td>' + (inv.startedAt ? new Date(inv.startedAt).toLocaleDateString() : '—') + '</td>' +
+          '<td><button type="button" class="btn-ghost btn-sm" data-vip-inv-edit="' + inv.id + '">Edit</button></td>';
+        body.appendChild(tr);
+      });
+      if (!vipInvestmentsAdmin.length) {
+        body.innerHTML = '<tr><td colspan="7" style="color:var(--muted);">No active VIP investments</td></tr>';
+      }
+      body.querySelectorAll('[data-vip-inv-edit]').forEach((btn) => {
+        btn.onclick = () => openVipInvestmentEdit(btn.getAttribute('data-vip-inv-edit'));
+      });
+    }
+
+    function openVipInvestmentEdit(id) {
+      const inv = vipInvestmentsAdmin.find((x) => x.id === id);
+      if (!inv) return;
+      vipInvestmentEditId = id;
+      document.getElementById('vipInvestmentModalErr').classList.add('hidden');
+      document.getElementById('vipInvestmentModalMeta').textContent =
+        (inv.userEmail || inv.userId) + ' · principal ' + fmtMoney(inv.principalUsd) + ' · started ' +
+        (inv.startedAt ? new Date(inv.startedAt).toLocaleString() : '—');
+      fillVipInvestmentForm('vipModal', inv);
+      document.getElementById('vipInvestmentModal').classList.remove('hidden');
+    }
+
+    async function saveVipInvestmentModal() {
+      if (!vipInvestmentEditId) return;
+      document.getElementById('vipInvestmentModalErr').classList.add('hidden');
+      if (!window.confirm('Save changes to this VIP investment?')) return;
+      try {
+        await api('/admin/api/vip-farmers/investments/' + vipInvestmentEditId, {
+          method: 'PATCH',
+          body: JSON.stringify(readVipInvestmentPatch('vipModal')),
+        });
+        closeModal('vipInvestmentModal');
+        await loadVipFarmersAdmin();
+      } catch (e) {
+        document.getElementById('vipInvestmentModalErr').textContent = e.message;
+        document.getElementById('vipInvestmentModalErr').classList.remove('hidden');
+      }
+    }
+
     async function loadVipFarmersAdmin() {
       document.getElementById('vipfarmersErr').classList.add('hidden');
       try {
-        const [loans, reinvest] = await Promise.all([
+        const [investments, loans, reinvest] = await Promise.all([
+          api('/admin/api/vip-farmers/investments'),
           api('/admin/api/vip-farmers/loans?status=pending'),
           api('/admin/api/vip-farmers/reinvestments?limit=50'),
           loadVipExitRequests(),
         ]);
+        vipInvestmentsAdmin = investments.investments || [];
+        renderVipInvestmentsTable();
 
         const loanBody = document.getElementById('vipLoanRows');
         loanBody.innerHTML = '';
@@ -3998,6 +4240,8 @@
     document.getElementById('vipExitRejectBtn').onclick = () => {
       if (vipExitReviewId) actOnVipExit(vipExitReviewId, 'reject', document.getElementById('vipExitRejectBtn'));
     };
+    document.getElementById('vipSaveInvestmentBtn').onclick = () => saveUserVipInvestment();
+    document.getElementById('vipModalSaveBtn').onclick = () => saveVipInvestmentModal();
     document.getElementById('saveUserPasswordBtn').onclick = () => saveUserPassword();
     document.getElementById('userTradeAddBtn').onclick = () => addUserTrade();
 

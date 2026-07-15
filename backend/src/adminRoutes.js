@@ -51,7 +51,7 @@ const { registerAdminAiRoutes } = require('./adminAiRoutes');
 const { getJournalMonth, getJournalDay } = require('./journalService');
 const { adminClawbackDropProfit } = require('./dropClawbackService');
 const { adminCreateTradeForUser, listTradeHistory } = require('./userTradeService');
-const { listVipAccrualHistory, adminInitiateVipInvestment } = require('./vipFarmerService');
+const { listVipAccrualHistory, adminInitiateVipInvestment, adminUpdateVipInvestmentForUser } = require('./vipFarmerService');
 const {
   getUserDropScheduleView,
   saveUserDropScheduleDraft,
@@ -358,6 +358,23 @@ function registerAdminRoutes(app) {
       }
       console.error('[admin/users/:id/vip-farmers/initiate]', e);
       return res.status(500).json({ message: e.message || 'Failed to start VIP investment' });
+    }
+  });
+
+  app.patch('/admin/api/users/:id/vip-farmers/investment', adminAuthMiddleware, async (req, res) => {
+    try {
+      const user = await getUserById(req.params.id);
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      return res.json(
+        await adminUpdateVipInvestmentForUser(req.params.id, req.body || {}, req.adminUser)
+      );
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) {
+        return res.status(503).json({ message: 'VIP schema not ready. Run 20260605_vip_farmers.sql and 20260610_vip_accrual_commission.sql.' });
+      }
+      console.error('[admin/users/:id/vip-farmers/investment]', e);
+      return res.status(500).json({ message: e.message || 'Failed to update VIP investment' });
     }
   });
 

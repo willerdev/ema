@@ -1,6 +1,6 @@
 const { isMissingTableError } = require('./db');
 const { requireSuperAdmin } = require('./middleware/adminAuth');
-const { enrichVipInvestmentApi } = require('./vipFarmerService');
+const { enrichVipInvestmentApi, listAdminVipInvestments, adminUpdateVipInvestment } = require('./vipFarmerService');
 const { listActiveVipInvestmentsAdmin, listVipReinvestEvents } = require('./vipFarmerRepository');
 const {
   listAdminVipExitRequests,
@@ -13,6 +13,27 @@ const { listAdminVipLoans, approveVipLoan, rejectVipLoan } = require('./vipLoanS
 function registerAdminVipFarmerRoutes(app, { adminAuthMiddleware }) {
   const schemaMsg =
     'VIP Farmers v2 schema missing. Run backend/sql/migrations/20260708_vip_farmers_v2.sql in Supabase.';
+
+  app.get('/admin/api/vip-farmers/investments', adminAuthMiddleware, async (_req, res) => {
+    try {
+      return res.json(await listAdminVipInvestments());
+    } catch (e) {
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to load VIP investments' });
+    }
+  });
+
+  app.patch('/admin/api/vip-farmers/investments/:id', adminAuthMiddleware, async (req, res) => {
+    try {
+      return res.json(
+        await adminUpdateVipInvestment(req.params.id, req.body || {}, req.adminUser)
+      );
+    } catch (e) {
+      if (e.statusCode === 400) return res.status(400).json({ message: e.message });
+      if (isMissingTableError(e)) return res.status(503).json({ message: schemaMsg });
+      return res.status(500).json({ message: e.message || 'Failed to update investment' });
+    }
+  });
 
   app.get('/admin/api/vip-farmers', adminAuthMiddleware, requireSuperAdmin, async (_req, res) => {
     try {
