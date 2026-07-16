@@ -57,3 +57,10 @@ export function navigateToAirfarmingTrade(navigation: NavLike) {
 export function navigateToVipFarmersTrade(navigation: NavLike) {
   getRootNavigation(navigation).navigate('VipFarmersTrade');
 }
+
+export function navigateToVipLoan(
+  navigation: NavLike,
+  params?: RootStackParamList['VipLoan']
+) {
+  getRootNavigation(navigation).navigate('VipLoan', params);
+}

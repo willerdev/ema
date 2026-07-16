@@ -100,6 +100,18 @@ export type VipExitRequest = {
   createdAt: string;
 };
 
+export type VipLoanRecord = {
+  id: string;
+  amountUsd: number;
+  disbursedUsd: number;
+  outstandingUsd: number;
+  repaidUsd: number;
+  status: string;
+  payoutDestination?: 'platform' | 'direct_wallet';
+  walletAddress?: string | null;
+  disburseWithinBusinessDays?: number;
+};
+
 export type VipLoanStatus = {
   eligible: boolean;
   ineligibilityReason?: string | null;
@@ -115,18 +127,58 @@ export type VipLoanStatus = {
   newUserFactor: number;
   disburseWithinBusinessDays: number;
   blocksWithdrawals: boolean;
-  loan: {
-    id: string;
-    amountUsd: number;
-    disbursedUsd: number;
-    outstandingUsd: number;
-    repaidUsd: number;
-    status: string;
-    payoutDestination?: 'platform' | 'direct_wallet';
-    walletAddress?: string | null;
-    disburseWithinBusinessDays?: number;
-  } | null;
+  loan: VipLoanRecord | null;
 };
+
+function num(v: unknown, fallback = 0) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeLoanRecord(raw: unknown): VipLoanRecord | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  if (!row.id && !row.status) return null;
+  return {
+    id: String(row.id || ''),
+    amountUsd: num(row.amountUsd),
+    disbursedUsd: num(row.disbursedUsd),
+    outstandingUsd: num(row.outstandingUsd),
+    repaidUsd: num(row.repaidUsd),
+    status: String(row.status || 'unknown'),
+    payoutDestination:
+      row.payoutDestination === 'direct_wallet' ? 'direct_wallet' : 'platform',
+    walletAddress: row.walletAddress ? String(row.walletAddress) : null,
+    disburseWithinBusinessDays: num(row.disburseWithinBusinessDays, 3),
+  };
+}
+
+export function normalizeVipLoanStatus(raw: unknown): VipLoanStatus | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const row = raw as Record<string, unknown>;
+  if (!('eligible' in row) && !('principalUsd' in row) && !('ineligibilityReason' in row)) {
+    return null;
+  }
+  const loan = normalizeLoanRecord(row.loan);
+  return {
+    eligible: Boolean(row.eligible),
+    ineligibilityReason:
+      row.ineligibilityReason == null ? null : String(row.ineligibilityReason),
+    principalUsd: num(row.principalUsd),
+    minPrincipalUsd: num(row.minPrincipalUsd, 2500),
+    lifetimeAccrualDays: num(row.lifetimeAccrualDays),
+    monthlyAccrualUsd: num(row.monthlyAccrualUsd),
+    isEstablished: Boolean(row.isEstablished),
+    lastMonthEarningsUsd: num(row.lastMonthEarningsUsd),
+    maxLoanUsd: num(row.maxLoanUsd),
+    minLoanUsd: num(row.minLoanUsd, 10),
+    commissionRate: num(row.commissionRate, 0.3),
+    newUserFactor: num(row.newUserFactor, 1),
+    disburseWithinBusinessDays: num(row.disburseWithinBusinessDays, 3),
+    blocksWithdrawals: Boolean(row.blocksWithdrawals),
+    loan,
+  };
+}
 
 export type VipEarningsTotals = {
   weekdayCount: number;
@@ -198,7 +250,12 @@ export const vipFarmerService = {
     walletAddress?: string;
   }) => api.post<{ request: VipExitRequest }>('/vip-farmers/exit/request', body),
   getExitRequests: () => api.get<{ requests: VipExitRequest[] }>('/vip-farmers/exit/requests'),
-  getLoanStatus: () => api.get<VipLoanStatus>('/vip-farmers/loans/status'),
+  getLoanStatus: async () => {
+    const raw = await api.get<unknown>('/vip-farmers/loans/status');
+    const status = normalizeVipLoanStatus(raw);
+    if (!status) throw new Error('Loan status response was invalid. Please try again.');
+    return status;
+  },
   requestLoan: (body: {
     amount: number;
     destination?: 'platform' | 'direct_wallet';

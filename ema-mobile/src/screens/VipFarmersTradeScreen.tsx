@@ -12,6 +12,7 @@ import {
   type VipLockProjection,
   type VipSummary,
 } from '../services/vipFarmerService';
+import { navigateToVipLoan } from '../utils/navigationHelpers';
 import { palette } from '../theme/colors';
 import type { RootStackParamList } from '../types';
 
@@ -347,7 +348,7 @@ export function VipFarmersTradeScreen() {
                   ) : null}
                   <PrimaryButton
                     label='Loan details'
-                    onPress={() => navigation.navigate('VipLoan')}
+                    onPress={() => navigateToVipLoan(navigation, { initialStatus: loan })}
                     style={{ marginTop: 8 }}
                   />
                 </>
@@ -360,7 +361,7 @@ export function VipFarmersTradeScreen() {
                   </Text>
                   <PrimaryButton
                     label={loan.eligible ? 'Apply for VIP loan' : 'View loan requirements'}
-                    onPress={() => navigation.navigate('VipLoan')}
+                    onPress={() => navigateToVipLoan(navigation, { initialStatus: loan })}
                     style={{ marginTop: 8 }}
                   />
                 </>

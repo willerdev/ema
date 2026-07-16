@@ -9,30 +9,56 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RouteProp } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { vipFarmerService, type VipLoanStatus } from '../services/vipFarmerService';
+import {
+  normalizeVipLoanStatus,
+  vipFarmerService,
+  type VipLoanStatus,
+} from '../services/vipFarmerService';
 import { whitelistWalletService } from '../services/whitelistWalletService';
 import type { WhitelistedWallet } from '../types';
 import { formatNetworkLabel } from '../utils/userFacingError';
+import { navigateToVipFarmersTrade } from '../utils/navigationHelpers';
 import { palette } from '../theme/colors';
 import type { RootStackParamList } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'VipLoan'>;
+type Route = RouteProp<RootStackParamList, 'VipLoan'>;
 
-function fmtUsd(n: number) {
-  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function fmtUsd(n: unknown) {
+  const value = Number(n);
+  const safe = Number.isFinite(value) ? value : 0;
+  return '$' + safe.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function fmtPct(rate: number) {
-  return String(Math.round(rate * 1000) / 10).replace(/\.0$/, '');
+function fmtPct(rate: unknown) {
+  const value = Number(rate);
+  const safe = Number.isFinite(value) ? value : 0;
+  return String(Math.round(safe * 1000) / 10).replace(/\.0$/, '');
+}
+
+function RequirementRow({ met, label }: { met: boolean; label: string }) {
+  return (
+    <View style={styles.reqRow}>
+      <Text style={[styles.reqIcon, met ? styles.reqMet : styles.reqMiss]}>{met ? '✓' : '○'}</Text>
+      <Text style={styles.meta}>{label}</Text>
+    </View>
+  );
 }
 
 export function VipLoanScreen() {
   const navigation = useNavigation<Nav>();
-  const [status, setStatus] = useState<VipLoanStatus | null>(null);
+  const route = useRoute<Route>();
+  const initialStatus = useMemo(
+    () => normalizeVipLoanStatus(route.params?.initialStatus),
+    [route.params?.initialStatus]
+  );
+
+  const [status, setStatus] = useState<VipLoanStatus | null>(initialStatus);
   const [wallets, setWallets] = useState<WhitelistedWallet[]>([]);
   const [amount, setAmount] = useState('');
   const [destination, setDestination] = useState<'platform' | 'direct_wallet'>('platform');
@@ -54,12 +80,14 @@ export function VipLoanScreen() {
       setWallets(list);
       const usdt = list.filter((w) => w.currency === 'usdttrc20');
       setSelectedWalletId((prev) => prev || usdt[0]?.id || null);
-      setAmount((prev) => (prev ? prev : loanStatus.maxLoanUsd > 0 ? String(loanStatus.maxLoanUsd) : ''));
+      setAmount((prev) =>
+        prev ? prev : loanStatus.maxLoanUsd > 0 ? String(loanStatus.maxLoanUsd) : ''
+      );
     } catch (e: any) {
       setError(e?.message || 'Failed to load loan status');
-      setStatus(null);
+      if (!initialStatus) setStatus(null);
     }
-  }, []);
+  }, [initialStatus]);
 
   useEffect(() => {
     void load();
@@ -130,22 +158,34 @@ export function VipLoanScreen() {
   };
 
   const openLoan = status?.loan;
+  const minPrincipal = status?.minPrincipalUsd ?? 2500;
+  const minAccrualDays = 22;
+  const hasActiveInvestment = (status?.principalUsd ?? 0) > 0;
+  const meetsPrincipal = (status?.principalUsd ?? 0) >= minPrincipal;
+  const meetsAccrualDays = (status?.lifetimeAccrualDays ?? 0) >= minAccrualDays;
+  const hasProjectedAccrual = (status?.monthlyAccrualUsd ?? 0) >= (status?.minLoanUsd ?? 10);
+  const showLoading = !status && !error;
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ padding: 16, paddingBottom: 32 }}
+      contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
     >
       <Text style={styles.title}>VIP Farmers loan</Text>
       <Text style={styles.sub}>
-        For investors with {fmtUsd(status?.minPrincipalUsd ?? 2500)}+ principal. Loan size is based on projected
-        accrual this month.
+        For investors with {fmtUsd(minPrincipal)}+ principal. Loan size is based on projected accrual this month.
       </Text>
 
       {error ? (
         <Card style={styles.errCard}>
           <Text style={styles.err}>{error}</Text>
+        </Card>
+      ) : null}
+
+      {showLoading ? (
+        <Card>
+          <Text style={styles.meta}>Loading…</Text>
         </Card>
       ) : null}
 
@@ -208,12 +248,12 @@ export function VipLoanScreen() {
               </View>
               {!status.isEstablished ? (
                 <Text style={styles.note}>
-                  New VIP investors: max loan is 50% of this month&apos;s projected accrual, then {fmtPct(status.commissionRate)}%
+                  New VIP investors: max loan is 50% of this month's projected accrual, then {fmtPct(status.commissionRate)}%
                   commission.
                 </Text>
               ) : (
                 <Text style={styles.note}>
-                  Established investors: max loan equals this month&apos;s projected accrual minus {fmtPct(status.commissionRate)}%
+                  Established investors: max loan equals this month's projected accrual minus {fmtPct(status.commissionRate)}%
                   commission on disbursement.
                 </Text>
               )}
@@ -286,20 +326,45 @@ export function VipLoanScreen() {
             </Card>
           ) : (
             <Card style={{ marginTop: 12 }}>
-              <Text style={styles.label}>Not eligible yet</Text>
-              <Text style={styles.meta}>{status.ineligibilityReason || 'Requirements not met.'}</Text>
+              <Text style={styles.label}>Loan requirements</Text>
+              <Text style={styles.meta}>
+                {status.ineligibilityReason || 'Complete the items below to apply for a VIP loan.'}
+              </Text>
+
+              <View style={styles.reqList}>
+                <RequirementRow met={hasActiveInvestment} label='Active VIP Farmers investment' />
+                <RequirementRow
+                  met={meetsPrincipal}
+                  label={`Minimum principal ${fmtUsd(minPrincipal)} (yours: ${fmtUsd(status.principalUsd)})`}
+                />
+                <RequirementRow
+                  met={!openLoan}
+                  label='No pending or active VIP loan'
+                />
+                <RequirementRow
+                  met={hasProjectedAccrual}
+                  label={`Projected monthly accrual supports at least ${fmtUsd(status.minLoanUsd)} loan`}
+                />
+                <RequirementRow
+                  met={meetsAccrualDays || status.isEstablished}
+                  label={`Established tier: ${minAccrualDays}+ weekday accrual days (yours: ${status.lifetimeAccrualDays})`}
+                />
+              </View>
+
+              <Text style={styles.note}>
+                New investors (under {minAccrualDays} accrual days) may qualify for up to 50% of projected monthly accrual
+                with a {fmtPct(0.1)}% commission. Established investors may borrow up to full projected accrual with a{' '}
+                {fmtPct(0.3)}% commission.
+              </Text>
+
               <PrimaryButton
                 label='Back to VIP Farmers'
-                onPress={() => navigation.navigate('VipFarmersTrade')}
+                onPress={() => navigateToVipFarmersTrade(navigation)}
                 style={{ marginTop: 12 }}
               />
             </Card>
           )}
         </>
-      ) : !error ? (
-        <Card>
-          <Text style={styles.meta}>Loading…</Text>
-        </Card>
       ) : null}
     </ScrollView>
   );
@@ -307,13 +372,14 @@ export function VipLoanScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: palette.background },
+  content: { padding: 16, paddingBottom: 32, flexGrow: 1 },
   title: { color: palette.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 4 },
   sub: { color: palette.textSecondary, marginBottom: 12, lineHeight: 18 },
   errCard: { marginBottom: 12, borderColor: '#b45309' },
   err: { color: '#fbbf24' },
   label: { color: palette.textPrimary, fontWeight: '700', marginBottom: 6 },
   bigVal: { color: palette.primary, fontSize: 28, fontWeight: '800' },
-  meta: { color: palette.textSecondary, fontSize: 13, lineHeight: 18 },
+  meta: { color: palette.textSecondary, fontSize: 13, lineHeight: 18, flex: 1 },
   val: { color: palette.textPrimary, fontWeight: '700' },
   row: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   input: {
@@ -347,4 +413,9 @@ const styles = StyleSheet.create({
   },
   walletRowOn: { borderColor: palette.primary },
   walletLabel: { color: palette.textPrimary, fontWeight: '600', fontSize: 13 },
+  reqList: { marginTop: 12, gap: 8 },
+  reqRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  reqIcon: { width: 18, fontWeight: '800', fontSize: 14, marginTop: 1 },
+  reqMet: { color: palette.success },
+  reqMiss: { color: palette.textSecondary },
 });
