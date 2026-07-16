@@ -18,6 +18,7 @@ export type RootStackParamList = {
   MainTabs: NavigatorScreenParams<RootTabParamList> | undefined;
   AirfarmingTrade: undefined;
   VipFarmersTrade: undefined;
+  VipLoan: undefined;
   ContractsTrade: undefined;
   ExpertAutoTrading: undefined;
   TradeHistory: undefined;

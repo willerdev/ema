@@ -3,6 +3,7 @@ import { ActivityIndicator, View } from 'react-native';
 import { MainTabNavigator } from './MainTabNavigator';
 import { AirfarmingTradeScreen } from '../screens/AirfarmingTradeScreen';
 import { VipFarmersTradeScreen } from '../screens/VipFarmersTradeScreen';
+import { VipLoanScreen } from '../screens/VipLoanScreen';
 import { ContractsTradeScreen } from '../screens/ContractsTradeScreen';
 import { ExpertAutoTradingScreen } from '../screens/ExpertAutoTradingScreen';
 import { TradeHistoryScreen } from '../screens/TradeHistoryScreen';
@@ -49,6 +50,7 @@ export function RootNavigator() {
       <Stack.Screen name='MainTabs' component={MainTabNavigator} options={{ headerShown: false }} />
       <Stack.Screen name='AirfarmingTrade' component={AirfarmingTradeScreen} options={{ title: 'Airfarmers' }} />
       <Stack.Screen name='VipFarmersTrade' component={VipFarmersTradeScreen} options={{ title: 'Live VIP Farmers' }} />
+      <Stack.Screen name='VipLoan' component={VipLoanScreen} options={{ title: 'VIP Farmers loan' }} />
       <Stack.Screen name='ContractsTrade' component={ContractsTradeScreen} options={{ title: 'Contracts' }} />
       <Stack.Screen name='ExpertAutoTrading' component={ExpertAutoTradingScreen} options={{ title: 'Expert Account Manager' }} />
       <Stack.Screen name='TradeHistory' component={TradeHistoryScreen} options={{ title: 'Trade history' }} />

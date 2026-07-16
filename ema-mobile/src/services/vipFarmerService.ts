@@ -102,18 +102,29 @@ export type VipExitRequest = {
 
 export type VipLoanStatus = {
   eligible: boolean;
+  ineligibilityReason?: string | null;
+  principalUsd: number;
+  minPrincipalUsd: number;
   lifetimeAccrualDays: number;
+  monthlyAccrualUsd: number;
+  isEstablished: boolean;
   lastMonthEarningsUsd: number;
   maxLoanUsd: number;
   minLoanUsd: number;
   commissionRate: number;
+  newUserFactor: number;
+  disburseWithinBusinessDays: number;
   blocksWithdrawals: boolean;
   loan: {
     id: string;
     amountUsd: number;
+    disbursedUsd: number;
     outstandingUsd: number;
     repaidUsd: number;
     status: string;
+    payoutDestination?: 'platform' | 'direct_wallet';
+    walletAddress?: string | null;
+    disburseWithinBusinessDays?: number;
   } | null;
 };
 
@@ -188,7 +199,11 @@ export const vipFarmerService = {
   }) => api.post<{ request: VipExitRequest }>('/vip-farmers/exit/request', body),
   getExitRequests: () => api.get<{ requests: VipExitRequest[] }>('/vip-farmers/exit/requests'),
   getLoanStatus: () => api.get<VipLoanStatus>('/vip-farmers/loans/status'),
-  requestLoan: (amount: number) => api.post<{ loan: VipLoanStatus['loan'] }>('/vip-farmers/loans/request', { amount }),
+  requestLoan: (body: {
+    amount: number;
+    destination?: 'platform' | 'direct_wallet';
+    walletAddress?: string;
+  }) => api.post<{ loan: VipLoanStatus['loan'] }>('/vip-farmers/loans/request', body),
   repayLoan: (amount: number) =>
     api.post<{ loan: VipLoanStatus['loan']; cashWalletUsd: number }>('/vip-farmers/loans/repay', { amount }),
 };

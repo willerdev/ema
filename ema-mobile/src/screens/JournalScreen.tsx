@@ -33,7 +33,9 @@ export function JournalScreen() {
   const [monthData, setMonthData] = useState<JournalMonthResponse | null>(null);
   const [selectedDate, setSelectedDate] = useState(now.toISOString().slice(0, 10));
   const [dayData, setDayData] = useState<JournalDayResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [monthError, setMonthError] = useState<string | null>(null);
+  const [dayError, setDayError] = useState<string | null>(null);
+  const [dayLoading, setDayLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   const calendarCells = useMemo(() => {
@@ -49,29 +51,44 @@ export function JournalScreen() {
     return cells;
   }, [year, month]);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const loadMonth = useCallback(async () => {
+    setMonthError(null);
     try {
-      const [m, d] = await Promise.all([
-        journalService.getMonth(year, month),
-        journalService.getDay(selectedDate),
-      ]);
+      const m = await journalService.getMonth(year, month);
       setMonthData(m);
+    } catch (e: any) {
+      setMonthError(e?.message || 'Failed to load journal month');
+      setMonthData(null);
+    }
+  }, [year, month]);
+
+  const loadDay = useCallback(async (ymd: string) => {
+    setDayError(null);
+    setDayLoading(true);
+    try {
+      const d = await journalService.getDay(ymd);
       setDayData(d);
     } catch (e: any) {
-      setError(e?.message || 'Failed to load journal');
+      setDayError(e?.message || 'Failed to load journal day');
+      setDayData(null);
+    } finally {
+      setDayLoading(false);
     }
-  }, [year, month, selectedDate]);
+  }, []);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadMonth();
+  }, [loadMonth]);
+
+  useEffect(() => {
+    if (selectedDate) void loadDay(selectedDate);
+  }, [selectedDate, loadDay]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await Promise.all([loadMonth(), loadDay(selectedDate)]);
     setRefreshing(false);
-  }, [load]);
+  }, [loadMonth, loadDay, selectedDate]);
 
   const shiftMonth = (delta: number) => {
     let m = month + delta;
@@ -91,7 +108,6 @@ export function JournalScreen() {
 
   const onSelectDay = (ymd: string) => {
     setSelectedDate(ymd);
-    void journalService.getDay(ymd).then(setDayData).catch((e: any) => setError(e?.message));
   };
 
   return (
@@ -103,9 +119,9 @@ export function JournalScreen() {
       <Text style={styles.title}>Journal</Text>
       <Text style={styles.sub}>Daily earnings (UTC). Green = profit day.</Text>
 
-      {error ? (
+      {monthError ? (
         <Card style={styles.errCard}>
-          <Text style={styles.err}>{error}</Text>
+          <Text style={styles.err}>{monthError}</Text>
         </Card>
       ) : null}
 
@@ -170,7 +186,10 @@ export function JournalScreen() {
 
       <Card style={styles.detailCard}>
         <Text style={styles.detailTitle}>{selectedDate} (UTC)</Text>
-        {dayData ? (
+        {dayError ? <Text style={styles.err}>{dayError}</Text> : null}
+        {dayLoading ? (
+          <Text style={styles.meta}>Loading day…</Text>
+        ) : dayData ? (
           <>
             <Text style={styles.detailTotal}>
               {dayData.hasProfit ? fmtUsd(dayData.totalUsd) : 'No earnings this day'}
@@ -195,9 +214,9 @@ export function JournalScreen() {
               <Text style={styles.meta}>No line items for this date.</Text>
             )}
           </>
-        ) : (
-          <Text style={styles.meta}>Loading day…</Text>
-        )}
+        ) : !dayError ? (
+          <Text style={styles.meta}>No data for this day.</Text>
+        ) : null}
       </Card>
     </ScrollView>
   );

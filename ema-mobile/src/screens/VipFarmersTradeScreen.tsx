@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { VipExitWizard } from '../components/VipExitWizard';
@@ -11,6 +13,9 @@ import {
   type VipSummary,
 } from '../services/vipFarmerService';
 import { palette } from '../theme/colors';
+import type { RootStackParamList } from '../types';
+
+type Nav = NativeStackNavigationProp<RootStackParamList, 'VipFarmersTrade'>;
 
 function fmtUsd(n: number) {
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -21,13 +26,13 @@ function fmtPct(rate: number) {
 }
 
 export function VipFarmersTradeScreen() {
+  const navigation = useNavigation<Nav>();
   const [summary, setSummary] = useState<VipSummary | null>(null);
   const [accruals, setAccruals] = useState<VipAccrual[]>([]);
   const [earningsTotals, setEarningsTotals] = useState<VipEarningsTotals | null>(null);
   const [commissionRate, setCommissionRate] = useState(0.03);
   const [amount, setAmount] = useState('');
   const [addAmount, setAddAmount] = useState('');
-  const [loanAmount, setLoanAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
   const [exitOpen, setExitOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -130,19 +135,6 @@ export function VipFarmersTradeScreen() {
         },
       ]
     );
-  };
-
-  const onRequestLoan = async () => {
-    const n = Number(loanAmount);
-    if (!n || n <= 0) return Alert.alert('Loan', 'Enter a valid amount');
-    try {
-      await vipFarmerService.requestLoan(n);
-      setLoanAmount('');
-      await load();
-      Alert.alert('Loan requested', 'Pending superadmin approval (up to 2 business days).');
-    } catch (e: any) {
-      Alert.alert('VIP loan', e?.message || 'Request failed');
-    }
   };
 
   const onRepayLoan = async () => {
@@ -350,28 +342,28 @@ export function VipFarmersTradeScreen() {
                       />
                       <PrimaryButton label='Repay loan' onPress={() => void onRepayLoan()} style={{ marginTop: 8 }} />
                     </>
+                  ) : loan.loan.status === 'pending' ? (
+                    <Text style={styles.meta}>Pending approval — funds within 3 business days after approval.</Text>
                   ) : null}
-                </>
-              ) : loan.eligible ? (
-                <>
-                  <Text style={styles.meta}>
-                    Max loan {fmtUsd(loan.maxLoanUsd)} (last 30 days earnings). 30% commission on disbursement.
-                  </Text>
-                  <TextInput
-                    style={styles.input}
-                    value={loanAmount}
-                    onChangeText={setLoanAmount}
-                    placeholder={`Min ${fmtUsd(loan.minLoanUsd)}`}
-                    placeholderTextColor={palette.textSecondary}
-                    keyboardType='numeric'
+                  <PrimaryButton
+                    label='Loan details'
+                    onPress={() => navigation.navigate('VipLoan')}
+                    style={{ marginTop: 8 }}
                   />
-                  <PrimaryButton label='Request VIP loan' onPress={() => void onRequestLoan()} style={{ marginTop: 8 }} />
                 </>
               ) : (
-                <Text style={styles.meta}>
-                  Not eligible — need active investment, {loan.lifetimeAccrualDays}/22 lifetime accrual days, min{' '}
-                  {fmtUsd(loan.minLoanUsd)} last-month earnings.
-                </Text>
+                <>
+                  <Text style={styles.meta}>
+                    {loan.eligible
+                      ? `Eligible up to ${fmtUsd(loan.maxLoanUsd)} based on this month's projected accrual.`
+                      : loan.ineligibilityReason || 'Not eligible yet.'}
+                  </Text>
+                  <PrimaryButton
+                    label={loan.eligible ? 'Apply for VIP loan' : 'View loan requirements'}
+                    onPress={() => navigation.navigate('VipLoan')}
+                    style={{ marginTop: 8 }}
+                  />
+                </>
               )}
             </Card>
           ) : null}

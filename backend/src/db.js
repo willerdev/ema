@@ -3628,9 +3628,10 @@ async function listRecentLiveTradingTransfersAdmin(limit = 80) {
 }
 
 async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
-  const query = () =>
+  const base = () =>
     supabase
       .from('airfarming_drops')
+      .select('id, profit_amount, profit_clawback_usd, paid_at, percent, status')
       .eq('user_id', userId)
       .eq('status', 'paid')
       .not('paid_at', 'is', null)
@@ -3638,11 +3639,17 @@ async function listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso) {
       .lte('paid_at', endIso)
       .order('paid_at', { ascending: true });
 
-  let { data, error } = await query().select(
-    'id, profit_amount, profit_clawback_usd, paid_at, percent, status'
-  );
+  let { data, error } = await base();
   if (error && isSchemaError(error)) {
-    ({ data, error } = await query().select('id, profit_amount, paid_at, percent, status'));
+    ({ data, error } = await supabase
+      .from('airfarming_drops')
+      .select('id, profit_amount, paid_at, percent, status')
+      .eq('user_id', userId)
+      .eq('status', 'paid')
+      .not('paid_at', 'is', null)
+      .gte('paid_at', startIso)
+      .lte('paid_at', endIso)
+      .order('paid_at', { ascending: true }));
     data = (data || []).map((row) => ({ ...row, profit_clawback_usd: 0 }));
   }
   if (error && isSchemaError(error)) return [];

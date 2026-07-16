@@ -66,9 +66,9 @@ async function getJournalMonth(userId, year, month) {
   const days = buildMonthDaysMap(year, month);
 
   const [drops, contracts, vipRows] = await Promise.all([
-    listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso),
-    listContractAccrualsForUserBetween(userId, startYmd, endYmd),
-    listVipAccrualsForUserBetween(userId, startYmd, endYmd),
+    listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso).catch(() => []),
+    listContractAccrualsForUserBetween(userId, startYmd, endYmd).catch(() => []),
+    listVipAccrualsForUserBetween(userId, startYmd, endYmd).catch(() => []),
   ]);
 
   for (const d of drops) {
@@ -106,9 +106,9 @@ async function getJournalDay(userId, dateYmd) {
   const endIso = `${date}T23:59:59.999Z`;
 
   const [drops, contracts, vipRows] = await Promise.all([
-    listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso),
-    listContractAccrualsForUserOnDate(userId, date),
-    listVipAccrualsForUserOnDate(userId, date),
+    listPaidAirfarmingDropsForUserBetween(userId, startIso, endIso).catch(() => []),
+    listContractAccrualsForUserOnDate(userId, date).catch(() => []),
+    listVipAccrualsForUserOnDate(userId, date).catch(() => []),
   ]);
 
   const items = [];

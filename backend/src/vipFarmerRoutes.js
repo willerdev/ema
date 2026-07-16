@@ -116,7 +116,7 @@ function registerVipFarmerRoutes(app, { authMiddleware }) {
 
   app.post('/vip-farmers/loans/request', authMiddleware, async (req, res) => {
     try {
-      const result = await requestVipLoan(req.userId, req.body?.amount);
+      const result = await requestVipLoan(req.userId, req.body || {});
       return res.status(201).json(result);
     } catch (e) {
       if (e.statusCode === 400) return res.status(400).json({ message: e.message });

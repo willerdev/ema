@@ -224,6 +224,17 @@ function exitRequestToApi(row) {
 
 function loanToApi(row) {
   if (!row) return null;
+  let payoutDestination = 'platform';
+  let walletAddress = null;
+  let disburseWithinBusinessDays = 3;
+  try {
+    const parsed = JSON.parse(row.admin_note || '');
+    if (parsed?.payoutDestination === 'direct_wallet') payoutDestination = 'direct_wallet';
+    walletAddress = parsed?.walletAddress || null;
+    disburseWithinBusinessDays = parsed?.disburseWithinBusinessDays || 3;
+  } catch {
+    /* legacy rows */
+  }
   return {
     id: row.id,
     userId: row.user_id,
@@ -237,6 +248,9 @@ function loanToApi(row) {
     outstandingUsd: Number(row.outstanding_usd),
     repaidUsd: Number(row.repaid_usd),
     status: row.status,
+    payoutDestination,
+    walletAddress,
+    disburseWithinBusinessDays,
     adminNote: row.admin_note,
     requestedAt: row.requested_at,
     reviewedAt: row.reviewed_at,
