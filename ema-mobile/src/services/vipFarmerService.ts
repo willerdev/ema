@@ -114,6 +114,8 @@ export type VipLoanRecord = {
 
 export type VipLoanStatus = {
   eligible: boolean;
+  hasActiveInvestment?: boolean;
+  investmentId?: string | null;
   ineligibilityReason?: string | null;
   principalUsd: number;
   minPrincipalUsd: number;
@@ -156,27 +158,78 @@ function normalizeLoanRecord(raw: unknown): VipLoanRecord | null {
 export function normalizeVipLoanStatus(raw: unknown): VipLoanStatus | null {
   if (!raw || typeof raw !== 'object') return null;
   const row = raw as Record<string, unknown>;
-  if (!('eligible' in row) && !('principalUsd' in row) && !('ineligibilityReason' in row)) {
+  if (
+    !('eligible' in row) &&
+    !('principalUsd' in row) &&
+    !('principal_usd' in row) &&
+    !('ineligibilityReason' in row) &&
+    !('ineligibility_reason' in row)
+  ) {
     return null;
   }
   const loan = normalizeLoanRecord(row.loan);
+  const principalUsd = num(row.principalUsd ?? row.principal_usd);
+  const hasActiveInvestment = Boolean(
+    row.hasActiveInvestment ??
+      row.has_active_investment ??
+      row.investmentId ??
+      row.investment_id ??
+      principalUsd > 0
+  );
   return {
     eligible: Boolean(row.eligible),
+    hasActiveInvestment,
+    investmentId:
+      row.investmentId != null
+        ? String(row.investmentId)
+        : row.investment_id != null
+          ? String(row.investment_id)
+          : null,
     ineligibilityReason:
-      row.ineligibilityReason == null ? null : String(row.ineligibilityReason),
-    principalUsd: num(row.principalUsd),
-    minPrincipalUsd: num(row.minPrincipalUsd, 2500),
-    lifetimeAccrualDays: num(row.lifetimeAccrualDays),
-    monthlyAccrualUsd: num(row.monthlyAccrualUsd),
-    isEstablished: Boolean(row.isEstablished),
-    lastMonthEarningsUsd: num(row.lastMonthEarningsUsd),
-    maxLoanUsd: num(row.maxLoanUsd),
-    minLoanUsd: num(row.minLoanUsd, 10),
-    commissionRate: num(row.commissionRate, 0.3),
-    newUserFactor: num(row.newUserFactor, 1),
-    disburseWithinBusinessDays: num(row.disburseWithinBusinessDays, 3),
-    blocksWithdrawals: Boolean(row.blocksWithdrawals),
+      row.ineligibilityReason == null && row.ineligibility_reason == null
+        ? null
+        : String(row.ineligibilityReason ?? row.ineligibility_reason ?? ''),
+    principalUsd,
+    minPrincipalUsd: num(row.minPrincipalUsd ?? row.min_principal_usd, 2500),
+    lifetimeAccrualDays: num(row.lifetimeAccrualDays ?? row.lifetime_accrual_days),
+    monthlyAccrualUsd: num(row.monthlyAccrualUsd ?? row.monthly_accrual_usd),
+    isEstablished: Boolean(row.isEstablished ?? row.is_established),
+    lastMonthEarningsUsd: num(row.lastMonthEarningsUsd ?? row.last_month_earnings_usd),
+    maxLoanUsd: num(row.maxLoanUsd ?? row.max_loan_usd),
+    minLoanUsd: num(row.minLoanUsd ?? row.min_loan_usd, 10),
+    commissionRate: num(row.commissionRate ?? row.commission_rate, 0.3),
+    newUserFactor: num(row.newUserFactor ?? row.new_user_factor, 1),
+    disburseWithinBusinessDays: num(
+      row.disburseWithinBusinessDays ?? row.disburse_within_business_days,
+      3
+    ),
+    blocksWithdrawals: Boolean(row.blocksWithdrawals ?? row.blocks_withdrawals),
     loan,
+  };
+}
+
+export function mergeVipLoanStatus(
+  status: VipLoanStatus | null,
+  fallback?: {
+    investmentPrincipalUsd?: number;
+    hasActiveInvestment?: boolean;
+  }
+): VipLoanStatus | null {
+  if (!status) return null;
+  const investmentPrincipalUsd = num(fallback?.investmentPrincipalUsd);
+  const principalUsd =
+    status.principalUsd > 0
+      ? status.principalUsd
+      : investmentPrincipalUsd > 0
+        ? investmentPrincipalUsd
+        : status.principalUsd;
+  const hasActiveInvestment = Boolean(
+    status.hasActiveInvestment ?? fallback?.hasActiveInvestment ?? principalUsd > 0
+  );
+  return {
+    ...status,
+    principalUsd,
+    hasActiveInvestment,
   };
 }
 
@@ -250,9 +303,12 @@ export const vipFarmerService = {
     walletAddress?: string;
   }) => api.post<{ request: VipExitRequest }>('/vip-farmers/exit/request', body),
   getExitRequests: () => api.get<{ requests: VipExitRequest[] }>('/vip-farmers/exit/requests'),
-  getLoanStatus: async () => {
+  getLoanStatus: async (fallback?: {
+    investmentPrincipalUsd?: number;
+    hasActiveInvestment?: boolean;
+  }) => {
     const raw = await api.get<unknown>('/vip-farmers/loans/status');
-    const status = normalizeVipLoanStatus(raw);
+    const status = mergeVipLoanStatus(normalizeVipLoanStatus(raw), fallback);
     if (!status) throw new Error('Loan status response was invalid. Please try again.');
     return status;
   },

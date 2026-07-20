@@ -348,7 +348,13 @@ export function VipFarmersTradeScreen() {
                   ) : null}
                   <PrimaryButton
                     label='Loan details'
-                    onPress={() => navigateToVipLoan(navigation, { initialStatus: loan })}
+                    onPress={() =>
+                      navigateToVipLoan(navigation, {
+                        initialStatus: loan,
+                        investmentPrincipalUsd: inv?.principalUsd,
+                        hasActiveInvestment: true,
+                      })
+                    }
                     style={{ marginTop: 8 }}
                   />
                 </>
@@ -361,7 +367,13 @@ export function VipFarmersTradeScreen() {
                   </Text>
                   <PrimaryButton
                     label={loan.eligible ? 'Apply for VIP loan' : 'View loan requirements'}
-                    onPress={() => navigateToVipLoan(navigation, { initialStatus: loan })}
+                    onPress={() =>
+                      navigateToVipLoan(navigation, {
+                        initialStatus: loan,
+                        investmentPrincipalUsd: inv?.principalUsd,
+                        hasActiveInvestment: true,
+                      })
+                    }
                     style={{ marginTop: 8 }}
                   />
                 </>

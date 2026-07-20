@@ -108,7 +108,7 @@ async function getVipSummary(userId) {
   const cash = roundUsd(wallet?.balance);
   const inv = await getActiveVipInvestmentForUser(userId);
   const pendingExit = await getPendingVipExitForUser(userId);
-  const loanStatus = await getVipLoanStatus(userId);
+  const loanStatus = await getVipLoanStatus(userId, inv);
   return {
     cashWalletUsd: cash,
     minInvestUsd: VIP_MIN_INVEST_USD,

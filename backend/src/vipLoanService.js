@@ -109,19 +109,22 @@ function ineligibilityReason({ inv, principalUsd, quote, openLoan }) {
   return null;
 }
 
-async function getVipLoanStatus(userId) {
-  const inv = await getActiveVipInvestmentForUser(userId);
+async function getVipLoanStatus(userId, invOverride = null) {
+  const inv = invOverride ?? (await getActiveVipInvestmentForUser(userId));
   const openLoan = await getOpenVipLoanForUser(userId);
   const lifetimeAccruals = await countLifetimeVipAccrualDays(userId);
-  const principalUsd = roundUsd(inv?.principal_usd || 0);
-  const quote = inv ? computeVipLoanQuote(inv, lifetimeAccruals) : null;
+  const hasActiveInvestment = Boolean(inv && inv.status === 'active');
+  const principalUsd = roundUsd(inv?.principal_usd ?? inv?.principalUsd ?? 0);
+  const quote = hasActiveInvestment ? computeVipLoanQuote(inv, lifetimeAccruals) : null;
   const reason = quote
     ? ineligibilityReason({ inv, principalUsd, quote, openLoan })
     : 'Active VIP Farmers investment required';
-  const eligible = Boolean(inv) && !reason;
+  const eligible = hasActiveInvestment && !reason;
 
   return {
     eligible,
+    hasActiveInvestment,
+    investmentId: inv?.id ?? null,
     ineligibilityReason: eligible ? null : reason,
     principalUsd,
     minPrincipalUsd: VIP_LOAN_MIN_PRINCIPAL_USD,

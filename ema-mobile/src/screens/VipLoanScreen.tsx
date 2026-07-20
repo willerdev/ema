@@ -15,6 +15,7 @@ import type { RouteProp } from '@react-navigation/native';
 import { Card } from '../components/Card';
 import { PrimaryButton } from '../components/PrimaryButton';
 import {
+  mergeVipLoanStatus,
   normalizeVipLoanStatus,
   vipFarmerService,
   type VipLoanStatus,
@@ -53,9 +54,16 @@ function RequirementRow({ met, label }: { met: boolean; label: string }) {
 export function VipLoanScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
+  const routeFallback = useMemo(
+    () => ({
+      investmentPrincipalUsd: Number(route.params?.investmentPrincipalUsd) || 0,
+      hasActiveInvestment: Boolean(route.params?.hasActiveInvestment),
+    }),
+    [route.params?.hasActiveInvestment, route.params?.investmentPrincipalUsd]
+  );
   const initialStatus = useMemo(
-    () => normalizeVipLoanStatus(route.params?.initialStatus),
-    [route.params?.initialStatus]
+    () => mergeVipLoanStatus(normalizeVipLoanStatus(route.params?.initialStatus), routeFallback),
+    [route.params?.initialStatus, routeFallback]
   );
 
   const [status, setStatus] = useState<VipLoanStatus | null>(initialStatus);
@@ -72,7 +80,7 @@ export function VipLoanScreen() {
     setError(null);
     try {
       const [loanStatus, wl] = await Promise.all([
-        vipFarmerService.getLoanStatus(),
+        vipFarmerService.getLoanStatus(routeFallback),
         whitelistWalletService.list().catch(() => ({ wallets: [], maxWallets: 3 })),
       ]);
       setStatus(loanStatus);
@@ -87,7 +95,7 @@ export function VipLoanScreen() {
       setError(e?.message || 'Failed to load loan status');
       if (!initialStatus) setStatus(null);
     }
-  }, [initialStatus]);
+  }, [initialStatus, routeFallback]);
 
   useEffect(() => {
     void load();
@@ -160,8 +168,9 @@ export function VipLoanScreen() {
   const openLoan = status?.loan;
   const minPrincipal = status?.minPrincipalUsd ?? 2500;
   const minAccrualDays = 22;
-  const hasActiveInvestment = (status?.principalUsd ?? 0) > 0;
-  const meetsPrincipal = (status?.principalUsd ?? 0) >= minPrincipal;
+  const hasActiveInvestment = Boolean(status?.hasActiveInvestment ?? routeFallback.hasActiveInvestment);
+  const principalUsd = status?.principalUsd ?? routeFallback.investmentPrincipalUsd ?? 0;
+  const meetsPrincipal = principalUsd >= minPrincipal;
   const meetsAccrualDays = (status?.lifetimeAccrualDays ?? 0) >= minAccrualDays;
   const hasProjectedAccrual = (status?.monthlyAccrualUsd ?? 0) >= (status?.minLoanUsd ?? 10);
   const showLoading = !status && !error;
@@ -193,7 +202,7 @@ export function VipLoanScreen() {
         <>
           <Card>
             <Text style={styles.label}>Your VIP principal</Text>
-            <Text style={styles.bigVal}>{fmtUsd(status.principalUsd)}</Text>
+            <Text style={styles.bigVal}>{fmtUsd(principalUsd)}</Text>
             <Text style={styles.meta}>
               Projected this month: {fmtUsd(status.monthlyAccrualUsd)} net accrual
               {status.isEstablished ? ' · established (1+ month)' : ' · new investor tier'}
@@ -335,7 +344,7 @@ export function VipLoanScreen() {
                 <RequirementRow met={hasActiveInvestment} label='Active VIP Farmers investment' />
                 <RequirementRow
                   met={meetsPrincipal}
-                  label={`Minimum principal ${fmtUsd(minPrincipal)} (yours: ${fmtUsd(status.principalUsd)})`}
+                  label={`Minimum principal ${fmtUsd(minPrincipal)} (yours: ${fmtUsd(principalUsd)})`}
                 />
                 <RequirementRow
                   met={!openLoan}

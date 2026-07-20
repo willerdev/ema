@@ -3118,11 +3118,10 @@ async function getActiveVipInvestmentForUser(userId) {
     .eq('user_id', userId)
     .eq('status', 'active')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(1);
   if (error && isSchemaError(error)) return null;
   if (error) throw error;
-  return data;
+  return (data && data[0]) || null;
 }
 
 async function getVipInvestmentById(id) {
