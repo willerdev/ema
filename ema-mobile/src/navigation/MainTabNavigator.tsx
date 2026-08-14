@@ -2,31 +2,25 @@ import { Pressable } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { HomeScreen } from '../screens/HomeScreen';
-import { JournalScreen } from '../screens/JournalScreen';
 import { TradesHubScreen } from '../screens/TradesHubScreen';
 import { WalletScreen } from '../screens/WalletScreen';
+import { SettingsScreen } from '../screens/SettingsScreen';
 import { navigateToTransactionHistory } from '../utils/navigationHelpers';
-import { ExtraStackNavigator } from './ExtraStackNavigator';
 import { palette } from '../theme/colors';
 import { RootTabParamList } from '../types';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
 const focusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
-  Home: 'home',
-  Journal: 'calendar',
-  Trades: 'stats-chart',
   Wallet: 'wallet',
-  Extra: 'grid',
+  Trades: 'stats-chart',
+  Settings: 'settings',
 };
 
 const unfocusedIconMap: Record<keyof RootTabParamList, keyof typeof Ionicons.glyphMap> = {
-  Home: 'home-outline',
-  Journal: 'calendar-outline',
-  Trades: 'stats-chart-outline',
   Wallet: 'wallet-outline',
-  Extra: 'grid-outline',
+  Trades: 'stats-chart-outline',
+  Settings: 'settings-outline',
 };
 
 export function MainTabNavigator() {
@@ -34,6 +28,7 @@ export function MainTabNavigator() {
 
   return (
     <Tab.Navigator
+      initialRouteName='Wallet'
       screenOptions={({ route }) => ({
         headerStyle: { backgroundColor: palette.surface },
         headerTitleStyle: { color: palette.textPrimary },
@@ -55,27 +50,10 @@ export function MainTabNavigator() {
       })}
     >
       <Tab.Screen
-        name='Home'
-        component={HomeScreen}
-        options={({ navigation }) => ({
-          tabBarLabel: 'Home',
-          headerRight: () => (
-            <Pressable
-              onPress={() => navigation.getParent()?.navigate('Notifications')}
-              style={{ marginRight: 14, padding: 4 }}
-              hitSlop={12}
-            >
-              <Ionicons name='notifications-outline' size={24} color={palette.primary} />
-            </Pressable>
-          ),
-        })}
-      />
-      <Tab.Screen name='Journal' component={JournalScreen} options={{ tabBarLabel: 'Journal', title: 'Journal' }} />
-      <Tab.Screen name='Trades' component={TradesHubScreen} options={{ tabBarLabel: 'Trades' }} />
-      <Tab.Screen
         name='Wallet'
         component={WalletScreen}
         options={({ navigation }) => ({
+          title: 'Wallet',
           tabBarLabel: 'Wallet',
           headerRight: () => (
             <Pressable
@@ -89,11 +67,8 @@ export function MainTabNavigator() {
           ),
         })}
       />
-      <Tab.Screen
-        name='Extra'
-        component={ExtraStackNavigator}
-        options={{ tabBarLabel: 'Extra', headerShown: false }}
-      />
+      <Tab.Screen name='Trades' component={TradesHubScreen} options={{ title: 'Products', tabBarLabel: 'Products' }} />
+      <Tab.Screen name='Settings' component={SettingsScreen} options={{ title: 'Settings', tabBarLabel: 'Settings' }} />
     </Tab.Navigator>
   );
 }

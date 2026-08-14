@@ -44,11 +44,11 @@ import {
 import {
   navigateToAirfarmingTrade,
   navigateToCryptoDepositPayment,
-  navigateToSupport,
   navigateToTransactionDetail,
   navigateToTransactionHistory,
   navigateToVipFarmersTrade,
 } from '../utils/navigationHelpers';
+import { TwoFactorReminderCard } from '../components/TwoFactorReminderCard';
 import { mergeAllWalletActivity } from '../utils/walletActivity';
 
 const PAY_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
@@ -378,6 +378,7 @@ export function WalletScreen() {
         contentContainerStyle={{ padding: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={palette.primary} />}
       >
+        <TwoFactorReminderCard />
         {!complianceComplete ? (
           <Card style={styles.complianceBanner}>
             <Text style={styles.complianceBannerText}>
@@ -555,11 +556,7 @@ export function WalletScreen() {
               {withdrawModalMax > 0 ? Math.floor(withdrawModalMax) : '—'} {withdrawModalCurrencyLabel}. Emptying the wallet
               can block future deposits.
             </Text>
-            <Pressable onPress={() => navigateToSupport(navigation, { category: 'withdraw' })} style={styles.supportLinkWrap}>
-              <Text style={styles.supportLinkText}>
-                Having trouble withdrawing? <Text style={styles.supportLinkAccent}>Get help in Support</Text>
-              </Text>
-            </Pressable>
+            <Text style={styles.hint}>Complete compliance and whitelisted wallets in Settings before withdrawing.</Text>
             <TextInput
               style={inputStyle}
               value={withdrawAmount}

@@ -1,17 +1,9 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 
-export type ExtraStackParamList = {
-  ExtraHub: undefined;
-  MT5: undefined;
-  Settings: { openSecurity?: boolean } | undefined;
-};
-
 export type RootTabParamList = {
-  Home: undefined;
-  Journal: undefined;
-  Trades: undefined;
   Wallet: undefined;
-  Extra: NavigatorScreenParams<ExtraStackParamList> | undefined;
+  Trades: undefined;
+  Settings: { openSecurity?: boolean } | undefined;
 };
 
 export type RootStackParamList = {
@@ -25,18 +17,9 @@ export type RootStackParamList = {
         hasActiveInvestment?: boolean;
       }
     | undefined;
-  ContractsTrade: undefined;
-  ExpertAutoTrading: undefined;
-  TradeHistory: undefined;
-  LiveTrading: undefined;
-  LiveTradingCreateBot: undefined;
-  LiveTradingCreateSetup: { botType: 'synthetix_ea' | 'quantix_ea' };
-  LiveTradingAccount: { accountId: string };
-  Notifications: undefined;
   TransactionHistory: { initialTab?: TransactionHistoryTab } | undefined;
   TransactionDetail: { row: WalletActivityRow };
   CryptoDepositPayment: { deposit: NowpaymentsCreateDepositResponse };
-  Support: { category?: 'withdraw' | 'deposit' | 'daily_earning' | 'transfer' | 'general' } | undefined;
 };
 
 export interface NotificationPreferences {

@@ -1,11 +1,11 @@
-export type TradeHubItemId = 'airfarming' | 'vip' | 'contracts' | 'expert';
+export type TradeHubItemId = 'airfarming' | 'vip';
 
 export type TradeHubItem = {
   id: TradeHubItemId;
   title: string;
   meta: string;
   roi: string;
-  route: 'AirfarmingTrade' | 'VipFarmersTrade' | 'ContractsTrade' | 'ExpertAutoTrading';
+  route: 'AirfarmingTrade' | 'VipFarmersTrade';
 };
 
 export const TRADE_HUB_ITEMS: TradeHubItem[] = [
@@ -19,25 +19,8 @@ export const TRADE_HUB_ITEMS: TradeHubItem[] = [
   {
     id: 'vip',
     title: 'Live VIP Farmers',
-    meta: '30 weekdays · 9% gross · 3% commission on interest',
+    meta: '38-day lock · 9% gross weekday accrual on principal',
     roi: 'Locked yield program',
     route: 'VipFarmersTrade',
   },
-  {
-    id: 'contracts',
-    title: 'Trade Contracts',
-    meta: 'Dedicated contract balance — accrues daily while funded',
-    roi: 'Daily accrual: 2%',
-    route: 'ContractsTrade',
-  },
-  {
-    id: 'expert',
-    title: 'Expert Account Manager',
-    meta: 'Managed MT5 trading — set risk limits and enable the expert',
-    roi: 'Connect MT5, configure risk, then activate',
-    route: 'ExpertAutoTrading',
-  },
 ];
-
-export const TRADE_HUB_HIDDEN_STORAGE_KEY = 'ema_trade_hub_hidden_v2';
-export const TRADE_HUB_DEFAULT_HIDDEN: TradeHubItemId[] = ['contracts', 'expert'];

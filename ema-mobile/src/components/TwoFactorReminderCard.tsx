@@ -2,23 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useNavigation } from '@react-navigation/native';
-import type { CompositeNavigationProp } from '@react-navigation/native';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import { Card } from './Card';
 import { useAuth } from '../context/AuthContext';
 import { authService } from '../services/authService';
-import { ExtraStackParamList, RootTabParamList } from '../types';
+import { RootTabParamList } from '../types';
 import { palette } from '../theme/colors';
 
 const DISMISS_KEY_PREFIX = 'ema_2fa_reminder_dismissed_';
 const REMIND_LATER_MS = 7 * 24 * 60 * 60 * 1000;
 
-type Nav = CompositeNavigationProp<
-  BottomTabNavigationProp<RootTabParamList, 'Home'>,
-  NativeStackNavigationProp<ExtraStackParamList>
->;
+type Nav = BottomTabNavigationProp<RootTabParamList>;
 
 export function TwoFactorReminderCard() {
   const navigation = useNavigation<Nav>();
@@ -67,7 +62,7 @@ export function TwoFactorReminderCard() {
   };
 
   const openSecurity = () => {
-    navigation.navigate('Extra', { screen: 'Settings', params: { openSecurity: true } });
+    navigation.navigate('Settings', { openSecurity: true });
   };
 
   if (loading || !visible) return null;

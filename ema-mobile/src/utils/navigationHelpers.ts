@@ -42,14 +42,6 @@ export function navigateToCryptoDepositPayment(
   root.navigate('CryptoDepositPayment', { deposit });
 }
 
-export function navigateToSupport(
-  navigation: NavLike,
-  params?: RootStackParamList['Support']
-) {
-  const root = getRootNavigation(navigation);
-  root.navigate('Support', params);
-}
-
 export function navigateToAirfarmingTrade(navigation: NavLike) {
   getRootNavigation(navigation).navigate('AirfarmingTrade');
 }

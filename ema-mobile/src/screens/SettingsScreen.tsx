@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { CompositeNavigationProp, RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import QRCode from 'react-native-qrcode-svg';
 import * as Clipboard from 'expo-clipboard';
@@ -23,9 +24,9 @@ import { whitelistWalletService } from '../services/whitelistWalletService';
 import { useToast } from '../hooks/useToast';
 import {
   ComplianceProfile,
-  ExtraStackParamList,
   PlannedInvestmentDuration,
   RootStackParamList,
+  RootTabParamList,
   SourceOfFunds,
   WhitelistedWallet,
 } from '../types';
@@ -34,7 +35,7 @@ import { notificationPreferencesService } from '../services/notificationPreferen
 import type { NotificationPreferences } from '../types';
 import { palette } from '../theme/colors';
 import { formatNetworkLabel } from '../utils/userFacingError';
-import { navigateToSupport, navigateToTransactionHistory } from '../utils/navigationHelpers';
+import { navigateToTransactionHistory } from '../utils/navigationHelpers';
 
 const WL_CURRENCY_OPTIONS = ['usdttrc20', 'btc', 'eth', 'ltc', 'trx'];
 
@@ -75,11 +76,11 @@ function SettingsRow({
 }
 
 type SettingsNav = CompositeNavigationProp<
-  NativeStackNavigationProp<ExtraStackParamList, 'Settings'>,
+  BottomTabNavigationProp<RootTabParamList, 'Settings'>,
   NativeStackNavigationProp<RootStackParamList>
 >;
 
-type SettingsRoute = RouteProp<ExtraStackParamList, 'Settings'>;
+type SettingsRoute = RouteProp<RootTabParamList, 'Settings'>;
 
 export function SettingsScreen() {
   const navigation = useNavigation<SettingsNav>();
@@ -548,18 +549,13 @@ export function SettingsScreen() {
           />
           <SettingsRow
             title='What we do'
-            subtitle='Wallet, trading, and risk tools'
+            subtitle='Deposits, Airfarmers, and VIP Farmers'
             onPress={() => setAboutModal('what')}
           />
           <SettingsRow
             title='How we profit'
             subtitle='10% revenue share and disclosed fees'
             onPress={() => setAboutModal('profit')}
-          />
-          <SettingsRow
-            title='Notifications'
-            subtitle='Saved messages for you and everyone'
-            onPress={() => navigation.navigate('Notifications')}
           />
           <SettingsRow
             title='Asset history'
@@ -585,11 +581,6 @@ export function SettingsScreen() {
             title='Deposit & withdrawal alerts'
             subtitle={alertsSummary}
             onPress={() => setAlertsModalOpen(true)}
-          />
-          <SettingsRow
-            title='Help & support'
-            subtitle='Withdrawal, deposit, earnings, or transfer issues'
-            onPress={() => navigateToSupport(navigation)}
           />
         </Card>
 
